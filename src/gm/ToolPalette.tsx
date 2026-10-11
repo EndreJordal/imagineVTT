@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { LIGHT_MENU, LIGHT_PRESETS, type LightKind } from '../shared/lights'
 import { useGm } from './store'
 import { useDropdown } from './useDropdown'
+import { Icon, LightKindIcon } from './icons'
 
 const SNAPS = [
   { fraction: 1, label: '1', title: 'Grid corners' },
@@ -16,16 +17,18 @@ function selectTool() {
   gm.setBuildingWalls(false)
   gm.setBuildingDoors(false)
   gm.setPlacingLight(null)
+  gm.setHideTool(null)
 }
 
 /**
- * Tools on a strip at the map's left edge: select, build walls, build doors, place a light.
- * Keys: Esc select, W walls, D doors, L lights.
+ * Tools on a strip at the map's left edge: select, build walls, build doors, place a light,
+ * hide areas. Keys: Esc select, W walls, D doors, L lights, H hide.
  */
 export function ToolPalette() {
   const walls = useGm((s) => s.buildingWalls)
   const doors = useGm((s) => s.buildingDoors)
   const placing = useGm((s) => s.placingLight)
+  const hiding = useGm((s) => !!s.hideTool)
   const { open: lightsOpen, setOpen, root: lightsRoot } = useDropdown()
 
   useEffect(() => {
@@ -38,6 +41,7 @@ export function ToolPalette() {
       if (key === 'w') gm.setBuildingWalls(!gm.buildingWalls)
       else if (key === 'd') gm.setBuildingDoors(!gm.buildingDoors)
       else if (key === 'l') setOpen((open) => !open)
+      else if (key === 'h') gm.toggleHideTool()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -47,28 +51,35 @@ export function ToolPalette() {
     useGm.getState().setPlacingLight(kind)
     setOpen(false)
   }
-  const idle = !walls && !doors && !placing
+  const idle = !walls && !doors && !placing && !hiding
 
   return (
     <nav className="tool-palette" aria-label="Tools">
-      <ToolButton icon="↖" label="Select and move" keyName="Esc" active={idle} onClick={selectTool} />
+      <ToolButton icon={<Icon name="select" size={20} />} label="Select and move" keyName="Esc" active={idle} onClick={selectTool} />
       <ToolButton
-        icon="🧱"
+        icon={<Icon name="walls" size={20} />}
         label="Build walls"
         keyName="W"
         active={walls}
         onClick={() => useGm.getState().setBuildingWalls(!walls)}
       />
       <ToolButton
-        icon="🚪"
+        icon={<Icon name="doors" size={20} />}
         label="Build doors"
         keyName="D"
         active={doors}
         onClick={() => useGm.getState().setBuildingDoors(!doors)}
       />
+      <ToolButton
+        icon={<Icon name="hide" size={20} />}
+        label="Hide areas (local fog)"
+        keyName="H"
+        active={hiding}
+        onClick={() => useGm.getState().toggleHideTool()}
+      />
       <div className="menu" ref={lightsRoot}>
         <ToolButton
-          icon={placing ? LIGHT_PRESETS[placing].icon : '💡'}
+          icon={placing ? <LightKindIcon icon={LIGHT_PRESETS[placing].icon} size={20} /> : <Icon name="lights" size={20} />}
           label="Add a light"
           keyName="L"
           active={!!placing || lightsOpen}
@@ -82,12 +93,12 @@ export function ToolPalette() {
                 <li key={kind} role="none">
                   <button role="menuitem" onClick={() => pick(kind)}>
                     <span className="menu-icon" aria-hidden>
-                      {p.icon}
+                      <LightKindIcon icon={p.icon} />
                     </span>
                     <span className="menu-label">{label}</span>
                     {p.handheld && (
                       <span className="menu-badge" title="Hand-held: meant to be moved">
-                        ✋
+                        <Icon name="hand-held" size={14} />
                       </span>
                     )}
                   </button>
@@ -116,13 +127,8 @@ function SnapMenu() {
         title={`Snap to grid: ${current.title.toLowerCase()} (walls, doors and placing lights)`}
         onClick={() => setOpen(!open)}
       >
-        <span className="snap-caption">Snap</span>
-        <span className="snap-value">
-          {current.label}
-          <span className="snap-arrow" aria-hidden>
-            ▸
-          </span>
-        </span>
+        <Icon name="snap" size={14} className="snap-caption" />
+        <span className="snap-value">{current.label}</span>
       </button>
       {open && (
         <ul className="menu-list tool-flyout snap-flyout" role="menu" aria-label="Snap to grid">
@@ -148,7 +154,7 @@ function SnapMenu() {
   )
 }
 
-function ToolButton(props: { icon: string; label: string; keyName: string; active: boolean; onClick(): void }) {
+function ToolButton(props: { icon: ReactNode; label: string; keyName: string; active: boolean; onClick(): void }) {
   return (
     <button
       className={`tool-button${props.active ? ' active' : ''}`}
@@ -157,8 +163,7 @@ function ToolButton(props: { icon: string; label: string; keyName: string; activ
       title={`${props.label} (${props.keyName})`}
       onClick={props.onClick}
     >
-      <span aria-hidden>{props.icon}</span>
-      <kbd>{props.keyName === 'Esc' ? '' : props.keyName}</kbd>
+      {props.icon}
     </button>
   )
 }

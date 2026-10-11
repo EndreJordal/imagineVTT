@@ -1,5 +1,6 @@
 import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 import { PixiHost } from '../render/PixiHost'
+import { iconCursor, iconTexture, loadCanvasIcons } from './canvasIcons'
 import { SceneLayer } from '../render/SceneLayer'
 import {
   mapScaleForCorner,
@@ -24,11 +25,16 @@ import {
   withLinked,
   type WallPointRef,
 } from '../shared/walls'
-import type { Point, Size, TableState } from '../shared/types'
+import type { MapInfo, Point, Size, TableState } from '../shared/types'
+import type { HideTool } from './store'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const VIEW_COLOR = 0xffb020
+/** Half the size of the table view's corner handles, in GM screen px. */
+const VIEW_CORNER_PX = 5
+/** The table view's outline while the curtain is down (the players see a picture, not the map). */
+const CURTAIN_COLOR = 0xd94dff
 const HANDLE_COLOR = 0x4da3ff
 const LOCKED_COLOR = 0x8a8a94
 /** Map resize handle half-size, in GM screen pixels (larger when locked, to fit a padlock). */
@@ -53,6 +59,12 @@ interface Handlers {
    * skips vision safety. Returning false refuses the move and drops the drag.
    */
   onViewMove(view: Point, force: boolean): boolean
+  /** The GM dragged a corner of the table view: zoom it (1 = true scale). */
+  onViewZoom(zoom: number): void
+  /** Hide-areas dropper: a click at p. */
+  onHideFill(p: Point): void
+  /** Hide-areas brush: a stroke from `from` to `to`, hiding or (erase) revealing. */
+  onHidePaint(from: Point, to: Point, erase: boolean): void
   /** The GM dragged the map's corner handle; scale is relative to the image's natural size. */
   onMapResize(scale: number): void
   /** The GM dragged the map; position is its new top-left corner. */
@@ -112,16 +124,32 @@ export interface GmUi {
   wallDraft: Point[]
   selectedWallPoints: WallPointRef[]
   selectedObjectIds: string[]
+  /** Another floor's map shown faintly over this one, to line them up (onion skin). */
+  onion: { image: Blob; map: MapInfo } | null
   /** Door building mode: two clicks on a wall line make a door. */
   buildingDoors: boolean
   /** First point of the door being placed. */
   doorDraft: Point | null
+  /** The curtain is down: the table shows a picture instead of the map. */
+  curtainDown: boolean
+  /**
+   * Lights in the scene that are only visiting: the party (on the table's floor) shown on a
+   * floor being prepared, to line them up with it. Drawn faintly; they can't be picked up.
+   */
+  ghostLightIds: string[]
+  /** The hide-areas tool's mode, when it's in use. */
+  hideTool: HideTool | null
+  /** Hide brush radius, in squares. */
+  hideBrush: number
 }
 
 type Drag =
   | { mode: 'pan'; last: Point }
   // grab = offset from the pointer to the thing being dragged, in scene space
   | { mode: 'view'; grab: Point }
+  // base: the pointer's distance from the view's centre that means true scale (zoom 1).
+  | { mode: 'viewZoom'; base: number }
+  | { mode: 'paint'; last: Point; erase: boolean }
   | { mode: 'map'; grab: Point }
   | { mode: 'resize'; grab: Point }
   // wasSelected: the light was already selected when pressed, so a click (no drag) narrows
@@ -145,12 +173,14 @@ type Drag =
 type Target =
   | { kind: 'door' | 'aim' | 'light' | 'object' | 'objectResize' | 'objectRotate'; id: string }
   | { kind: 'wallPoint'; ref: WallPointRef }
-  | { kind: 'view' | 'map' | 'resize' | 'locked' }
+  | { kind: 'view' | 'viewZoom' | 'map' | 'resize' | 'locked' }
   | null
 
 const CURSORS: Record<Drag['mode'] | 'locked' | 'door', string> = {
   pan: 'grab',
   view: 'move',
+  viewZoom: 'nwse-resize',
+  paint: 'none',
   map: 'move',
   resize: 'nwse-resize',
   locked: 'not-allowed',
@@ -188,48 +218,9 @@ const DOOR_BUTTON_PX = 10
 /** How far from a wall line (GM screen px) the door tool still finds a door point. */
 const DOOR_REACH_PX = 22
 
-/** CSS cursor showing a light's icon, with the hotspot in its centre. */
-const iconCursors = new Map<string, string>()
-
-function iconCursor(icon: string): string {
-  let cursor = iconCursors.get(icon)
-  if (!cursor) {
-    const size = 32
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = size
-    const ctx = canvas.getContext('2d')!
-    ctx.font = '24px "Segoe UI Emoji", "Apple Color Emoji", sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)'
-    ctx.shadowBlur = 3
-    ctx.fillText(icon, size / 2, size / 2 + 1)
-    cursor = `url(${canvas.toDataURL()}) ${size / 2} ${size / 2}, crosshair`
-    iconCursors.set(icon, cursor)
-  }
-  return cursor
-}
-
-/** Emoji drawn once per icon and shared by every token showing it. */
-const iconTextures = new Map<string, Texture>()
+/** Size of a light token's icon, in GM screen px. */
 const ICON_PX = 18
 
-function iconTexture(icon: string): Texture {
-  let texture = iconTextures.get(icon)
-  if (!texture) {
-    const scale = 3 // stays crisp when the browser zooms or on HiDPI screens
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = ICON_PX * scale + 4
-    const ctx = canvas.getContext('2d')!
-    ctx.font = `${ICON_PX * scale * 0.8}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(icon, canvas.width / 2, canvas.height / 2 + scale)
-    texture = Texture.from(canvas)
-    iconTextures.set(icon, texture)
-  }
-  return texture
-}
 
 /**
  * GM's interactive map view. Left-drag moves the map image, its corner handle resizes it,
@@ -251,6 +242,11 @@ export class GmCanvas extends PixiHost {
   private visionRings = new Graphics()
   /** Walls (GM-only: players only see their effect on sight). */
   private wallsLayer = new Graphics()
+  /** Onion skin: another floor's map, faint, to line this one up with it. */
+  private onionSprite = new Sprite({ alpha: 0.3 })
+  private onionImage: Blob | null = null
+  private onion: GmUi['onion'] = null
+  private onionToken = 0
   /** Outline and handles of the selected objects. */
   private objectHandles = new Graphics()
   private selectedObjectIds = new Set<string>()
@@ -262,15 +258,22 @@ export class GmCanvas extends PixiHost {
   private selectedWallPoints: WallPointRef[] = []
   /** The Shift-drag selection box. */
   private selectionBox = new Graphics()
+  /** The hide brush's outline, under the pointer. */
+  private brushOutline = new Graphics()
+  private hideTool: HideTool | null = null
+  private hideBrush = 1
+  private brushAt: Point | null = null
   /** Snapped point under the cursor while building walls. */
   private wallCursor: Point | null = null
   private buildingDoors = false
   private doorDraft: Point | null = null
+  private curtainDown = false
   /** Valid door point under the cursor while building doors (null: none in reach). */
   private doorCursor: Point | null = null
   /** Where a light being placed would go (snapped), while placing. */
   private lightCursor: Point | null = null
   private selectedLightIds = new Set<string>()
+  private ghostLightIds = new Set<string>()
   private placingLight: LightKind | null = null
   private peeking = false
   private fogMemory: FogMemory | null = null
@@ -282,6 +285,8 @@ export class GmCanvas extends PixiHost {
   private tableConnected = false
   private image: Blob | null = null
   private marker: Point[] | null = null
+  /** The table view's corners (also handles for zooming it), as last drawn. */
+  private viewCorners: Point[] | null = null
   private drag: Drag | null = null
   private fitted = false
   /** A camera to show instead of fitting the map, once the canvas is ready. */
@@ -296,6 +301,7 @@ export class GmCanvas extends PixiHost {
   protected setup() {
     this.camera.addChild(
       this.sceneLayer,
+      this.onionSprite,
       this.viewOverlay,
       this.mapHandle,
       this.viewMarker,
@@ -306,9 +312,12 @@ export class GmCanvas extends PixiHost {
       this.aimHandle,
       this.wallDraftLayer,
       this.selectionBox,
+      this.brushOutline,
     )
     this.app.stage.addChild(this.camera)
     this.sceneLayer.onChange = () => this.requestRender()
+    // Light token icons decode in the background: draw the tokens again once they're in.
+    void loadCanvasIcons().then(() => this.render())
     void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
 
@@ -327,20 +336,27 @@ export class GmCanvas extends PixiHost {
     this.tableScreen = ui.tableScreen
     this.tableConnected = ui.tableConnected
     this.selectedLightIds = new Set(ui.selectedLightIds)
+    this.ghostLightIds = new Set(ui.ghostLightIds)
     this.peeking = ui.peeking
     this.snap = ui.snap
     this.wallDraft = ui.wallDraft
     this.selectedWallPoints = ui.selectedWallPoints
     this.selectedObjectIds = new Set(ui.selectedObjectIds)
+    this.setOnion(ui.onion)
     this.doorDraft = ui.doorDraft
+    this.curtainDown = ui.curtainDown
+    this.hideBrush = ui.hideBrush
     if (
       ui.placingLight !== this.placingLight ||
       ui.buildingWalls !== this.buildingWalls ||
-      ui.buildingDoors !== this.buildingDoors
+      ui.buildingDoors !== this.buildingDoors ||
+      ui.hideTool !== this.hideTool
     ) {
       this.placingLight = ui.placingLight
       this.buildingWalls = ui.buildingWalls
       this.buildingDoors = ui.buildingDoors
+      this.hideTool = ui.hideTool
+      if (!this.brushing) this.brushAt = null
       if (!this.buildingWalls) this.wallCursor = null
       if (!this.buildingDoors) this.doorCursor = null
       if (!this.placingLight) this.lightCursor = null
@@ -350,6 +366,46 @@ export class GmCanvas extends PixiHost {
   }
 
   /** Fog memory changed (the grid object is updated in place; version tells when). */
+  /** Show (or hide) another floor's map faintly over this one. */
+  private setOnion(onion: GmUi['onion']) {
+    this.onion = onion
+    const s = this.onionSprite
+    s.visible = !!onion
+    if (!onion) return
+    this.placeOnion()
+    if (onion.image === this.onionImage) return
+    this.onionImage = onion.image
+    const token = ++this.onionToken
+    // A guide only: a small copy will do.
+    const k = Math.min(1, 2048 / Math.max(onion.map.naturalWidth, onion.map.naturalHeight))
+    void createImageBitmap(onion.image, {
+      resizeWidth: Math.max(1, Math.round(onion.map.naturalWidth * k)),
+      resizeHeight: Math.max(1, Math.round(onion.map.naturalHeight * k)),
+      resizeQuality: 'medium',
+    }).then((bitmap) => {
+      if (token !== this.onionToken) return bitmap.close()
+      const old = s.texture
+      s.texture = Texture.from(bitmap)
+      if (old !== Texture.EMPTY) old.destroy(true)
+      this.placeOnion()
+      this.requestRender()
+    })
+  }
+
+  /** The onion sprite over its map's placement, turned as that map is. */
+  private placeOnion() {
+    const map = this.onion?.map
+    if (!map) return
+    const s = this.onionSprite
+    const turns = map.turns ?? 0
+    s.anchor.set(0.5)
+    s.position.set(map.x + map.width / 2, map.y + map.height / 2)
+    s.rotation = (turns * Math.PI) / 2
+    // Sized before turning: the image's own width is the shown height when turned a quarter.
+    if (turns % 2) s.setSize(map.height, map.width)
+    else s.setSize(map.width, map.height)
+  }
+
   /** Images of the assets objects show. */
   setObjectImages(images: AssetImages) {
     this.sceneLayer.setObjectImages(images)
@@ -481,14 +537,22 @@ export class GmCanvas extends PixiHost {
 
     // Dark halo under the coloured line keeps it visible on light maps.
     g.poly(corners).stroke({ width: 5 * px, color: 0x000000, alpha: 0.7 })
-    g.poly(corners).stroke({ width: 2 * px, color: VIEW_COLOR })
+    const color = this.curtainDown ? CURTAIN_COLOR : VIEW_COLOR
+    g.poly(corners).stroke({ width: (this.curtainDown ? 4 : 2) * px, color })
 
     // The marker on the table's "up" edge doubles as the handle for moving the view.
     this.marker = upMarker(corners, this.state.scene.view, MARKER_PX * px)
     this.viewMarker
       .poly(this.marker)
-      .fill(VIEW_COLOR)
+      .fill(color)
       .stroke({ width: 2 * px, color: 0x000000, alpha: 0.8 })
+
+    // Corner handles: drag one to zoom the table out (an overview) or in.
+    this.viewCorners = corners
+    const r = VIEW_CORNER_PX * px
+    for (const c of corners) {
+      this.viewMarker.rect(c.x - r, c.y - r, 2 * r, 2 * r).fill(color).stroke({ width: 1.5 * px, color: 0x000000, alpha: 0.8 })
+    }
   }
 
   private drawMapHandle() {
@@ -539,8 +603,10 @@ export class GmCanvas extends PixiHost {
       const selected = this.selectedLightIds.has(light.id)
       t.root.position.set(light.x, light.y)
       t.root.scale.set(this.px)
-      // Dimmed when switched off: lights by being unlit, vision tokens by not seeing.
-      t.root.alpha = (emitsLight(light) ? light.on : light.vision) ? 1 : 0.55
+      // Dimmed when switched off: lights by being unlit, vision tokens by not seeing; faint
+      // when only visiting (the party, on a floor being prepared).
+      const lit = emitsLight(light) ? light.on : light.vision
+      t.root.alpha = (lit ? 1 : 0.55) * (this.ghostLightIds.has(light.id) ? 0.5 : 1)
       t.icon.texture = iconTexture(LIGHT_PRESETS[light.kind].icon)
       t.icon.setSize(ICON_PX)
       t.ring
@@ -814,6 +880,7 @@ export class GmCanvas extends PixiHost {
     // Topmost (last drawn) token first.
     for (let i = lights.length - 1; i >= 0; i--) {
       const l = lights[i]
+      if (this.ghostLightIds.has(l.id)) continue
       if (Math.hypot(p.x - l.x, p.y - l.y) <= (TOKEN_PX + 2) * px) return { kind: 'light', id: l.id }
     }
     for (const w of state.scene.walls) {
@@ -846,6 +913,10 @@ export class GmCanvas extends PixiHost {
         return { kind: map.lockToGrid ? 'locked' : 'resize' }
       }
     }
+    if (this.viewCorners) {
+      const r = (VIEW_CORNER_PX + SLACK_PX) * px
+      if (this.viewCorners.some((c) => Math.abs(p.x - c.x) <= r && Math.abs(p.y - c.y) <= r)) return { kind: 'viewZoom' }
+    }
     if (this.marker) {
       const c = centroid(this.marker)
       if (pointInPolygon(p, this.marker) || Math.hypot(p.x - c.x, p.y - c.y) <= SLACK_PX * 2 * px) {
@@ -861,9 +932,28 @@ export class GmCanvas extends PixiHost {
 
   private cursorFor(target: Target) {
     if (this.placingLight) return iconCursor(LIGHT_PRESETS[this.placingLight].icon)
-    if (this.buildingWalls) return iconCursor('🧱')
-    if (this.buildingDoors) return target?.kind === 'door' ? CURSORS.door : iconCursor('🚪')
+    if (this.buildingWalls) return iconCursor('walls')
+    if (this.buildingDoors) return target?.kind === 'door' ? CURSORS.door : iconCursor('doors')
+    if (this.hideTool === 'fill') return iconCursor('fill')
+    if (this.brushing) return 'crosshair'
     return CURSORS[target?.kind ?? 'pan']
+  }
+
+  /** Whether the hide tool is a brush (painting or erasing). */
+  private get brushing() {
+    return this.hideTool === 'brush' || this.hideTool === 'erase'
+  }
+
+  /** The hide brush's outline at the pointer: dark for hiding, light for revealing. */
+  private drawBrush(erase: boolean) {
+    const g = this.brushOutline.clear()
+    const at = this.brushAt
+    if (!this.brushing || !at || !this.state) return
+    const px = this.px
+    const r = this.hideBrush * this.state.scene.grid.size
+    g.circle(at.x, at.y, r).stroke({ width: 3 * px, color: 0x000000, alpha: 0.6 })
+    g.circle(at.x, at.y, r).stroke({ width: 1.5 * px, color: erase ? 0xffffff : 0xb070ff })
+    this.requestRender()
   }
 
   /** Pointer position in canvas CSS pixels (clientX-based; offsetX is unreliable). */
@@ -881,7 +971,7 @@ export class GmCanvas extends PixiHost {
     if (e.button > 2) return
     const p = this.toScene(e)
     // With a tool, right-click confirms like Enter; middle still pans.
-    if ((this.buildingWalls || this.buildingDoors || this.placingLight) && e.button === 2) {
+    if ((this.buildingWalls || this.buildingDoors || this.placingLight || this.hideTool) && e.button === 2) {
       this.handlers.onToolConfirm()
       return
     }
@@ -899,6 +989,18 @@ export class GmCanvas extends PixiHost {
       }
       const at = this.doorPointAt(p)
       if (at) this.handlers.onDoorPoint(at)
+      return
+    }
+    // Hiding areas: the dropper fills (or reveals) a space; the brush paints, Alt inverting it.
+    if (this.hideTool === 'fill' && e.button === 0) {
+      this.handlers.onHideFill(p)
+      return
+    }
+    if (this.brushing && e.button === 0) {
+      const erase = (this.hideTool === 'erase') !== e.altKey
+      this.drag = { mode: 'paint', last: p, erase }
+      this.handlers.onHidePaint(p, p, erase)
+      this.app.canvas.setPointerCapture(e.pointerId)
       return
     }
     // Placement mode: left-click places.
@@ -961,6 +1063,9 @@ export class GmCanvas extends PixiHost {
       this.drag = { mode: 'resize', grab: { x: map.x + map.width - p.x, y: map.y + map.height - p.y } }
     } else if (target?.kind === 'view' && scene) {
       this.drag = { mode: 'view', grab: { x: scene.view.x - p.x, y: scene.view.y - p.y } }
+    } else if (target?.kind === 'viewZoom' && scene) {
+      const zoom = scene.viewZoom ?? 1
+      this.drag = { mode: 'viewZoom', base: Math.hypot(p.x - scene.view.x, p.y - scene.view.y) * zoom }
     } else if (target?.kind === 'map' && scene?.map) {
       this.drag = { mode: 'map', grab: { x: scene.map.x - p.x, y: scene.map.y - p.y } }
     } else {
@@ -983,6 +1088,16 @@ export class GmCanvas extends PixiHost {
     if (this.placingLight) {
       this.lightCursor = this.lightPointAt(this.toScene(e))
       this.drawWallDraft()
+    }
+    if (this.brushing) {
+      this.brushAt = this.toScene(e)
+      this.drawBrush(drag?.mode === 'paint' ? drag.erase : (this.hideTool === 'erase') !== e.altKey)
+    }
+    if (drag?.mode === 'paint') {
+      const p = this.toScene(e)
+      this.handlers.onHidePaint(drag.last, p, drag.erase)
+      drag.last = p
+      return
     }
     if (!drag) {
       this.app.canvas.style.cursor = this.cursorFor(this.targetAt(this.toScene(e)))
@@ -1024,6 +1139,11 @@ export class GmCanvas extends PixiHost {
       }
       return
     }
+    if (drag.mode === 'viewZoom') {
+      const view = this.state?.scene.view
+      if (view) this.handlers.onViewZoom(drag.base / Math.max(1e-6, Math.hypot(p.x - view.x, p.y - view.y)))
+      return
+    }
     if (drag.mode === 'aim') {
       const light = this.state?.scene.lights.find((l) => l.id === drag.id)
       if (light) this.handlers.onLightAim(drag.id, Math.atan2(p.y - light.y, p.x - light.x))
@@ -1053,7 +1173,9 @@ export class GmCanvas extends PixiHost {
       drag && ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate'].includes(drag.mode)
     if (drag?.mode === 'box') {
       const r = rectBetween(drag.start, drag.end)
-      const lights = (this.state?.scene.lights ?? []).filter((l) => inRect(l, r)).map((l) => l.id)
+      const lights = (this.state?.scene.lights ?? [])
+        .filter((l) => inRect(l, r) && !this.ghostLightIds.has(l.id))
+        .map((l) => l.id)
       const points = wallPointsIn(this.state?.scene.walls ?? [], r)
       this.handlers.onBoxSelect(lights, points, e.ctrlKey || e.metaKey)
       this.drag = null

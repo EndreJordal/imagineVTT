@@ -3,13 +3,18 @@ import {
   alignMapToGrid,
   boundingRect,
   carryPoint,
+  clampViewZoom,
   fitMapToRect,
+  mapNatural,
+  mapPivot,
   sceneBounds,
+  turnPoint,
+  turnRect,
   followGrid,
   pointInPolygon,
   tableViewCorners,
 } from '../shared/geometry'
-import { createFogMemory, fitsBounds, stampVision, type FogMemory } from '../shared/fog'
+import { createFogMemory, fitsBounds, stampVision, turnFogMemory, type FogMemory } from '../shared/fog'
 import {
   createLight,
   DEFAULT_VISION_RANGE,
@@ -18,6 +23,16 @@ import {
   type LightKind,
 } from '../shared/lights'
 import { carryObject, type AssetImage, type AssetImages, type MapObject } from '../shared/mapObjects'
+import { applyLevel, emptyLevel, extractLevel, moveParty, type Level } from '../shared/levels'
+import {
+  editableMask,
+  encodeHidden,
+  fillHidden,
+  hiddenMask,
+  paintHidden,
+  turnHidden,
+  type FillResult,
+} from '../shared/hidden'
 import { load } from '../shared/persist'
 import type { GmCamera, SceneFile } from '../shared/sceneFile'
 import { createVisibilityTest, moveCrossesWall, visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
@@ -40,8 +55,11 @@ const DEFAULT_GRID_STYLE = { color: '#ffffff', opacity: 0.35 }
 /** What each vision token last stamped into which memory grid (see stampFog). */
 const stamped = {
   memory: null as FogMemory | null,
-  viewers: new Map<string, { key: string; walls: Wall[] }>(),
+  viewers: new Map<string, { key: string; walls: Wall[]; hidden: Scene['hidden'] }>(),
 }
+
+/** The hiding tool's modes: fill an enclosed space, or paint and erase with a brush. */
+export type HideTool = 'fill' | 'brush' | 'erase'
 
 /** By default the GM sees half the darkness the players do. */
 const DEFAULT_GM_VISION = 0.5
@@ -52,7 +70,31 @@ export function gmDarkness(s: Pick<GmStore, 'scene' | 'gmVision' | 'peeking'>): 
 }
 
 interface GmStore extends TableState {
+  /** The map image of the floor being viewed (see levelImages for the others). */
   mapImage: Blob | null
+  /**
+   * The scene's floors, in order. `scene` holds the floor being viewed (levelId), so its
+   * entry here is out of date while it's viewed: read floors through allLevels().
+   */
+  levels: Level[]
+  /** The floor the GM views and edits, and the floor the table shows. */
+  levelId: string
+  tableLevelId: string
+  /** Map images and fog memories of the floors not being viewed. */
+  levelImages: Record<string, Blob | null>
+  levelFog: Record<string, FogMemory | null>
+  /** GM-only: the floor below shown faintly, to line maps up (stairs). */
+  onionSkin: boolean
+  /** View and edit another floor (the table keeps showing its floor). */
+  viewLevel(id: string): void
+  /** Show a floor on the table (default: the one viewed); the party goes along. */
+  showLevelOnTable(id?: string): void
+  /** Add an empty floor and view it. */
+  addLevel(): void
+  renameLevel(id: string, name: string): void
+  moveLevel(id: string, by: -1 | 1): void
+  deleteLevel(id: string): void
+  setOnionSkin(on: boolean): void
   /** Size of the table window; the last known size while none is connected. */
   tableScreen: Size
   tableConnected: boolean
@@ -66,6 +108,23 @@ interface GmStore extends TableState {
   objectImages: AssetImages
   /** A light kind waiting to be placed with a click on the map (GM-only). */
   placingLight: LightKind | null
+  /** The hide-areas tool ("local fog"), and its mode, when it's in use. */
+  hideTool: HideTool | null
+  /** The mode the hide tool comes back in: the last one used. */
+  hideMode: HideTool
+  /** Hide brush radius, in squares. */
+  hideBrush: number
+  setHideTool(tool: HideTool | null): void
+  /** Pick up the hide tool (in its last mode), or put it down (H). */
+  toggleHideTool(): void
+  setHideBrush(squares: number): void
+  /** Dropper: hide the enclosed space at p (or reveal the hidden patch there). */
+  hideFill(p: Point): FillResult
+  /** Brush stroke from `from` to `to`, hiding or (erase) revealing. */
+  hidePaint(from: Point, to: Point, erase: boolean): void
+  /** Reveal every hidden area on this floor. */
+  revealAll(): void
+  setHiddenSoftness(squares: number): void
   /**
    * How much of the night the GM is spared, 0 (sees what the players see) to 1 (full day).
    * A GM preference: it never affects the table.
@@ -107,6 +166,8 @@ interface GmStore extends TableState {
    * view, the view doesn't move and false is returned.
    */
   setView(view: Point, safe?: boolean): boolean
+  /** Zoom the table view (1: true scale, matching the minis). */
+  setViewZoom(zoom: number): void
   setDarkness(darkness: number): void
   setGmVision(vision: number): void
   /** The GM panned or zoomed (doesn't move the camera; the canvas already did). */
@@ -207,6 +268,12 @@ interface GmStore extends TableState {
   alignMapToGrid(cell: { period: number; phaseX: number; phaseY: number }): void
   /** Put the map back to an earlier placement (undo). */
   restoreMap(map: MapInfo): void
+  /**
+   * Turn the map a quarter turn (1 clockwise, -1 anticlockwise) with everything on it:
+   * walls, lights, objects and what's been explored. It turns about a grid intersection,
+   * so the grid stays matched to it.
+   */
+  turnMap(direction: 1 | -1): void
   setCalibrating(on: boolean): void
   setTableScreen(screen: Size): void
   setTableDisconnected(): void
@@ -224,6 +291,35 @@ const defaultScene: Scene = {
   objects: [],
 }
 
+const FIRST_LEVEL = 'floor-1'
+const firstLevel = (scene: Scene, id = FIRST_LEVEL): Level => extractLevel(scene, { id, name: 'Floor 1' })
+
+/** Changing floor (or scene) starts the GM's tools afresh. */
+const TOOLS_OFF = {
+  selectedLightIds: [],
+  selectedWallPoints: [],
+  selectedObjectIds: [],
+  placingLight: null,
+  buildingWalls: false,
+  wallDraft: [],
+  buildingDoors: false,
+  doorDraft: null,
+  hideTool: null,
+} satisfies Partial<GmStore>
+
+/** All floors, up to date (the viewed one is read from the scene). */
+export function allLevels(s: Pick<GmStore, 'levels' | 'levelId' | 'scene'>): Level[] {
+  return s.levels.map((l) => (l.id === s.levelId ? extractLevel(s.scene, l) : l))
+}
+
+/** A floor's map image and fog memory. */
+export function levelImage(s: Pick<GmStore, 'levelId' | 'mapImage' | 'levelImages'>, id: string): Blob | null {
+  return id === s.levelId ? s.mapImage : (s.levelImages[id] ?? null)
+}
+export function levelFogMemory(s: Pick<GmStore, 'levelId' | 'fogMemory' | 'levelFog'>, id: string): FogMemory | null {
+  return id === s.levelId ? s.fogMemory : (s.levelFog[id] ?? null)
+}
+
 // Calibrated on the GM's own table TV: the nominal 96 CSS px per inch square measured 137 mm
 // instead of 100. Other screens differ; calibration corrects it.
 const defaultDisplay: Display = { pxPerMm: (96 / MM_PER_INCH) * (100 / 137), orientation: 0 }
@@ -231,8 +327,86 @@ const defaultDisplay: Display = { pxPerMm: (96 / MM_PER_INCH) * (100 / 137), ori
 // Until a table window has ever connected, assume a 1080p TV.
 const defaultTableScreen: Size = { width: 1920, height: 1080 }
 
-export const useGm = create<GmStore>()((set) => ({
+export const useGm = create<GmStore>()((set, get) => ({
   scene: defaultScene,
+  levels: [firstLevel(defaultScene)],
+  levelId: FIRST_LEVEL,
+  tableLevelId: FIRST_LEVEL,
+  levelImages: {},
+  levelFog: {},
+  onionSkin: true,
+  viewLevel: (id) =>
+    set((s) => {
+      if (id === s.levelId) return s
+      const levels = allLevels(s)
+      const target = levels.find((l) => l.id === id)
+      if (!target) return s
+      // The viewed floor's image and memory live in mapImage and fogMemory (not twice).
+      const { [id]: _image, ...images } = s.levelImages
+      const { [id]: _fog, ...fogs } = s.levelFog
+      void _image
+      void _fog
+      return {
+        levels,
+        levelId: id,
+        levelImages: { ...images, [s.levelId]: s.mapImage },
+        levelFog: { ...fogs, [s.levelId]: s.fogMemory },
+        scene: applyLevel(s.scene, target),
+        mapImage: s.levelImages[id] ?? null,
+        fogMemory: s.levelFog[id] ?? null,
+        fogVersion: s.fogVersion + 1,
+        ...TOOLS_OFF,
+      }
+    }),
+  showLevelOnTable: (id) =>
+    set((s) => {
+      const to = id ?? s.levelId
+      if (to === s.tableLevelId) return s
+      const all = allLevels(s)
+      const from = all.find((l) => l.id === s.tableLevelId)
+      const target = all.find((l) => l.id === to)
+      if (!target) return s
+      // The party goes along to the floor shown, to the same place (floors line up).
+      const moved = from ? moveParty(from.lights, target.lights) : null
+      const levels = all.map((l) =>
+        moved && l.id === from!.id ? { ...l, lights: moved.from } : moved && l.id === to ? { ...l, lights: moved.to } : l,
+      )
+      const viewed = levels.find((l) => l.id === s.levelId)!
+      return { levels, tableLevelId: to, scene: applyLevel(s.scene, viewed) }
+    }),
+  addLevel: () => {
+    const s = get()
+    const level = emptyLevel(crypto.randomUUID(), `Floor ${s.levels.length + 1}`, s.scene)
+    set({ levels: [...allLevels(s), level] })
+    get().viewLevel(level.id)
+  },
+  renameLevel: (id, name) =>
+    set((s) => ({ levels: s.levels.map((l) => (l.id === id ? { ...l, name: name.trim() || l.name } : l)) })),
+  moveLevel: (id, by) =>
+    set((s) => {
+      const i = s.levels.findIndex((l) => l.id === id)
+      const j = i + by
+      if (i < 0 || j < 0 || j >= s.levels.length) return s
+      const levels = [...s.levels]
+      ;[levels[i], levels[j]] = [levels[j], levels[i]]
+      return { levels }
+    }),
+  deleteLevel: (id) => {
+    const s = get()
+    const i = s.levels.findIndex((l) => l.id === id)
+    if (i < 0 || s.levels.length <= 1) return
+    const neighbour = s.levels[i === 0 ? 1 : i - 1].id
+    if (s.tableLevelId === id) get().showLevelOnTable(neighbour)
+    if (get().levelId === id) get().viewLevel(neighbour)
+    set((t) => {
+      const { [id]: _image, ...levelImages } = t.levelImages
+      const { [id]: _fog, ...levelFog } = t.levelFog
+      void _image
+      void _fog
+      return { levels: t.levels.filter((l) => l.id !== id), levelImages, levelFog }
+    })
+  },
+  setOnionSkin: (onionSkin) => set({ onionSkin }),
   display: defaultDisplay,
   calibrating: false,
   mapImage: null,
@@ -243,6 +417,36 @@ export const useGm = create<GmStore>()((set) => ({
   selectedObjectIds: [],
   objectImages: {},
   placingLight: null,
+  hideTool: null,
+  hideMode: 'fill',
+  hideBrush: 1,
+  // One tool at a time: hiding puts the others (and selections) away.
+  setHideTool: (hideTool) => set(hideTool ? { ...TOOLS_OFF, hideTool, hideMode: hideTool } : { hideTool }),
+  toggleHideTool: () => {
+    const { hideTool, hideMode, setHideTool } = useGm.getState()
+    setHideTool(hideTool ? null : hideMode)
+  },
+  setHideBrush: (hideBrush) => set({ hideBrush }),
+  hideFill: (p) => {
+    const { scene } = useGm.getState()
+    const bounds = sceneBounds(scene)
+    const grid = editableMask(scene.hidden, bounds)
+    const result = fillHidden(grid, bounds, scene.walls, p)
+    if (result === 'filled' || result === 'revealed') {
+      set((s) => ({ scene: { ...s.scene, hidden: encodeHidden(grid.cols, grid.rows, grid.mask) } }))
+    }
+    return result
+  },
+  hidePaint: (from, to, erase) =>
+    set((s) => {
+      const bounds = sceneBounds(s.scene)
+      const grid = editableMask(s.scene.hidden, bounds)
+      const radius = s.hideBrush * s.scene.grid.size
+      if (!paintHidden(grid, bounds, from, to, radius, erase ? 0 : 1)) return s
+      return { scene: { ...s.scene, hidden: encodeHidden(grid.cols, grid.rows, grid.mask) } }
+    }),
+  revealAll: () => set((s) => (s.scene.hidden ? { scene: { ...s.scene, hidden: null } } : s)),
+  setHiddenSoftness: (hiddenSoftness) => set((s) => ({ scene: { ...s.scene, hiddenSoftness } })),
   gmVision: DEFAULT_GM_VISION,
   peeking: false,
   fogMemory: null,
@@ -267,8 +471,25 @@ export const useGm = create<GmStore>()((set) => ({
     }),
   setDisplay: (patch) => set((s) => ({ display: { ...s.display, ...patch } })),
   setSquareMm: (squareMm) => set((s) => ({ scene: { ...s.scene, squareMm } })),
+  setViewZoom: (zoom) =>
+    set((s) => {
+      const viewZoom = clampViewZoom(zoom)
+      return (s.scene.viewZoom ?? 1) === viewZoom ? s : { scene: { ...s.scene, viewZoom } }
+    }),
   setView: (view, safe = false) => {
     const s = useGm.getState()
+    if (s.levelId !== s.tableLevelId) {
+      // Viewing another floor: the party (on the table's floor) still travels with the view.
+      const dx = view.x - s.scene.view.x
+      const dy = view.y - s.scene.view.y
+      const levels = s.levels.map((l) =>
+        l.id === s.tableLevelId
+          ? { ...l, lights: l.lights.map((t) => (t.followView ? { ...t, x: t.x + dx, y: t.y + dy } : t)) }
+          : l,
+      )
+      set({ scene: { ...s.scene, view }, levels })
+      return true
+    }
     // Lights carried by the party travel with the table view.
     const dx = view.x - s.scene.view.x
     const dy = view.y - s.scene.view.y
@@ -311,6 +532,11 @@ export const useGm = create<GmStore>()((set) => ({
   newScene: () => {
     set((s) => ({
       scene: defaultScene,
+      levels: [firstLevel(defaultScene)],
+      levelId: FIRST_LEVEL,
+      tableLevelId: FIRST_LEVEL,
+      levelImages: {},
+      levelFog: {},
       mapImage: null,
       fogMemory: null,
       fogVersion: s.fogVersion + 1,
@@ -318,39 +544,36 @@ export const useGm = create<GmStore>()((set) => ({
       cameraVersion: s.cameraVersion + 1,
       historyEpoch: s.historyEpoch + 1,
       objectImages: {},
-      selectedLightIds: [],
-      selectedWallPoints: [],
-      selectedObjectIds: [],
-      placingLight: null,
-      buildingWalls: false,
-      wallDraft: [],
-      buildingDoors: false,
-      doorDraft: null,
+      ...TOOLS_OFF,
     }))
     // After the scene change, which marks unsaved (see sync).
     set({ sceneName: null, unsaved: false })
   },
   loadScene: (file, name) => {
-    set((s) => ({
-      historyEpoch: s.historyEpoch + 1,
-      scene: migrateScene(file.scene),
-      display: { ...s.display, orientation: file.orientation },
-      mapImage: file.mapImage,
-      fogMemory: file.fogMemory,
-      fogVersion: s.fogVersion + 1,
-      gmCamera: file.camera,
-      cameraVersion: s.cameraVersion + 1,
-      objectImages: file.objectImages,
-      // A fresh start for the GM's tools.
-      selectedLightIds: [],
-      selectedWallPoints: [],
-      selectedObjectIds: [],
-      placingLight: null,
-      buildingWalls: false,
-      wallDraft: [],
-      buildingDoors: false,
-      doorDraft: null,
-    }))
+    set((s) => {
+      const shared = migrateScene(file.scene)
+      const levels = file.levels.map((l) => migrateLevel(l, shared))
+      const viewed = levels.find((l) => l.id === file.levelId) ?? levels[0]
+      const tableLevelId = levels.some((l) => l.id === file.tableLevelId) ? file.tableLevelId : viewed.id
+      return {
+        historyEpoch: s.historyEpoch + 1,
+        levels,
+        levelId: viewed.id,
+        tableLevelId,
+        scene: applyLevel(shared, viewed),
+        levelImages: file.mapImages,
+        levelFog: file.fogMemories,
+        display: { ...s.display, orientation: file.orientation },
+        mapImage: file.mapImages[viewed.id] ?? null,
+        fogMemory: file.fogMemories[viewed.id] ?? null,
+        fogVersion: s.fogVersion + 1,
+        gmCamera: file.camera,
+        cameraVersion: s.cameraVersion + 1,
+        objectImages: file.objectImages,
+        // A fresh start for the GM's tools.
+        ...TOOLS_OFF,
+      }
+    })
     // After the scene change, which marks unsaved (see sync).
     set({ sceneName: name, unsaved: false })
   },
@@ -365,7 +588,8 @@ export const useGm = create<GmStore>()((set) => ({
   },
   stampFog: () =>
     set((s) => {
-      if (!s.scene.fog.enabled) return s
+      // The party explores the floor the table shows.
+      if (!s.scene.fog.enabled || s.levelId !== s.tableLevelId) return s
       const bounds = sceneBounds(s.scene)
       // A memory made for another map (different shape) starts over.
       const memory = s.fogMemory && fitsBounds(s.fogMemory, bounds) ? s.fogMemory : createFogMemory(bounds)
@@ -381,8 +605,10 @@ export const useGm = create<GmStore>()((set) => ({
           // stamp: they can't reveal anything new.
           const key = `${l.x - bounds.x},${l.y - bounds.y},${bounds.width},${l.visionRange * s.scene.grid.size}`
           const last = stamped.viewers.get(l.id)
-          if (last && last.key === key && last.walls === s.scene.walls) return false
-          stamped.viewers.set(l.id, { key, walls: s.scene.walls })
+          // Revealing an area lets a viewer that hasn't moved remember what's in it.
+          const { walls, hidden } = s.scene
+          if (last && last.key === key && last.walls === walls && last.hidden === hidden) return false
+          stamped.viewers.set(l.id, { key, walls, hidden })
           return true
         })
         .map((l) => {
@@ -393,7 +619,8 @@ export const useGm = create<GmStore>()((set) => ({
           const polygon = visibilityPolygon(l, range, segments)
           return { x: l.x, y: l.y, range, sees: createVisibilityTest(l, polygon), reach: boundingRect(polygon) }
         })
-      const changed = viewers.length > 0 && stampVision(memory, bounds, viewers)
+      const hidden = hiddenMask(s.scene.hidden, bounds)
+      const changed = viewers.length > 0 && stampVision(memory, bounds, viewers, hidden)
       if (!changed && memory === s.fogMemory) return s
       return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
     }),
@@ -405,6 +632,7 @@ export const useGm = create<GmStore>()((set) => ({
       buildingDoors: buildingWalls ? false : s.buildingDoors,
       doorDraft: null,
       placingLight: buildingWalls ? null : s.placingLight,
+      hideTool: buildingWalls ? null : s.hideTool,
       // The wall toolbox takes the selection panels' place.
       selectedLightIds: buildingWalls ? [] : s.selectedLightIds,
       selectedWallPoints: buildingWalls ? [] : s.selectedWallPoints,
@@ -435,8 +663,9 @@ export const useGm = create<GmStore>()((set) => ({
     set((s) => {
       const map = s.scene.map
       if (!map) return s
-      const kx = map.width / map.naturalWidth
-      const ky = map.height / map.naturalHeight
+      // Detected in the image as shown (turned), in its pixels.
+      const kx = map.width / mapNatural(map).width
+      const ky = map.height / mapNatural(map).height
       const added: Wall[] = detected.map((w) => ({
         id: crypto.randomUUID(),
         points: w.points.map((p) => ({ x: map.x + p.x * kx, y: map.y + p.y * ky })),
@@ -452,6 +681,7 @@ export const useGm = create<GmStore>()((set) => ({
       buildingWalls: buildingDoors ? false : s.buildingWalls,
       wallDraft: buildingDoors ? [] : s.wallDraft,
       placingLight: buildingDoors ? null : s.placingLight,
+      hideTool: buildingDoors ? null : s.hideTool,
       selectedLightIds: buildingDoors ? [] : s.selectedLightIds,
       selectedWallPoints: buildingDoors ? [] : s.selectedWallPoints,
     })),
@@ -615,6 +845,7 @@ export const useGm = create<GmStore>()((set) => ({
       wallDraft: placingLight ? [] : s.wallDraft,
       buildingDoors: placingLight ? false : s.buildingDoors,
       doorDraft: placingLight ? null : s.doorDraft,
+      hideTool: placingLight ? null : s.hideTool,
     })),
   setMap: (mapImage, size) =>
     set((s) => ({
@@ -625,15 +856,18 @@ export const useGm = create<GmStore>()((set) => ({
       scene: {
         ...s.scene,
         map: size && { x: 0, y: 0, ...size, naturalWidth: size.width, naturalHeight: size.height },
-        view: size ? { x: size.width / 2, y: size.height / 2 } : s.scene.view,
+        // Hidden areas belong to the old map too.
+        hidden: null,
+        // A first map: the table view goes to it (not when preparing another floor).
+        view: size && s.levelId === s.tableLevelId ? { x: size.width / 2, y: size.height / 2 } : s.scene.view,
       },
     })),
   setMapScale: (scale) =>
     set((s) => {
       const map = s.scene.map
       if (!map || map.lockToGrid) return s
-      const width = map.naturalWidth * scale
-      const height = map.naturalHeight * scale
+      const width = mapNatural(map).width * scale
+      const height = mapNatural(map).height * scale
       return { scene: { ...s.scene, ...placeMap(s.scene, { ...map, width, height }) } }
     }),
   setMapPosition: ({ x, y }) =>
@@ -676,6 +910,32 @@ export const useGm = create<GmStore>()((set) => ({
       }
     }),
   restoreMap: (map) => set((s) => ({ scene: { ...s.scene, ...placeMap(s.scene, map) } })),
+  turnMap: (direction) =>
+    set((s) => {
+      const { map, grid } = s.scene
+      if (!map) return s
+      const pivot = mapPivot(map, grid)
+      const turn = (p: Point) => turnPoint(p, pivot, direction)
+      const quarter = (direction * Math.PI) / 2
+      // The table view (shared by the floors) follows only when this floor is on the table.
+      const onTable = s.levelId === s.tableLevelId
+      return {
+        scene: {
+          ...s.scene,
+          map: { ...map, ...turnRect(map, pivot, direction), turns: ((((map.turns ?? 0) + direction) % 4) + 4) % 4 },
+          walls: s.scene.walls.map((w) => ({ ...w, points: w.points.map(turn) })),
+          lights: s.scene.lights.map((l) => ({ ...l, ...turn(l), angle: l.angle + quarter })),
+          objects: s.scene.objects.map((o) => ({ ...o, ...turn(o), rotation: o.rotation + quarter })),
+          hidden: s.scene.hidden && turnHidden(s.scene.hidden, direction),
+          view: onTable ? turn(s.scene.view) : s.scene.view,
+        },
+        // What's been explored turns with the map it covers.
+        fogMemory: s.fogMemory && turnFogMemory(s.fogMemory, direction),
+        fogVersion: s.fogVersion + 1,
+        wallDraft: [],
+        doorDraft: null,
+      }
+    }),
   setMapLock: (axis, locked) =>
     set((s) => {
       const map = s.scene.map
@@ -718,8 +978,10 @@ function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' | 'light
   }
 }
 
+/** What the table shows: its floor, with the shared parts of the scene. */
 export function tableState(s: GmStore): TableState {
-  return { scene: s.scene, display: s.display, calibrating: s.calibrating }
+  const level = s.tableLevelId === s.levelId ? null : s.levels.find((l) => l.id === s.tableLevelId)
+  return { scene: level ? applyLevel(s.scene, level) : s.scene, display: s.display, calibrating: s.calibrating }
 }
 
 /** Restore the last session from IndexedDB. */
@@ -749,9 +1011,24 @@ export function migrateScene(scene: Scene): Scene {
   return scene
 }
 
+/** The floors, as kept between sessions (the viewed floor is in the saved scene). */
+export interface SavedFloors {
+  levels: Level[]
+  levelId: string
+  tableLevelId: string
+  levelImages: Record<string, Blob | null>
+  levelFog: Record<string, FogMemory | null>
+}
+
+/** A floor saved by an earlier version: fill in what's missing, as for scenes. */
+function migrateLevel(level: Level, shared: Scene): Level {
+  const scene = migrateScene(applyLevel(shared, { ...level, objects: level.objects ?? [], walls: level.walls ?? [] }))
+  return extractLevel(scene, level)
+}
+
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages] =
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
@@ -762,9 +1039,21 @@ export async function hydrate() {
       load<GmCamera>('gmCamera'),
       load<{ name: string | null; unsaved: boolean }>('sceneName'),
       load<AssetImages>('objectImages'),
+      load<SavedFloors>('floors'),
     ])
+  const restored = scene ? migrateScene(scene) : defaultScene
+  // Sessions from before floors: the scene is the one floor.
+  const valid = floors?.levels.some((l) => l.id === floors.levelId)
+  const levels = valid ? floors!.levels.map((l) => migrateLevel(l, restored)) : [firstLevel(restored)]
+  const levelId = valid ? floors!.levelId : levels[0].id
+  const tableLevelId = valid && levels.some((l) => l.id === floors!.tableLevelId) ? floors!.tableLevelId : levelId
   useGm.setState((s) => ({
-    scene: scene ? migrateScene(scene) : defaultScene,
+    scene: restored,
+    levels,
+    levelId,
+    tableLevelId,
+    levelImages: (valid && floors!.levelImages) || {},
+    levelFog: (valid && floors!.levelFog) || {},
     display: display ?? defaultDisplay,
     mapImage: mapImage ?? null,
     tableScreen: tableScreen ?? defaultTableScreen,

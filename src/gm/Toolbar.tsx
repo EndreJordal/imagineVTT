@@ -1,10 +1,12 @@
 import { useEffect } from 'react'
+import { CurtainButton } from './Curtain'
 import { redo, undo } from './history'
 import { newScene, openScene, saveScene } from './sceneFiles'
 import { SettingsMenu } from './Settings'
 import { useGm } from './store'
 import { openTableWindow } from './tableWindow'
 import { useDropdown } from './useDropdown'
+import { Icon } from './icons'
 
 export function Toolbar() {
   const darkness = useGm((s) => s.scene.darkness)
@@ -17,7 +19,7 @@ export function Toolbar() {
       <UndoRedo />
       <TableStatus />
       <label className="toolbar-item" title="Time of day: dims and desaturates the map, on the table too">
-        <span aria-hidden>☀</span>
+        <Icon name="day" />
         <input
           type="range"
           min={0}
@@ -29,10 +31,11 @@ export function Toolbar() {
           onChange={(e) => setDarkness(e.target.valueAsNumber)}
           onDoubleClick={() => setDarkness(0)}
         />
-        <span aria-hidden>🌙</span>
+        <Icon name="night" />
       </label>
       <GmVision />
       <FogMenu />
+      <CurtainButton />
       <span className="toolbar-spacer" />
       <SettingsMenu />
     </header>
@@ -53,17 +56,17 @@ function SceneFile() {
         {unsaved && <span className="unsaved-dot"> •</span>}
       </span>
       <button className="icon-button" title="New scene" onClick={newScene}>
-        📄
+        <Icon name="new" size={18} />
       </button>
       <button className="icon-button" title="Open a scene (Ctrl+O)" onClick={() => void openScene()}>
-        📂
+        <Icon name="open" size={18} />
       </button>
       <button
         className="icon-button"
         title="Save the scene (Ctrl+S; Ctrl+Shift+S to save as a new file)"
         onClick={(e) => void saveScene(e.shiftKey)}
       >
-        💾
+        <Icon name="save" size={18} />
       </button>
     </div>
   )
@@ -84,8 +87,13 @@ function FogMenu() {
         title="Fog of war and vision safety"
         onClick={() => setOpen(!open)}
       >
-        🌫 Fog {enabled ? 'on' : 'off'}
-        {safety && <span title="Vision safety on"> 🛡</span>} ▾
+        <Icon name="fog" /> Fog {enabled ? 'on' : 'off'}
+        {safety && (
+          <span title="Vision safety on">
+            <Icon name="safety" size={14} />
+          </span>
+        )}
+        <Icon name="chevron-down" size={14} />
       </button>
       {open && (
         <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Fog of war">
@@ -102,11 +110,11 @@ function FogMenu() {
               if (confirm('Forget everything the party has explored?')) resetFog()
             }}
           >
-            ↺ Reset explored areas
+            <Icon name="reset-fog" /> Reset explored areas
           </button>
           <label className="check">
             <input type="checkbox" checked={safety} onChange={(e) => setVisionSafety(e.target.checked)} />
-            🛡 Vision safety
+            <Icon name="safety" /> Vision safety
           </label>
           <p className="hint">
             Vision tokens can’t be dragged through walls or closed doors, so a careless drag doesn’t reveal the
@@ -138,10 +146,10 @@ function UndoRedo() {
   return (
     <div className="toolbar-item toolbar-group">
       <button className="icon-button" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
-        ↶
+        <Icon name="undo" size={18} />
       </button>
       <button className="icon-button" title="Redo (Ctrl+Y)" disabled={!canRedo} onClick={redo}>
-        ↷
+        <Icon name="redo" size={18} />
       </button>
     </div>
   )
@@ -169,7 +177,7 @@ function GmVision() {
         onPointerUp={() => setPeeking(false)}
         onPointerCancel={() => setPeeking(false)}
       >
-        👁
+        <Icon name="peek" size={18} />
       </button>
       <span className="toolbar-label">GM vision</span>
       <input

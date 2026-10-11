@@ -463,14 +463,6 @@ body,
   background: none;
 }
 
-.tool-button kbd {
-  position: absolute;
-  right: 2px;
-  bottom: 1px;
-  font: 9px/1 inherit;
-  color: var(--muted);
-}
-
 .tool-flyout {
   top: 0;
   left: calc(100% + 8px);
@@ -794,4 +786,251 @@ input[type='color'].swatch {
   width: 100%;
   max-height: 248px;
   background-repeat: no-repeat;
+}
+
+/* Floor switcher, over the map (right of the tool palette) */
+.floors {
+  position: absolute;
+  top: 12px;
+  left: 72px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 380px);
+}
+
+.floor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: rgb(29 29 34 / 94%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.floor-tab {
+  padding: 3px 10px;
+  border-color: transparent;
+  background: none;
+  white-space: nowrap;
+}
+
+.floor-tab.active {
+  background: #2e2e38;
+  border-color: var(--accent);
+}
+
+.floor-add {
+  color: var(--muted);
+}
+
+.floor-menu {
+  width: 260px;
+}
+
+.floor-menu button {
+  text-align: left;
+}
+
+.floor-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 12px;
+  background: rgb(60 44 10 / 95%);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+
+/* Icons (Lucide): in the text colour, sitting on the text line */
+.icon {
+  flex: none;
+  vertical-align: -0.2em;
+}
+
+button .icon + *,
+button * + .icon {
+  margin-left: 0;
+}
+
+/* Buttons with an icon and text: icon and text side by side, centred. */
+button:has(> .icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tool-button {
+  display: grid;
+  place-items: center;
+}
+
+.tool-button.active,
+.icon-button.active {
+  color: var(--accent);
+}
+
+.snap-button .snap-caption {
+  color: var(--muted);
+}
+
+.floor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.light-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.placement-hint .icon {
+  margin-right: 2px;
+}
+
+/* Curtain */
+button.curtain-down,
+button.curtain-down:hover:not(:disabled) {
+  background: #d94dff;
+  border-color: #d94dff;
+  color: #1a0620;
+}
+
+/* minmax(0, …): long names are cut short instead of widening the columns. */
+.curtain-pictures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.curtain-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  /* Buttons size to their content (the thumbnail's own width): keep it to the grid cell. */
+  width: 100%;
+  min-width: 0;
+  padding: 3px;
+  border-width: 2px;
+  border-color: transparent;
+  background: none;
+  color: inherit;
+}
+
+.curtain-thumb:hover:not(:disabled) {
+  border-color: #4a4a55;
+}
+
+.curtain-thumb.active,
+.curtain-thumb.active:hover:not(:disabled) {
+  border-color: #d94dff;
+  color: inherit;
+}
+
+.curtain-picture {
+  position: relative;
+  min-width: 0;
+}
+
+.curtain-picture.dimmed .curtain-thumb {
+  opacity: 0.45;
+}
+
+.curtain-tick {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #d94dff;
+}
+
+.check.disabled {
+  opacity: 0.5;
+}
+
+.curtain-thumb img,
+.curtain-thumb-empty {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 2px;
+  background: #000;
+}
+
+.curtain-name {
+  min-width: 0;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.curtain-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.curtain-folder .hint {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.curtain-folder button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.segmented {
+  display: flex;
+}
+
+.segmented button,
+.menu-list .segmented button {
+  flex: 1;
+  justify-content: center;
+  background: #26262d;
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+.segmented button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.segmented button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.segmented button + button {
+  margin-left: -1px;
+}
+
+.segmented button.active,
+.segmented button:hover:not(:disabled) {
+  position: relative; /* its border over the neighbour's */
+}
+
+.menu-list .segmented button.active {
+  border-color: var(--accent);
 }

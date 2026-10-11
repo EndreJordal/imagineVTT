@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { Icon } from './icons'
 
 const COLLAPSED_KEY = 'imaginevtt.collapsedSections'
 
@@ -33,7 +34,7 @@ export function Section({ title, children }: { title: string; children: ReactNod
       <h2>
         <button className="section-toggle" aria-expanded={!collapsed} onClick={toggle}>
           <span className="chevron" aria-hidden>
-            ▾
+            <Icon name="chevron-down" size={14} />
           </span>
           {title}
         </button>

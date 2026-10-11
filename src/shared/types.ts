@@ -1,3 +1,4 @@
+import type { HiddenAreas } from './hidden'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
 import type { Wall } from './visibility'
@@ -42,6 +43,11 @@ export interface MapInfo extends Rect {
    * The map's own size can't be changed directly while this is on.
    */
   lockToGrid?: boolean
+  /**
+   * Quarter turns clockwise (0..3) the image is shown at. x/y/width/height are the shown
+   * (turned) placement; naturalWidth/naturalHeight stay the image file's own.
+   */
+  turns?: number
 }
 
 export interface Scene {
@@ -52,6 +58,11 @@ export interface Scene {
   squareMm: number
   /** Map-space centre of what the table display shows. */
   view: Point
+  /**
+   * Table zoom: 1 is true scale (a square is squareMm on the table, matching the minis);
+   * less shows more of the map (an overview), more shows less. Absent means 1.
+   */
+  viewZoom?: number
   /** Time of day, 0 (day: map as drawn) to 1 (night: dimmed and desaturated). */
   darkness: number
   /** Light sources and vision tokens. Lights light up the map at night. */
@@ -66,6 +77,13 @@ export interface Scene {
   walls: Wall[]
   /** Images placed on the map (asset library), bottom first. They go with the map too. */
   objects: MapObject[]
+  /**
+   * Hidden areas ("local fog"): black on the table whatever the party sees, but they don't
+   * block sight past them. Null or absent: none.
+   */
+  hidden?: HiddenAreas | null
+  /** How soft hidden areas' edges are, in squares (shared by the floors). */
+  hiddenSoftness?: number
 }
 
 export type Orientation = 0 | 90 | 180 | 270

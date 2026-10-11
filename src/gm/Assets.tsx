@@ -11,6 +11,7 @@ import {
   type LibraryAsset,
 } from './assetLibrary'
 import { Section } from './ui'
+import { Icon } from './icons'
 
 /** How many results to show at first (more on request): the grid stays quick. */
 const PAGE = 60
@@ -71,13 +72,15 @@ export function AssetsSection() {
       )}
       {status.kind === 'none' && (
         <>
-          <button onClick={() => void chooseAssetFolder()}>📁 Choose asset folder…</button>
+          <button onClick={() => void chooseAssetFolder()}>
+            <Icon name="folder" /> Choose asset folder…
+          </button>
           <p className="hint">Pick your asset folder (e.g. media-assets). It stays on this computer.</p>
         </>
       )}
       {status.kind === 'reconnect' && (
         <button onClick={() => void reconnectAssetFolder()} title="The browser asks again on each visit">
-          📁 Reconnect “{folderName}”
+          <Icon name="folder" /> Reconnect “{folderName}”
         </button>
       )}
       {status.kind === 'scanning' && (
@@ -136,7 +139,7 @@ export function AssetsSection() {
                 {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" draggable={false} /> : <span className="asset-none">?</span>}
                 {a.animated && (
                   <span className="asset-badge" title="Animated">
-                    ▶
+                    <Icon name="animated" size={11} />
                   </span>
                 )}
                 <span className="asset-name">{a.name}</span>
@@ -201,7 +204,7 @@ export function AssetPreview() {
       <header>
         <span className="light-panel-title">{asset.name}</span>
         <button className="icon-button" title="Close" onClick={() => useAssets.getState().setPreviewing(null)}>
-          ✕
+          <Icon name="close" />
         </button>
       </header>
       <div className="asset-preview-image" draggable onDragStart={startDrag(asset)} title="Drag onto the map">

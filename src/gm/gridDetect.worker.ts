@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { detectGrid, toGray, type GridDetection } from '../shared/gridDetect'
 import { refineGridByWalls } from '../shared/wallDetect'
-import { bitmapMapImage } from './bitmapImage'
+import { bitmapMapImage, turnBitmap } from './bitmapImage'
 
 /**
  * Decodes the map image and runs grid detection off the main thread. Very large images
@@ -15,6 +15,8 @@ export interface DetectRequest {
   /** The image's natural size, so it needn't be decoded at full size just to measure it. */
   width: number
   height: number
+  /** Quarter turns clockwise the map is shown at: detection is in the turned image. */
+  turns: number
 }
 
 /** Detection result in the image's own (natural) pixels, or null if no grid was found. */
@@ -24,7 +26,7 @@ self.onmessage = async (e: MessageEvent<DetectRequest>) => {
   try {
     const { width, height } = e.data
     const scale = Math.min(1, MAX_DECODE_SIDE / Math.max(width, height))
-    const bitmap =
+    const decoded =
       scale < 1
         ? await createImageBitmap(e.data.image, {
             resizeWidth: Math.round(width * scale),
@@ -32,6 +34,7 @@ self.onmessage = async (e: MessageEvent<DetectRequest>) => {
             resizeQuality: 'high',
           })
         : await createImageBitmap(e.data.image)
+    const bitmap = await turnBitmap(decoded, e.data.turns)
 
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!

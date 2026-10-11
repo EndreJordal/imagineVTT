@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createLight } from '../shared/lights'
-import { gmDarkness, useGm } from './store'
+import { extractLevel } from '../shared/levels'
+import { allLevels, levelImage } from './store'
+import { gmDarkness, tableState, useGm } from './store'
 
 const lights = () => useGm.getState().scene.lights
 const byKind = (kind: string) => lights().find((l) => l.kind === kind)!
@@ -400,6 +402,74 @@ describe('objects', () => {
   })
 })
 
+describe('floors', () => {
+  const gm = () => useGm.getState()
+  const groundMap = { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 }
+  const party = { ...createLight('torch', 100, 100, 'party'), followView: true }
+  const brazier = createLight('brazier', 300, 300, 'brazier')
+  const groundImage = new Blob(['ground'])
+  beforeEach(() => {
+    gm().newScene()
+    useGm.setState((s) => ({
+      scene: { ...s.scene, map: groundMap, lights: [party, brazier], darkness: 0.2, view: { x: 500, y: 500 } },
+      mapImage: groundImage,
+    }))
+  })
+
+  it('adds a floor with its own map, walls and lights; the table keeps its floor', () => {
+    const ground = gm().levelId
+    gm().addLevel()
+    const roof = gm().levelId
+    expect(roof).not.toBe(ground)
+    expect(gm().tableLevelId).toBe(ground)
+    // A new floor is empty, and night/day of its own.
+    expect([gm().scene.map, gm().scene.lights, gm().mapImage]).toEqual([null, [], null])
+    gm().setDarkness(0.9)
+    gm().addWallPoint({ x: 0, y: 0 })
+    gm().addWallPoint({ x: 100, y: 0 })
+    gm().confirmWallDraft()
+    // Back on the ground floor: as it was.
+    gm().viewLevel(ground)
+    expect(gm().scene.darkness).toBe(0.2)
+    expect(gm().scene.walls).toEqual([])
+    expect(gm().mapImage).toBe(groundImage)
+    expect(gm().scene.lights.map((l) => l.id)).toEqual(['party', 'brazier'])
+    const roofLevel = allLevels(gm()).find((l) => l.id === roof)!
+    expect([roofLevel.darkness, roofLevel.walls.length]).toEqual([0.9, 1])
+  })
+
+  it('shows a floor on the table, and the party goes along', () => {
+    const ground = gm().levelId
+    gm().addLevel()
+    const roof = gm().levelId
+    // While preparing the roof, the table shows the ground floor, party and all.
+    expect(tableState(gm()).scene.lights.map((l) => l.id)).toEqual(['party', 'brazier'])
+    // Moving the PVB still moves the party, on the floor shown.
+    gm().setView({ x: 600, y: 500 })
+    expect(tableState(gm()).scene.lights.find((l) => l.id === 'party')!.x).toBe(200)
+    gm().showLevelOnTable()
+    expect(gm().tableLevelId).toBe(roof)
+    expect(gm().scene.lights.map((l) => l.id)).toEqual(['party'])
+    const groundLevel = allLevels(gm()).find((l) => l.id === ground)!
+    expect(groundLevel.lights.map((l) => l.id)).toEqual(['brazier'])
+    expect(levelImage(gm(), ground)).toBe(groundImage)
+  })
+
+  it('renames, reorders and deletes floors (the party survives)', () => {
+    const ground = gm().levelId
+    gm().addLevel()
+    const roof = gm().levelId
+    gm().renameLevel(roof, 'Roof')
+    gm().moveLevel(roof, -1)
+    expect(gm().levels.map((l) => l.name)).toEqual(['Roof', 'Floor 1'])
+    gm().showLevelOnTable(roof)
+    gm().deleteLevel(roof)
+    expect(gm().levels.map((l) => l.id)).toEqual([ground])
+    expect([gm().levelId, gm().tableLevelId]).toEqual([ground, ground])
+    expect(gm().scene.lights.map((l) => l.id).sort()).toEqual(['brazier', 'party'])
+  })
+})
+
 describe('new scene', () => {
   it('empties the scene and forgets its name, keeping calibration', () => {
     const gm = () => useGm.getState()
@@ -429,10 +499,13 @@ describe('opening a scene file', () => {
     gm().loadScene(
       {
         scene: saved,
+        levels: [extractLevel(saved, { id: 'f', name: 'Floor 1' })],
+        levelId: 'f',
+        tableLevelId: 'f',
         orientation: 180,
         camera: { x: 1, y: 2, zoom: 0.5 },
-        mapImage: image,
-        fogMemory: { cols: 1, rows: 1, data: new Uint8Array([255]) },
+        mapImages: { f: image },
+        fogMemories: { f: { cols: 1, rows: 1, data: new Uint8Array([255]) } },
         objectImages: {},
       },
       'Goblin cave',
@@ -449,3 +522,105 @@ describe('opening a scene file', () => {
   })
 })
 
+
+describe('turning the map', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      levelId: s.tableLevelId,
+      scene: {
+        ...s.scene,
+        grid: { ...s.scene.grid, size: 100, offsetX: 0, offsetY: 0 },
+        map: { x: 0, y: 0, width: 400, height: 200, naturalWidth: 800, naturalHeight: 400, lockToGrid: true },
+        lights: [],
+        walls: [{ id: 'w', points: [{ x: 0, y: 0 }, { x: 400, y: 0 }] }],
+        objects: [],
+        view: { x: 300, y: 100 },
+      },
+      fogMemory: { cols: 2, rows: 1, data: new Uint8Array([7, 9]) },
+    }))
+  })
+
+  it('turns the map with its walls, lights, view and explored areas, about a grid point', () => {
+    const { addLight, turnMap } = useGm.getState()
+    addLight('torch', { x: 300, y: 100 })
+    turnMap(1)
+    const s = useGm.getState()
+    // Pivot (200, 100): the map's centre is on a grid intersection.
+    expect(s.scene.map).toMatchObject({ x: 100, y: -100, width: 200, height: 400, turns: 1, lockToGrid: true })
+    expect(s.scene.walls[0].points).toEqual([
+      { x: 300, y: -100 },
+      { x: 300, y: 300 },
+    ])
+    expect(s.scene.lights[0]).toMatchObject({ x: 200, y: 200, angle: Math.PI / 2 })
+    expect(s.scene.view).toEqual({ x: 200, y: 200 })
+    expect(s.fogMemory).toEqual({ cols: 1, rows: 2, data: new Uint8Array([7, 9]) })
+  })
+
+  it('turns back the other way', () => {
+    const before = useGm.getState().scene
+    const { turnMap } = useGm.getState()
+    turnMap(1)
+    turnMap(-1)
+    const s = useGm.getState()
+    expect(s.scene.map).toMatchObject({ ...before.map, turns: 0 })
+    expect(s.scene.walls).toEqual(before.walls)
+    expect(s.fogMemory?.data).toEqual(new Uint8Array([7, 9]))
+  })
+})
+
+describe('hidden areas', () => {
+  const room = [
+    { x: 400, y: 400 },
+    { x: 600, y: 400 },
+    { x: 600, y: 600 },
+    { x: 400, y: 600 },
+    { x: 400, y: 400 },
+  ]
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      levelId: s.tableLevelId,
+      scene: {
+        ...s.scene,
+        grid: { ...s.scene.grid, size: 100, offsetX: 0, offsetY: 0 },
+        map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
+        walls: [{ id: 'room', points: room }],
+        lights: [],
+        hidden: null,
+        fog: { enabled: true, safety: true },
+      },
+      fogMemory: null,
+    }))
+  })
+
+  it('fills an enclosed room, refuses an open space, and reveals on a second click', () => {
+    const { hideFill } = useGm.getState()
+    expect(hideFill({ x: 100, y: 100 })).toBe('open')
+    expect(useGm.getState().scene.hidden).toBeNull()
+    expect(hideFill({ x: 500, y: 500 })).toBe('filled')
+    expect(useGm.getState().scene.hidden).not.toBeNull()
+    expect(hideFill({ x: 500, y: 500 })).toBe('revealed')
+    expect(useGm.getState().scene.hidden).toBeNull()
+  })
+
+  it('paints and erases with the brush, and reveals all', () => {
+    const { hidePaint, revealAll } = useGm.getState()
+    hidePaint({ x: 100, y: 100 }, { x: 300, y: 100 }, false)
+    expect(useGm.getState().scene.hidden).not.toBeNull()
+    hidePaint({ x: 100, y: 100 }, { x: 300, y: 100 }, true)
+    expect(useGm.getState().scene.hidden).toBeNull()
+    hidePaint({ x: 100, y: 100 }, { x: 100, y: 100 }, false)
+    revealAll()
+    expect(useGm.getState().scene.hidden).toBeNull()
+  })
+
+  it("doesn't remember what's under a hidden area as explored", () => {
+    const { hideFill, addLight, stampFog } = useGm.getState()
+    hideFill({ x: 500, y: 500 })
+    addLight('vision', { x: 500, y: 500 })
+    stampFog()
+    const memory = useGm.getState().fogMemory!
+    const at = (x: number, y: number) =>
+      memory.data[Math.floor((y / 1000) * memory.rows) * memory.cols + Math.floor((x / 1000) * memory.cols)]
+    expect(at(500, 500)).toBe(0)
+  })
+})

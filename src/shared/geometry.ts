@@ -14,9 +14,23 @@ export function sceneBounds(scene: Scene): Rect {
     : { x: 0, y: 0, width: BLANK_SQUARES.x * grid.size, height: BLANK_SQUARES.y * grid.size }
 }
 
-/** Table-screen CSS pixels per map pixel, so one grid square = squareMm physically. */
+/**
+ * Table-screen CSS pixels per map pixel, so one grid square = squareMm physically (times
+ * the table zoom, when the GM zooms out for an overview).
+ */
 export function tableScale(scene: Scene, display: Display): number {
-  return (display.pxPerMm * scene.squareMm) / scene.grid.size
+  return ((display.pxPerMm * scene.squareMm) / scene.grid.size) * (scene.viewZoom ?? 1)
+}
+
+/** Table zoom limits, and how close to true scale snaps to it. */
+export const MIN_VIEW_ZOOM = 0.05
+export const MAX_VIEW_ZOOM = 4
+const VIEW_ZOOM_SNAP = 0.04
+
+/** A table zoom within limits, snapped to true scale when it's close. */
+export function clampViewZoom(zoom: number): number {
+  if (Math.abs(zoom - 1) < VIEW_ZOOM_SNAP) return 1
+  return Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, zoom))
 }
 
 /**
@@ -54,9 +68,40 @@ export function tableViewCorners(scene: Scene, display: Display, screen: Size): 
   }))
 }
 
+/** The map image's pixel size as shown: width and height swap when it's turned a quarter. */
+export function mapNatural(map: MapInfo): Size {
+  return (map.turns ?? 0) % 2
+    ? { width: map.naturalHeight, height: map.naturalWidth }
+    : { width: map.naturalWidth, height: map.naturalHeight }
+}
+
+/** p turned `turns` quarter turns clockwise (screen axes, y down) about `pivot`. */
+export function turnPoint(p: Point, pivot: Point, turns: number): Point {
+  let dx = p.x - pivot.x
+  let dy = p.y - pivot.y
+  for (let i = 0; i < (((turns % 4) + 4) % 4); i++) [dx, dy] = [-dy, dx]
+  return { x: pivot.x + dx, y: pivot.y + dy }
+}
+
+/** A rect turned a quarter turn (or several) about `pivot`: the same area, turned. */
+export function turnRect(r: Rect, pivot: Point, turns: number): Rect {
+  const c = turnPoint({ x: r.x + r.width / 2, y: r.y + r.height / 2 }, pivot, turns)
+  const [width, height] = turns % 2 ? [r.height, r.width] : [r.width, r.height]
+  return { x: c.x - width / 2, y: c.y - height / 2, width, height }
+}
+
+/**
+ * Where to turn the map about: the grid intersection nearest its centre, so grid lines land
+ * on grid lines and a map matched to the grid stays matched.
+ */
+export function mapPivot(map: Rect, grid: GridSettings): Point {
+  const near = (v: number, offset: number) => offset + Math.round((v - offset) / grid.size) * grid.size
+  return { x: near(map.x + map.width / 2, grid.offsetX), y: near(map.y + map.height / 2, grid.offsetY) }
+}
+
 /** Map scale (relative to natural size) that puts the map's bottom-right corner nearest p. */
 export function mapScaleForCorner(map: MapInfo, p: Point): number {
-  const { naturalWidth: w, naturalHeight: h } = map
+  const { width: w, height: h } = mapNatural(map)
   return ((p.x - map.x) * w + (p.y - map.y) * h) / (w * w + h * h)
 }
 
@@ -74,10 +119,10 @@ export function boundingRect(points: Point[]): Rect {
  * The map's centre on the other axis stays where it was.
  */
 export function fitMapToRect(map: MapInfo, target: Rect, axis: 'x' | 'y'): MapInfo {
-  const scale =
-    axis === 'x' ? target.width / map.naturalWidth : target.height / map.naturalHeight
-  const width = map.naturalWidth * scale
-  const height = map.naturalHeight * scale
+  const natural = mapNatural(map)
+  const scale = axis === 'x' ? target.width / natural.width : target.height / natural.height
+  const width = natural.width * scale
+  const height = natural.height * scale
   return axis === 'x'
     ? { ...map, width, height, x: target.x, y: map.y + (map.height - height) / 2 }
     : { ...map, width, height, y: target.y, x: map.x + (map.width - width) / 2 }
@@ -101,8 +146,8 @@ export function alignMapToGrid(
   }
   return {
     ...map,
-    width: map.naturalWidth * scale,
-    height: map.naturalHeight * scale,
+    width: mapNatural(map).width * scale,
+    height: mapNatural(map).height * scale,
     x: align(map.x, cell.phaseX, grid.offsetX),
     y: align(map.y, cell.phaseY, grid.offsetY),
   }

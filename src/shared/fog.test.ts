@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFogMemory, fitsBounds, stampVision, visionFalloff } from './fog'
+import { createFogMemory, fitsBounds, stampVision, turnFogMemory, visionFalloff } from './fog'
 
 const bounds = { x: 100, y: 50, width: 2000, height: 1000 }
 const at = (m: ReturnType<typeof createFogMemory>, sceneX: number, sceneY: number) => {
@@ -56,5 +56,24 @@ describe('visionFalloff', () => {
     expect(visionFalloff(0.85)).toBe(1)
     expect(visionFalloff(0.925)).toBeCloseTo(0.5)
     expect(visionFalloff(1)).toBe(0)
+  })
+})
+
+describe('turnFogMemory', () => {
+  // 3 wide, 2 tall:  1 2 3
+  //                  4 5 6
+  const memory = { cols: 3, rows: 2, data: new Uint8Array([1, 2, 3, 4, 5, 6]) }
+
+  it('turns the grid a quarter turn clockwise', () => {
+    // 4 1
+    // 5 2
+    // 6 3
+    expect(turnFogMemory(memory, 1)).toEqual({ cols: 2, rows: 3, data: new Uint8Array([4, 1, 5, 2, 6, 3]) })
+  })
+
+  it('turns back to where it was', () => {
+    expect(turnFogMemory(turnFogMemory(memory, 1), -1)).toEqual(memory)
+    expect(turnFogMemory(memory, 4)).toEqual(memory)
+    expect(turnFogMemory(memory, 2).data).toEqual(new Uint8Array([6, 5, 4, 3, 2, 1]))
   })
 })

@@ -65,9 +65,12 @@ export type Animation = 'steady' | 'fire' | 'candle' | 'lantern' | 'flicker'
 /** How the light spreads: round, a cone, along a tube, or not at all (vision only). */
 export type Shape = 'radial' | 'cone' | 'tube' | 'none'
 
+/** Light kinds share a few icons (the token's ring, in the light's colour, tells them apart). */
+export type LightIcon = 'lamp' | 'fire' | 'flashlight' | 'eye'
+
 export interface LightPreset {
   label: string
-  icon: string
+  icon: LightIcon
   /** Hand-held: meant to be carried around. */
   handheld: boolean
   shape: Shape
@@ -96,18 +99,18 @@ export const isDirectional = (light: Light) => {
 
 /** Radii roughly follow 5e (squares of 5ft): a torch lights 20ft bright + 20ft dim. */
 export const LIGHT_PRESETS: Record<LightKind, LightPreset> = {
-  fixture: { label: 'Light fixture', icon: '💡', handheld: false, shape: 'radial', animation: 'steady', radius: 7, color: '#fff4e0', intensity: 0.95 },
-  fixtureFlicker: { label: 'Light fixture (flickering)', icon: '💡', handheld: false, shape: 'radial', animation: 'flicker', radius: 7, color: '#f2f6ff', intensity: 0.9, flicker: DEFAULT_FLICKER },
-  neon: { label: 'Neon', icon: '🔆', handheld: false, shape: 'tube', animation: 'steady', radius: 4, color: '#ff3fd2', intensity: 0.9 },
-  neonFlicker: { label: 'Neon (flickering)', icon: '🔆', handheld: false, shape: 'tube', animation: 'flicker', radius: 4, color: '#3fe8ff', intensity: 0.9, flicker: { ...DEFAULT_FLICKER, rate: 26 }, buzz: true },
-  brazier: { label: 'Brazier', icon: '⚱️', handheld: false, shape: 'radial', animation: 'fire', radius: 6, color: '#ff9a40', intensity: 0.95 },
-  torch: { label: 'Torch', icon: '🔥', handheld: true, shape: 'radial', animation: 'fire', radius: 8, color: '#ff9440', intensity: 0.9 },
-  campfire: { label: 'Camp fire', icon: '🏕️', handheld: false, shape: 'radial', animation: 'fire', radius: 9, color: '#ff8a30', intensity: 1 },
-  candle: { label: 'Candle', icon: '🕯️', handheld: true, shape: 'radial', animation: 'candle', radius: 2.5, color: '#ffb766', intensity: 0.8 },
-  flashlight: { label: 'Flashlight', icon: '🔦', handheld: true, shape: 'cone', animation: 'steady', radius: 12, color: '#f4f8ff', intensity: 0.95, cone: 50 },
-  lantern: { label: 'Lantern', icon: '🏮', handheld: true, shape: 'radial', animation: 'lantern', radius: 10, color: '#ffc070', intensity: 0.9 },
+  fixture: { label: 'Light fixture', icon: 'lamp', handheld: false, shape: 'radial', animation: 'steady', radius: 7, color: '#fff4e0', intensity: 0.95 },
+  fixtureFlicker: { label: 'Light fixture (flickering)', icon: 'lamp', handheld: false, shape: 'radial', animation: 'flicker', radius: 7, color: '#f2f6ff', intensity: 0.9, flicker: DEFAULT_FLICKER },
+  neon: { label: 'Neon', icon: 'lamp', handheld: false, shape: 'tube', animation: 'steady', radius: 4, color: '#ff3fd2', intensity: 0.9 },
+  neonFlicker: { label: 'Neon (flickering)', icon: 'lamp', handheld: false, shape: 'tube', animation: 'flicker', radius: 4, color: '#3fe8ff', intensity: 0.9, flicker: { ...DEFAULT_FLICKER, rate: 26 }, buzz: true },
+  brazier: { label: 'Brazier', icon: 'fire', handheld: false, shape: 'radial', animation: 'fire', radius: 6, color: '#ff9a40', intensity: 0.95 },
+  torch: { label: 'Torch', icon: 'fire', handheld: true, shape: 'radial', animation: 'fire', radius: 8, color: '#ff9440', intensity: 0.9 },
+  campfire: { label: 'Camp fire', icon: 'fire', handheld: false, shape: 'radial', animation: 'fire', radius: 9, color: '#ff8a30', intensity: 1 },
+  candle: { label: 'Candle', icon: 'fire', handheld: true, shape: 'radial', animation: 'candle', radius: 2.5, color: '#ffb766', intensity: 0.8 },
+  flashlight: { label: 'Flashlight', icon: 'flashlight', handheld: true, shape: 'cone', animation: 'steady', radius: 12, color: '#f4f8ff', intensity: 0.95, cone: 50 },
+  lantern: { label: 'Lantern', icon: 'fire', handheld: true, shape: 'radial', animation: 'lantern', radius: 10, color: '#ffc070', intensity: 0.9 },
   // Placed switched off at the smallest range, so the GM opens it up deliberately.
-  vision: { label: 'Vision token', icon: '👤', handheld: true, shape: 'none', animation: 'steady', radius: 0, color: '#9ad0ff', intensity: 0, vision: false, visionRange: 1 },
+  vision: { label: 'Vision token', icon: 'eye', handheld: true, shape: 'none', animation: 'steady', radius: 0, color: '#9ad0ff', intensity: 0, vision: false, visionRange: 1 },
 }
 
 /** A light's flicker settings (flickering lights only). */

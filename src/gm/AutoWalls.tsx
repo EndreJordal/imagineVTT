@@ -1,6 +1,8 @@
+import { mapNatural } from '../shared/geometry'
 import { useEffect, useRef, useState } from 'react'
 import { useGm } from './store'
 import type { WallDetectRequest, WallDetectResponse } from './wallDetect.worker'
+import { Icon } from './icons'
 
 type Status = { kind: 'idle' } | { kind: 'running' } | { kind: 'done'; walls: number; doors: number } | { kind: 'error'; message: string }
 
@@ -24,7 +26,8 @@ export function AutoWalls() {
       existing > 0 &&
       confirm(`Replace the ${existing} existing walls and doors? Cancel keeps them and adds the new ones.`)
     // The scene grid in the image's own pixels.
-    const k = map.width / map.naturalWidth
+    const natural = mapNatural(map)
+    const k = map.width / natural.width
     const grid = {
       period: scene.grid.size / k,
       phaseX: (scene.grid.offsetX - map.x) / k,
@@ -47,7 +50,13 @@ export function AutoWalls() {
       w.terminate()
       setStatus({ kind: 'error', message: e.message })
     }
-    w.postMessage({ image: mapImage, width: map.naturalWidth, height: map.naturalHeight, grid } satisfies WallDetectRequest)
+    w.postMessage({
+      image: mapImage,
+      width: map.naturalWidth,
+      height: map.naturalHeight,
+      turns: map.turns ?? 0,
+      grid,
+    } satisfies WallDetectRequest)
   }
 
   if (!hasMap || !image) return null
@@ -58,7 +67,7 @@ export function AutoWalls() {
         disabled={status.kind === 'running'}
         title="Find walls and doors on the map (experimental). Match the grid to the map first."
       >
-        {status.kind === 'running' ? 'Finding walls…' : '✨ Auto walls (beta)'}
+        <Icon name="auto-walls" /> {status.kind === 'running' ? 'Finding walls…' : 'Auto walls (beta)'}
       </button>
       {status.kind === 'done' && (
         <p className="hint">

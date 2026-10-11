@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { emitsLight, flickerOf, isDirectional, LIGHT_PRESETS, type Flicker, type Light } from '../shared/lights'
 import { useGm } from './store'
 import { Slider } from './ui'
+import { Icon, LightKindIcon } from './icons'
 
 /**
  * Floating panel for configuring the selected light(s). With several selected, a change
@@ -55,18 +56,25 @@ export function LightPanel() {
         <span className="light-panel-title">
           {single ? (
             <>
-              {single.icon} {single.label}
-              {single.handheld && <span title="Hand-held: meant to be moved"> ✋</span>}
+              <LightKindIcon icon={single.icon} /> {single.label}
+              {single.handheld && (
+                <span title="Hand-held: meant to be moved">
+                  {' '}
+                  <Icon name="hand-held" size={14} />
+                </span>
+              )}
             </>
           ) : (
             <>
-              {[...new Set(lights.map((l) => LIGHT_PRESETS[l.kind].icon))].join('')} {lights.length} lights
-              selected
+              {[...new Set(lights.map((l) => LIGHT_PRESETS[l.kind].icon))].map((icon) => (
+                <LightKindIcon key={icon} icon={icon} />
+              ))}{' '}
+              {lights.length} lights selected
             </>
           )}
         </span>
         <button className="icon-button" title="Close" onClick={() => selectLight(null)}>
-          ✕
+          <Icon name="close" />
         </button>
       </header>
 

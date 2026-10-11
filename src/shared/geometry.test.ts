@@ -9,8 +9,13 @@ import {
   mapScaleForCorner,
   pointInPolygon,
   tableScale,
+  clampViewZoom,
   tableViewCorners,
   upMarker,
+  mapNatural,
+  mapPivot,
+  turnPoint,
+  turnRect,
 } from './geometry'
 import type { Display, Scene } from './types'
 
@@ -173,5 +178,58 @@ describe('pointInPolygon', () => {
   it('detects inside and outside', () => {
     expect(pointInPolygon({ x: 5, y: 5 }, square)).toBe(true)
     expect(pointInPolygon({ x: 15, y: 5 }, square)).toBe(false)
+  })
+})
+
+describe('turning the map', () => {
+  const grid = { size: 100, offsetX: 0, offsetY: 0, visible: true, color: '#000000', opacity: 1 }
+
+  it('turns points clockwise on screen (y down)', () => {
+    expect(turnPoint({ x: 10, y: 0 }, { x: 0, y: 0 }, 1)).toEqual({ x: 0, y: 10 })
+    expect(turnPoint({ x: 10, y: 0 }, { x: 0, y: 0 }, -1)).toEqual({ x: 0, y: -10 })
+    expect(turnPoint({ x: 3, y: 4 }, { x: 1, y: 1 }, 4)).toEqual({ x: 3, y: 4 })
+  })
+
+  it('turns a rect into the same area, turned', () => {
+    expect(turnRect({ x: 0, y: 0, width: 400, height: 200 }, { x: 200, y: 100 }, 1)).toEqual({
+      x: 100,
+      y: -100,
+      width: 200,
+      height: 400,
+    })
+  })
+
+  it('turns about the grid intersection nearest the centre, keeping a gridded map on the grid', () => {
+    // 5 x 2 squares, on grid lines: its centre (250, 100) is mid-square on x.
+    const map = { x: 0, y: 0, width: 500, height: 200 }
+    const pivot = mapPivot(map, grid)
+    expect(pivot.y).toBe(100)
+    expect([200, 300]).toContain(pivot.x)
+    const turned = turnRect(map, pivot, 1)
+    for (const v of [turned.x, turned.y]) expect(Math.abs(v % 100)).toBe(0)
+  })
+
+  it("swaps the image's shown size when turned a quarter", () => {
+    const map = { x: 0, y: 0, width: 10, height: 20, naturalWidth: 100, naturalHeight: 200 }
+    expect(mapNatural(map)).toEqual({ width: 100, height: 200 })
+    expect(mapNatural({ ...map, turns: 1 })).toEqual({ width: 200, height: 100 })
+    expect(mapNatural({ ...map, turns: 2 })).toEqual({ width: 100, height: 200 })
+  })
+})
+
+describe('table zoom', () => {
+  const scene = { grid: { size: 100 }, squareMm: 25.4 } as Scene
+  const display = { pxPerMm: 4 } as Display
+
+  it('scales the table view: less than 1 shows more of the map', () => {
+    expect(tableScale({ ...scene, viewZoom: 0.5 }, display)).toBeCloseTo(tableScale(scene, display) / 2)
+  })
+
+  it('keeps zoom within limits, and snaps to true scale near it', () => {
+    expect(clampViewZoom(0.98)).toBe(1)
+    expect(clampViewZoom(1.03)).toBe(1)
+    expect(clampViewZoom(0.5)).toBe(0.5)
+    expect(clampViewZoom(0)).toBeGreaterThan(0)
+    expect(clampViewZoom(100)).toBeLessThan(100)
   })
 })

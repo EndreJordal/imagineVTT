@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
-import { tableScale } from '../shared/geometry'
+import { mapNatural, tableScale } from '../shared/geometry'
 import { AssetsSection } from './Assets'
+import { CurtainSection } from './Curtain'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
@@ -8,6 +9,7 @@ import { finite, positive, round } from './numbers'
 import { MM_PER_INCH, useGm } from './store'
 import { openTableWindow } from './tableWindow'
 import { Field, Section, Slider } from './ui'
+import { Icon } from './icons'
 
 async function readImage(file: File) {
   const bitmap = await createImageBitmap(file)
@@ -53,14 +55,14 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 title={map.lockToGrid ? 'Unlock from grid to rescale' : "Scale the map to the table view's width"}
                 onClick={() => s.fitMapToView('x')}
               >
-                ↔ Fit width
+                <Icon name="fit-width" /> Fit width
               </button>
               <button
                 disabled={!!map.lockToGrid}
                 title={map.lockToGrid ? 'Unlock from grid to rescale' : "Scale the map to the table view's height"}
                 onClick={() => s.fitMapToView('y')}
               >
-                ↕ Fit height
+                <Icon name="fit-height" /> Fit height
               </button>
             </div>
             <div className="row">
@@ -70,7 +72,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 title="Stop dragging from moving the map left/right"
                 onClick={() => s.setMapLock('x', !map.lockX)}
               >
-                {map.lockX ? '🔒' : '🔓'} Lock X
+                <Icon name={map.lockX ? 'locked' : 'unlocked'} /> Lock X
               </button>
               <button
                 className={map.lockY ? 'active' : ''}
@@ -78,12 +80,13 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 title="Stop dragging from moving the map up/down"
                 onClick={() => s.setMapLock('y', !map.lockY)}
               >
-                {map.lockY ? '🔒' : '🔓'} Lock Y
+                <Icon name={map.lockY ? 'locked' : 'unlocked'} /> Lock Y
               </button>
             </div>
           </>
         )}
       </Section>
+      <CurtainSection />
 
       <Section title="Map">
         <input
@@ -104,7 +107,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 min={5}
                 disabled={!!map.lockToGrid}
                 title={map.lockToGrid ? 'Unlock from grid to change the scale' : undefined}
-                value={round((map.width / map.naturalWidth) * 100, 1)}
+                value={round((map.width / mapNatural(map).width) * 100, 1)}
                 onChange={(e) => positive(e.target.valueAsNumber, (pct) => s.setMapScale(pct / 100))}
               />
             </Field>
@@ -115,6 +118,20 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 ? 'Locked to the grid: dragging the map moves the grid with it.'
                 : 'Drag the map to move it, or its blue corner to resize.'}
             </p>
+            <div className="row">
+              <button
+                onClick={() => s.turnMap(-1)}
+                title="Turn the map a quarter turn anticlockwise, with its walls, lights, objects and explored areas"
+              >
+                <Icon name="turn-left" /> Turn left
+              </button>
+              <button
+                onClick={() => s.turnMap(1)}
+                title="Turn the map a quarter turn clockwise, with its walls, lights, objects and explored areas"
+              >
+                <Icon name="turn-right" /> Turn right
+              </button>
+            </div>
             <button onClick={() => s.setMap(null, null)}>Remove map</button>
           </>
         )}
@@ -159,7 +176,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
               title="Keep the map matched to the grid: they move and scale together"
               onClick={() => s.setMapLockToGrid(!map.lockToGrid)}
             >
-              {map.lockToGrid ? '🔒' : '🔓'} Lock to grid
+              <Icon name={map.lockToGrid ? 'locked' : 'unlocked'} /> Lock to grid
             </button>
           </>
         )}

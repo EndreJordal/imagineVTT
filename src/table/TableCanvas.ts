@@ -1,6 +1,8 @@
 import { Container, Graphics, Text } from 'pixi.js'
+import { CurtainLayer } from '../render/CurtainLayer'
 import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
+import type { CurtainState } from '../shared/curtain'
 import { CALIBRATION_MM, tableTransform } from '../shared/geometry'
 import type { FogMemory } from '../shared/fog'
 import type { AssetImages } from '../shared/mapObjects'
@@ -10,6 +12,9 @@ import type { TableState } from '../shared/types'
 export class TableCanvas extends PixiHost {
   private sceneLayer = new SceneLayer()
   private calibration = new Container()
+  private curtain = new CurtainLayer()
+  private curtainState: CurtainState | null = null
+  private curtainImages: Record<string, Blob> = {}
   private state: TableState | null = null
   private image: Blob | null = null
   private fogMemory: FogMemory | null = null
@@ -19,8 +24,10 @@ export class TableCanvas extends PixiHost {
   }
 
   protected setup() {
-    this.app.stage.addChild(this.sceneLayer, this.calibration)
+    this.app.stage.addChild(this.sceneLayer, this.curtain, this.calibration)
     this.sceneLayer.onChange = () => this.requestRender()
+    this.curtain.onChange = () => this.requestRender()
+    this.updateCurtain()
     this.app.renderer.on('resize', () => this.render())
     void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
@@ -44,17 +51,34 @@ export class TableCanvas extends PixiHost {
     this.requestRender()
   }
 
+  /** The curtain: a picture over the map (only on the table). */
+  setCurtain(state: CurtainState) {
+    this.curtainState = state
+    this.updateCurtain()
+  }
+
+  setCurtainImages(images: Record<string, Blob>) {
+    this.curtainImages = images
+    this.updateCurtain()
+  }
+
+  private updateCurtain() {
+    if (this.ready && this.curtainState) this.curtain.set(this.curtainState, this.curtainImages)
+    this.requestRender()
+  }
+
   setMapImage(image: Blob | null) {
     this.image = image
     if (this.ready) void this.sceneLayer.setMapImage(image).then(() => this.requestRender())
   }
 
   protected override isAnimating() {
-    return this.sceneLayer.isAnimating()
+    return this.sceneLayer.isAnimating() || this.curtain.animated
   }
 
   protected override beforeRender(seconds: number) {
     this.sceneLayer.animate(this.app.renderer, seconds)
+    this.curtain.animate(seconds)
   }
 
   private render() {
@@ -62,6 +86,7 @@ export class TableCanvas extends PixiHost {
     if (!this.ready || !this.state) return
     const { scene, display, calibrating } = this.state
     const screen = this.app.screen
+    this.curtain.resize(screen.width, screen.height)
 
     this.sceneLayer.visible = !calibrating
     this.sceneLayer.update(scene, 'players')

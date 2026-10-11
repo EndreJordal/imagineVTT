@@ -1,5 +1,6 @@
 import { useGm } from './store'
 import { Slider } from './ui'
+import { Icon } from './icons'
 
 /** Floating panel for the selected object: size, rotation, order, removal. */
 export function ObjectPanel() {
@@ -15,7 +16,7 @@ export function ObjectPanel() {
       <header>
         <span className="light-panel-title">{object.name}</span>
         <button className="icon-button" title="Close" onClick={() => selectObject(null)}>
-          ✕
+          <Icon name="close" />
         </button>
       </header>
       <Slider

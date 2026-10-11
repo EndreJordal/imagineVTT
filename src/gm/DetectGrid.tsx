@@ -1,8 +1,10 @@
+import { mapNatural } from '../shared/geometry'
 import { useEffect, useRef, useState } from 'react'
 import { MIN_CONFIDENCE } from '../shared/gridDetect'
 import type { MapInfo } from '../shared/types'
 import type { DetectRequest, DetectResponse } from './gridDetect.worker'
 import { useGm } from './store'
+import { Icon } from './icons'
 
 type Status =
   | { kind: 'idle' }
@@ -41,8 +43,8 @@ export function DetectGrid() {
       useGm.getState().alignMapToGrid(d)
       setStatus({
         kind: 'found',
-        cols: previous.naturalWidth / d.period,
-        rows: previous.naturalHeight / d.period,
+        cols: mapNatural(previous).width / d.period,
+        rows: mapNatural(previous).height / d.period,
         period: d.period,
         confidence: d.confidence,
         previous,
@@ -56,6 +58,7 @@ export function DetectGrid() {
       image: mapImage,
       width: previous.naturalWidth,
       height: previous.naturalHeight,
+      turns: previous.turns ?? 0,
     }
     w.postMessage(request)
   }
@@ -63,7 +66,7 @@ export function DetectGrid() {
   return (
     <>
       <button onClick={detect} disabled={status.kind === 'running'}>
-        {status.kind === 'running' ? 'Detecting grid…' : '⌗ Detect grid'}
+        <Icon name="detect-grid" /> {status.kind === 'running' ? 'Detecting grid…' : 'Detect grid'}
       </button>
       {status.kind === 'found' && (
         <>

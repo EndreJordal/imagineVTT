@@ -5,7 +5,7 @@ import {
   sceneNameFromFile,
   writeSceneFile,
 } from '../shared/sceneFile'
-import { useGm } from './store'
+import { allLevels, levelFogMemory, levelImage, useGm } from './store'
 
 /**
  * Saving and opening scene files. Where the browser can write files (Chrome, Edge), the
@@ -45,8 +45,11 @@ export async function saveScene(saveAs = false) {
     scene: s.scene,
     orientation: s.display.orientation,
     camera: s.gmCamera,
-    mapImage: s.mapImage,
-    fogMemory: s.fogMemory,
+    levels: allLevels(s),
+    levelId: s.levelId,
+    tableLevelId: s.tableLevelId,
+    mapImages: Object.fromEntries(s.levels.map((l) => [l.id, levelImage(s, l.id)])),
+    fogMemories: Object.fromEntries(s.levels.map((l) => [l.id, levelFogMemory(s, l.id)])),
     objectImages: s.objectImages,
   })
   const suggestedName = `${s.sceneName ?? 'Untitled scene'}${SCENE_FILE_EXTENSION}`

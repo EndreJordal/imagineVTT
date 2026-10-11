@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { isParty } from '../shared/levels'
+import type { Point } from '../shared/types'
 import { GmCanvas } from './GmCanvas'
 import { LightPanel } from './LightPanel'
 import { ASSET_DRAG_TYPE, initAssetLibrary, placeAsset } from './assetLibrary'
@@ -8,9 +10,12 @@ import { PlacementHint } from './PlacementHint'
 import { openDroppedScene, openScene, saveScene } from './sceneFiles'
 import { GmNotice } from './GmNotice'
 import { DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
+import { HideToolbox } from './Hide'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
-import { gmDarkness, hydrate, tableState, useGm } from './store'
+import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
+import { gmDarkness, hydrate, levelImage, useGm } from './store'
+import { Floors } from './Floors'
 import { startGmSync } from './sync'
 import { redo, startHistory, undo } from './history'
 import { ToolPalette } from './ToolPalette'
@@ -28,7 +33,29 @@ function confirmTool() {
     gm.setBuildingDoors(false)
   } else if (gm.placingLight) {
     gm.setPlacingLight(null)
+  } else if (gm.hideTool) {
+    gm.setHideTool(null)
   }
+}
+
+/** Hide-areas dropper: fill (or reveal) the space clicked, or say why it can't. */
+function hideFill(p: Point) {
+  const gm = useGm.getState()
+  const result = gm.hideFill(p)
+  if (result === 'open') {
+    gm.notify("That space isn't closed in by walls and doors: close the gap, or hide it with the brush.")
+  } else if (result === 'on-wall') {
+    gm.notify('Click inside the space, not on its wall.')
+  }
+}
+
+/** The floor below the one viewed, faint over it, to line maps up (onion skin). */
+function onionOf(s: ReturnType<typeof useGm.getState>) {
+  if (!s.onionSkin) return null
+  const i = s.levels.findIndex((l) => l.id === s.levelId)
+  const below = i > 0 ? s.levels[i - 1] : null
+  const image = below && levelImage(s, below.id)
+  return below?.map && image ? { image, map: below.map } : null
 }
 
 export function GmApp() {
@@ -40,8 +67,10 @@ export function GmApp() {
     let cancelled = false
     let stop: (() => void) | undefined
     let stopHistory: (() => void) | undefined
-    void hydrate().then(() => {
-      if (cancelled) return
+    let stopCurtain: (() => void) | undefined
+    void Promise.all([hydrate(), hydrateCurtain()]).then(([, saveCurtain]) => {
+      if (cancelled) return saveCurtain()
+      stopCurtain = saveCurtain
       stop = startGmSync()
       stopHistory = startHistory()
       void initAssetLibrary()
@@ -51,6 +80,7 @@ export function GmApp() {
       cancelled = true
       stop?.()
       stopHistory?.()
+      stopCurtain?.()
     }
   }, [])
 
@@ -58,6 +88,9 @@ export function GmApp() {
     if (!hydrated || !hostRef.current) return
     const canvas = new GmCanvas(hostRef.current, {
       onViewMove: (view, force) => useGm.getState().setView(view, !force),
+      onViewZoom: (zoom) => useGm.getState().setViewZoom(zoom),
+      onHideFill: hideFill,
+      onHidePaint: (from, to, erase) => useGm.getState().hidePaint(from, to, erase),
       onMapResize: (scale) => useGm.getState().setMapScale(scale),
       onMapMove: (position) => useGm.getState().setMapPosition(position),
       onLightMove: (id, to, force) => {
@@ -109,8 +142,14 @@ export function GmApp() {
         canvas.setCamera(s.gmCamera)
       }
       canvas.setMapImage(s.mapImage)
-      // The GM's view has its own darkness (GM vision); the table's state is untouched.
-      const state = tableState(s)
+      // The GM views their floor (which may not be the table's), with their own darkness
+      // (GM vision); the table's state is untouched.
+      // Preparing another floor: the party (on the table's floor) shows on it too, lighting
+      // and seeing as it will once this floor is on the table, to line them up with it.
+      const tableFloor = s.levelId === s.tableLevelId ? null : s.levels.find((l) => l.id === s.tableLevelId)
+      const party = tableFloor?.lights.filter(isParty) ?? []
+      const scene = party.length ? { ...s.scene, lights: [...s.scene.lights, ...party] } : s.scene
+      const state = { scene, display: s.display, calibrating: s.calibrating }
       const darkness = gmDarkness(s)
       const shown = darkness === state.scene.darkness ? state : { ...state, scene: { ...state.scene, darkness } }
       canvas.update(shown, {
@@ -124,15 +163,22 @@ export function GmApp() {
         wallDraft: s.wallDraft,
         selectedWallPoints: s.selectedWallPoints,
         selectedObjectIds: s.selectedObjectIds,
+        onion: onionOf(s),
         buildingDoors: s.buildingDoors,
         doorDraft: s.doorDraft,
+        curtainDown: useCurtain.getState().state.down,
+        ghostLightIds: party.map((l) => l.id),
+        hideTool: s.hideTool,
+        hideBrush: s.hideBrush,
       })
       canvas.setFogMemory(s.fogMemory, s.fogVersion)
     }
     push()
     const unsubscribe = useGm.subscribe((s) => push(s))
+    const unsubscribeCurtain = useCurtain.subscribe((c, prev) => c.state.down !== prev.state.down && push())
     return () => {
       unsubscribe()
+      unsubscribeCurtain()
       canvas.destroy()
       canvasRef.current = null
     }
@@ -142,7 +188,7 @@ export function GmApp() {
   // - building walls: Enter confirms, Esc cancels the points (or stops building), Backspace
   //   takes back the last point
   // - Esc cancels light placement; Delete / Backspace removes the selected lights
-  // - hold V to peek at the players' view
+  // - hold V to peek at the players' view; C drops or raises the curtain
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Scene files: Ctrl+S save, Ctrl+Shift+S save as, Ctrl+O open (even while typing).
@@ -176,8 +222,13 @@ export function GmApp() {
         if (!e.repeat) useGm.getState().setPeeking(true)
         return
       }
+      // C drops or raises the curtain.
+      if (e.key.toLowerCase() === 'c' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+        void toggleCurtain()
+        return
+      }
       const gm = useGm.getState()
-      if (e.key === 'Enter' && !typing && (gm.buildingWalls || gm.buildingDoors || gm.placingLight)) {
+      if (e.key === 'Enter' && !typing && (gm.buildingWalls || gm.buildingDoors || gm.placingLight || gm.hideTool)) {
         confirmTool()
         return
       }
@@ -196,6 +247,10 @@ export function GmApp() {
       if (gm.buildingDoors && !typing && e.key === 'Escape') {
         if (gm.doorDraft) gm.cancelDoorDraft()
         else gm.setBuildingDoors(false)
+        return
+      }
+      if (e.key === 'Escape' && gm.hideTool && !typing) {
+        gm.setHideTool(null)
         return
       }
       if (e.key === 'Escape' && useGm.getState().placingLight) {
@@ -261,9 +316,11 @@ export function GmApp() {
             }}
           />
           <ToolPalette />
+          <Floors />
           <div className="side-panels">
             <WallToolbox />
             <DoorToolbox />
+            <HideToolbox />
             <WallPointsPanel />
             <LightPanel />
             <ObjectPanel />

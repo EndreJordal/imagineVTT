@@ -1,5 +1,6 @@
 import { zipSync, strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
+import { extractLevel } from './levels'
 import { readSceneFile, SceneFileError, writeSceneFile, type SceneFile } from './sceneFile'
 import type { Scene } from './types'
 
@@ -16,13 +17,19 @@ const scene: Scene = {
 }
 
 const frames = { count: 4, cols: 2, rows: 2, fps: 30, frameWidth: 64, frameHeight: 64, pad: 2 }
+const ground = extractLevel(scene, { id: 'g', name: 'Ground' })
+const roof = { ...extractLevel(scene, { id: 'r', name: 'Roof' }), map: null, walls: [], objects: [], darkness: 0 }
+const jpeg = () => new Blob([new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])], { type: 'image/jpeg' })
 
 const sample = (): SceneFile => ({
   scene,
+  levels: [ground, roof],
+  levelId: 'r',
+  tableLevelId: 'g',
+  mapImages: { g: jpeg(), r: null },
+  fogMemories: { g: { cols: 4, rows: 2, data: new Uint8Array([0, 255, 128, 0, 0, 0, 255, 255]) }, r: null },
   orientation: 90,
   camera: { x: 500, y: 300, zoom: 0.4 },
-  mapImage: new Blob([new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])], { type: 'image/jpeg' }),
-  fogMemory: { cols: 4, rows: 2, data: new Uint8Array([0, 255, 128, 0, 0, 0, 255, 255]) },
   objectImages: {
     'Fantasy/Objects/Fire/Brazier': { image: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' }), width: 512, height: 512, frames },
     // Not shown by any object: not saved.
@@ -31,23 +38,41 @@ const sample = (): SceneFile => ({
 })
 
 describe('scene files', () => {
-  it('round-trips everything a scene holds', async () => {
+  it('round-trips every floor, with its map and fog, and the shared settings', async () => {
     const back = await readSceneFile(await writeSceneFile(sample()))
     expect(back.scene).toEqual(scene)
+    expect(back.levels).toEqual([ground, roof])
+    expect([back.levelId, back.tableLevelId]).toEqual(['r', 'g'])
     expect(back.orientation).toBe(90)
     expect(back.camera).toEqual({ x: 500, y: 300, zoom: 0.4 })
-    expect(back.mapImage?.type).toBe('image/jpeg')
-    expect([...new Uint8Array(await back.mapImage!.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])
-    expect(back.fogMemory).toEqual(sample().fogMemory)
+    expect(back.mapImages.g?.type).toBe('image/jpeg')
+    expect([...new Uint8Array(await back.mapImages.g!.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])
+    expect(back.mapImages.r ?? null).toBeNull()
+    expect(back.fogMemories.g).toEqual(sample().fogMemories.g)
     expect(Object.keys(back.objectImages)).toEqual(['Fantasy/Objects/Fire/Brazier'])
     const img = back.objectImages['Fantasy/Objects/Fire/Brazier']
     expect([img.width, img.height, img.frames, img.image.type]).toEqual([512, 512, frames, 'image/webp'])
     expect([...new Uint8Array(await img.image.arrayBuffer())]).toEqual([1, 2, 3])
   })
 
-  it('saves a scene without a map or fog', async () => {
-    const back = await readSceneFile(await writeSceneFile({ ...sample(), mapImage: null, fogMemory: null }))
-    expect([back.mapImage, back.fogMemory]).toEqual([null, null])
+  it('opens version 1 files (one map) as one floor', async () => {
+    const v1 = {
+      format: 'imaginevtt-scene',
+      version: 1,
+      scene,
+      orientation: 0,
+      camera: null,
+      map: { file: 'map.jpg', type: 'image/jpeg' },
+      fog: { cols: 1, rows: 1 },
+    }
+    const zip = zipSync({ 'scene.json': strToU8(JSON.stringify(v1)), 'map.jpg': new Uint8Array([7]), 'fog.bin': new Uint8Array([255]) })
+    const back = await readSceneFile(new Blob([zip]))
+    expect(back.levels).toHaveLength(1)
+    const [level] = back.levels
+    expect([back.levelId, back.tableLevelId]).toEqual([level.id, level.id])
+    expect(level.walls).toEqual(scene.walls)
+    expect(back.mapImages[level.id]?.type).toBe('image/jpeg')
+    expect(back.fogMemories[level.id]?.data).toEqual(new Uint8Array([255]))
   })
 
   it('rejects files that are not scenes, or from a newer version', async () => {

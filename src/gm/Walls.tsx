@@ -1,6 +1,7 @@
 import { selectedSegment } from '../shared/walls'
 import { AutoWalls } from './AutoWalls'
 import { useGm } from './store'
+import { Icon } from './icons'
 
 /** Selection box for wall points: how many, and delete them. */
 export function WallPointsPanel() {
@@ -12,7 +13,7 @@ export function WallPointsPanel() {
     <aside className="light-panel" aria-label="Selected wall points">
       <header>
         <span className="light-panel-title">
-          🧱 {count} wall point{count === 1 ? '' : 's'} selected
+          <Icon name="walls" /> {count} wall point{count === 1 ? '' : 's'} selected
         </span>
       </header>
       <p className="hint">Drag a point to move them. Deleting cuts the walls there.</p>
@@ -21,7 +22,7 @@ export function WallPointsPanel() {
       </button>
       {canConvert && (
         <button title="Turn the wall between these two points into a door" onClick={() => convertToDoor(selectedWallPoints)}>
-          🚪 Convert wall points to door
+          <Icon name="doors" /> Convert wall points to door
         </button>
       )}
     </aside>
@@ -38,9 +39,11 @@ export function DoorToolbox() {
   return (
     <aside className="light-panel wall-toolbox" aria-label="Door building">
       <header>
-        <span className="light-panel-title">🚪 Building doors</span>
+        <span className="light-panel-title">
+          <Icon name="doors" /> Building doors
+        </span>
         <button className="icon-button" title="Stop building doors" onClick={() => setBuildingDoors(false)}>
-          ✕
+          <Icon name="close" />
         </button>
       </header>
       <p className="hint">
@@ -73,9 +76,11 @@ export function WallToolbox() {
   return (
     <aside className="light-panel wall-toolbox" aria-label="Wall building">
       <header>
-        <span className="light-panel-title">🧱 Building walls</span>
+        <span className="light-panel-title">
+          <Icon name="walls" /> Building walls
+        </span>
         <button className="icon-button" title="Stop building walls" onClick={() => setBuildingWalls(false)}>
-          ✕
+          <Icon name="close" />
         </button>
       </header>
       <p className="hint">Click to add wall points; the red dot shows where the next one goes.</p>

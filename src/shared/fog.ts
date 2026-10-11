@@ -25,6 +25,21 @@ export interface Viewer {
   reach?: Rect
 }
 
+/** The memory turned `turns` quarter turns clockwise, along with the map it covers. */
+export function turnFogMemory(memory: FogMemory, turns: number): FogMemory {
+  let m = memory
+  for (let i = 0; i < (((turns % 4) + 4) % 4); i++) {
+    const { cols, rows, data } = m
+    // Cell (x, y) goes to (rows - 1 - y, x) in a grid `rows` wide.
+    const out = new Uint8Array(data.length)
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) out[x * rows + (rows - 1 - y)] = data[y * cols + x]
+    }
+    m = { cols: rows, rows: cols, data: out }
+  }
+  return m
+}
+
 export function createFogMemory(bounds: Size): FogMemory {
   const k = FOG_RESOLUTION / Math.max(bounds.width, bounds.height)
   const cols = Math.max(1, Math.round(bounds.width * k))
@@ -51,7 +66,7 @@ export function visionFalloff(d: number): number {
 }
 
 /** Record what the viewers see into memory. Returns whether anything new was seen. */
-export function stampVision(memory: FogMemory, bounds: Rect, viewers: Viewer[]): boolean {
+export function stampVision(memory: FogMemory, bounds: Rect, viewers: Viewer[], hidden?: Uint8Array | null): boolean {
   const { cols, rows, data } = memory
   const sx = cols / bounds.width
   const sy = rows / bounds.height
@@ -79,6 +94,7 @@ export function stampVision(memory: FogMemory, bounds: Rect, viewers: Viewer[]):
       for (let x = x0; x <= x1; x++) {
         const i = y * cols + x
         if (data[i] === 255) continue // already fully remembered: nothing to add
+        if (hidden?.[i]) continue // hidden by the GM: not seen, so not remembered
         const dx = (x + 0.5 - cx) / rx
         const value = Math.round(255 * visionFalloff(Math.hypot(dx, dy)))
         if (value <= data[i]) continue

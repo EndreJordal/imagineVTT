@@ -1,20 +1,23 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import type { FogMemory } from './fog'
+import { extractLevel, type Level } from './levels'
 import type { AssetImage, AssetImages } from './mapObjects'
 import type { Orientation, Scene } from './types'
 
 /**
  * Scene files (.ivtt): a zip with
- * - scene.json: the scene, PVB orientation and GM camera, plus a format tag and version
- * - map.<ext>: the original map image, byte for byte
- * - fog.bin: fog memory (what the party has explored), if any
+ * - scene.json: the floors, the shared scene settings, PVB orientation and GM camera, plus
+ *   a format tag and version
+ * - maps/<n>.<ext>: each floor's original map image, byte for byte
+ * - fog/<n>.bin: each floor's fog memory (what the party has explored), if any
  * - assets/<n>.<ext>: the images of the objects placed (so the file needs no asset library)
  *
+ * Version 1 files (one map, map.<ext> and fog.bin) open as a scene with one floor.
  * Calibration (a property of the TV) and GM preferences are not part of a scene.
  */
 export const SCENE_FILE_EXTENSION = '.ivtt'
 const FORMAT = 'imaginevtt-scene'
-const VERSION = 1
+const VERSION = 2
 
 /** The GM's view: the scene point at the centre of the view, and the zoom. */
 export interface GmCamera {
@@ -24,11 +27,17 @@ export interface GmCamera {
 }
 
 export interface SceneFile {
+  /** The shared settings, showing the floor that was being viewed (levelId). */
   scene: Scene
+  /** All floors, in order. */
+  levels: Level[]
+  levelId: string
+  tableLevelId: string
+  /** Per floor: map image and fog memory. */
+  mapImages: Record<string, Blob | null>
+  fogMemories: Record<string, FogMemory | null>
   orientation: Orientation
   camera: GmCamera | null
-  mapImage: Blob | null
-  fogMemory: FogMemory | null
   /** Images of the assets the scene's objects show. */
   objectImages: AssetImages
 }
@@ -39,8 +48,15 @@ interface SceneJson {
   scene: Scene
   orientation: Orientation
   camera: GmCamera | null
-  map: { file: string; type: string } | null
-  fog: { cols: number; rows: number } | null
+  /** Version 2. */
+  levels?: Level[]
+  levelId?: string
+  tableLevelId?: string
+  maps?: Record<string, { file: string; type: string }>
+  fogs?: Record<string, { file: string; cols: number; rows: number }>
+  /** Version 1: the one map and fog. */
+  map?: { file: string; type: string } | null
+  fog?: { cols: number; rows: number } | null
   /** Asset key -> image file in the zip, and its other details. */
   assets?: Record<string, Omit<AssetImage, 'image'> & { file: string; type: string }>
 }
@@ -53,24 +69,36 @@ const EXTENSIONS: Record<string, string> = {
   'image/avif': 'avif',
 }
 
+const ext = (blob: Blob) => EXTENSIONS[blob.type] ?? 'bin'
+
 export async function writeSceneFile(s: SceneFile): Promise<Blob> {
+  // Images are already compressed: store them as-is rather than deflating again.
   const files: Record<string, Uint8Array | [Uint8Array, { level: 0 }]> = {}
-  let map: SceneJson['map'] = null
-  if (s.mapImage) {
-    const file = `map.${EXTENSIONS[s.mapImage.type] ?? 'bin'}`
-    // Images are already compressed: store them as-is rather than deflating again.
-    files[file] = [new Uint8Array(await s.mapImage.arrayBuffer()), { level: 0 }]
-    map = { file, type: s.mapImage.type }
+  const stored = async (blob: Blob) => [new Uint8Array(await blob.arrayBuffer()), { level: 0 }] as [Uint8Array, { level: 0 }]
+  const maps: NonNullable<SceneJson['maps']> = {}
+  const fogs: NonNullable<SceneJson['fogs']> = {}
+  for (const [n, level] of s.levels.entries()) {
+    const image = s.mapImages[level.id]
+    if (image) {
+      const file = `maps/${n}.${ext(image)}`
+      files[file] = await stored(image)
+      maps[level.id] = { file, type: image.type }
+    }
+    const fog = s.fogMemories[level.id]
+    if (fog) {
+      const file = `fog/${n}.bin`
+      files[file] = fog.data
+      fogs[level.id] = { file, cols: fog.cols, rows: fog.rows }
+    }
   }
-  if (s.fogMemory) files['fog.bin'] = s.fogMemory.data
-  // Only the images objects actually show.
-  const used = new Set((s.scene.objects ?? []).map((o) => o.asset))
+  // Only the images objects actually show, on any floor.
+  const used = new Set(s.levels.flatMap((l) => l.objects ?? []).map((o) => o.asset))
   const assets: NonNullable<SceneJson['assets']> = {}
   let n = 0
   for (const [key, img] of Object.entries(s.objectImages)) {
     if (!used.has(key)) continue
-    const file = `assets/${n++}.${EXTENSIONS[img.image.type] ?? 'bin'}`
-    files[file] = [new Uint8Array(await img.image.arrayBuffer()), { level: 0 }]
+    const file = `assets/${n++}.${ext(img.image)}`
+    files[file] = await stored(img.image)
     const { image, ...rest } = img
     assets[key] = { ...rest, file, type: image.type }
   }
@@ -80,8 +108,11 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     scene: s.scene,
     orientation: s.orientation,
     camera: s.camera,
-    map,
-    fog: s.fogMemory && { cols: s.fogMemory.cols, rows: s.fogMemory.rows },
+    levels: s.levels,
+    levelId: s.levelId,
+    tableLevelId: s.tableLevelId,
+    maps,
+    fogs,
     assets,
   }
   files['scene.json'] = strToU8(JSON.stringify(json, null, 2))
@@ -110,23 +141,48 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
     throw new SceneFileError('This scene was saved by a newer version of imagineVTT.')
   }
 
-  const mapBytes = json.map && entries[json.map.file]
-  const fogBytes = entries['fog.bin']
+  // unzipSync returns plain ArrayBuffer-backed arrays, which is what Blob wants.
+  const blob = (name: string, type: string) =>
+    entries[name] ? new Blob([entries[name] as Uint8Array<ArrayBuffer>], { type }) : null
+  const fog = (name: string, cols: number, rows: number): FogMemory | null => {
+    const data = entries[name]
+    return data && data.length === cols * rows ? { cols, rows, data } : null
+  }
+
+  let levels: Level[]
+  let levelId: string
+  let tableLevelId: string
+  const mapImages: Record<string, Blob | null> = {}
+  const fogMemories: Record<string, FogMemory | null> = {}
+  if (json.levels?.length) {
+    levels = json.levels
+    levelId = json.levelId ?? levels[0].id
+    tableLevelId = json.tableLevelId ?? levelId
+    for (const [id, m] of Object.entries(json.maps ?? {})) mapImages[id] = blob(m.file, m.type)
+    for (const [id, f] of Object.entries(json.fogs ?? {})) fogMemories[id] = fog(f.file, f.cols, f.rows)
+  } else {
+    // Version 1: one map, which becomes the one floor.
+    const level = extractLevel(json.scene, { id: 'floor-1', name: 'Floor 1' })
+    levels = [level]
+    levelId = tableLevelId = level.id
+    mapImages[level.id] = json.map ? blob(json.map.file, json.map.type) : null
+    fogMemories[level.id] = json.fog ? fog('fog.bin', json.fog.cols, json.fog.rows) : null
+  }
+
   const objectImages: AssetImages = {}
   for (const [key, { file: name, type, ...rest }] of Object.entries(json.assets ?? {})) {
-    const bytes = entries[name]
-    if (bytes) objectImages[key] = { ...rest, image: new Blob([bytes as Uint8Array<ArrayBuffer>], { type }) }
+    const image = blob(name, type)
+    if (image) objectImages[key] = { ...rest, image }
   }
   return {
     scene: json.scene,
+    levels,
+    levelId,
+    tableLevelId,
+    mapImages,
+    fogMemories,
     orientation: json.orientation ?? 0,
     camera: json.camera ?? null,
-    // unzipSync returns plain ArrayBuffer-backed arrays, which is what Blob wants.
-    mapImage: json.map && mapBytes ? new Blob([mapBytes as Uint8Array<ArrayBuffer>], { type: json.map.type }) : null,
-    fogMemory:
-      json.fog && fogBytes && fogBytes.length === json.fog.cols * json.fog.rows
-        ? { cols: json.fog.cols, rows: json.fog.rows, data: fogBytes }
-        : null,
     objectImages,
   }
 }

@@ -4,6 +4,7 @@ import type { AssetImage } from '../shared/mapObjects'
 import { load, save } from '../shared/persist'
 import type { Point } from '../shared/types'
 import type { AssetImageRequest, AssetImageResponse } from './assetImage.worker'
+import { folderPicker as picker, type DirHandle, type FileHandle } from './folderAccess'
 import { useGm } from './store'
 
 /**
@@ -58,24 +59,6 @@ export const useAssets = create<LibraryState>()((set) => ({
   previewing: null,
   setPreviewing: (previewing) => set({ previewing }),
 }))
-
-// Folder access (File System Access API: in Chromium; not yet in TypeScript's DOM types).
-interface DirHandle {
-  kind: 'directory'
-  name: string
-  values(): AsyncIterable<DirHandle | FileHandle>
-  getDirectoryHandle(name: string): Promise<DirHandle>
-  getFileHandle(name: string): Promise<FileHandle>
-  queryPermission(o: { mode: 'read' }): Promise<PermissionState>
-  requestPermission(o: { mode: 'read' }): Promise<PermissionState>
-}
-interface FileHandle {
-  kind: 'file'
-  name: string
-  getFile(): Promise<File>
-}
-type Picker = (o: { id?: string; mode?: 'read' }) => Promise<DirHandle>
-const picker = () => (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker
 
 let folder: DirHandle | null = null
 

@@ -42,6 +42,12 @@ export function TableApp() {
         case 'assets':
           canvas.setObjectImages(msg.images)
           break
+        case 'curtain':
+          canvas.setCurtain(msg.state)
+          break
+        case 'curtain-images':
+          canvas.setCurtainImages(msg.images)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break

@@ -4,8 +4,9 @@ import { positive, round } from './numbers'
 import { Field } from './ui'
 import { useGm } from './store'
 import { useDropdown } from './useDropdown'
+import { Icon } from './icons'
 
-/** Toolbar ⚙ button: settings that rarely change (calibration, for now). */
+/** Toolbar settings button: settings that rarely change (calibration, for now). */
 export function SettingsMenu() {
   const { open, setOpen, root } = useDropdown()
   const s = useGm()
@@ -18,7 +19,7 @@ export function SettingsMenu() {
         title="Settings"
         onClick={() => setOpen(!open)}
       >
-        ⚙
+        <Icon name="settings" size={18} />
       </button>
       {open && (
         <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Settings">

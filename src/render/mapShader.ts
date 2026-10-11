@@ -37,9 +37,11 @@ uniform sampler2D uLightMask;
 uniform sampler2D uGlow;
 uniform sampler2D uVision;
 uniform sampler2D uMemory;
+uniform sampler2D uHidden;     // hidden areas, soft-edged (red), over the map's bounds
 
 uniform vec4 uBounds;          // scene x, y, width, height of the map
 uniform float uHasMap;
+uniform float uMapTurns;       // quarter turns clockwise the map image is shown at
 uniform vec3 uBackground;      // shown where there is no map image
 uniform vec4 uGrid;            // size, offset x, offset y, visible
 uniform vec4 uGridColor;       // rgb, opacity
@@ -51,6 +53,7 @@ uniform float uFogMode;        // 0 off, 1 players, 2 GM
 uniform vec2 uVisionUv;        // map uv -> sight map uv
 uniform float uMemoryBrightness;
 uniform float uGmShade;
+uniform float uHiddenMode;     // hidden areas: 0 none, 1 players (black), 2 GM (shaded)
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
@@ -75,6 +78,12 @@ vec3 shade(vec3 day, vec2 uv) {
     vec3 memory = vec3(dot(day, LUMA)) * uMemoryBrightness * texture(uMemory, uv).r;
     color = mix(memory, color, seen);
   }
+
+  // Hidden areas: black for the players whatever they see; shaded and tinted for the GM.
+  if (uHiddenMode > 0.5) {
+    float hidden = texture(uHidden, uv).r;
+    color = uHiddenMode > 1.5 ? mix(color, color * 0.3 + vec3(0.06, 0.02, 0.1), hidden) : color * (1.0 - hidden);
+  }
   return color;
 }
 `
@@ -87,9 +96,17 @@ out vec4 finalColor;
 uniform sampler2D uMap;
 ${shading}
 
+/** Where in the image a point of the (turned) map is. */
+vec2 imageUv(vec2 uv) {
+  if (uMapTurns < 0.5) return uv;
+  if (uMapTurns < 1.5) return vec2(uv.y, 1.0 - uv.x);
+  if (uMapTurns < 2.5) return 1.0 - uv;
+  return vec2(1.0 - uv.y, uv.x);
+}
+
 void main() {
   vec2 scene = uBounds.xy + vUV * uBounds.zw;
-  vec3 day = uHasMap > 0.5 ? texture(uMap, vUV).rgb : uBackground;
+  vec3 day = uHasMap > 0.5 ? texture(uMap, imageUv(vUV)).rgb : uBackground;
 
   // Grid lines, about one screen pixel wide at any zoom.
   if (uGrid.w > 0.5) {
@@ -126,6 +143,7 @@ void main() {
 export interface MapUniforms {
   uBounds: Float32Array
   uHasMap: number
+  uMapTurns: number
   uBackground: Float32Array
   uGrid: Float32Array
   uGridColor: Float32Array
@@ -137,18 +155,20 @@ export interface MapUniforms {
   uVisionUv: Float32Array
   uMemoryBrightness: number
   uGmShade: number
+  uHiddenMode: number
 }
 
 /** The light, sight and memory maps the shading reads (shared by the map and objects). */
-export type SharedTextureSlot = 'uLightMask' | 'uGlow' | 'uVision' | 'uMemory'
+export type SharedTextureSlot = 'uLightMask' | 'uGlow' | 'uVision' | 'uMemory' | 'uHidden'
 export type MapTextureSlot = 'uMap' | SharedTextureSlot
-export const SHARED_SLOTS: SharedTextureSlot[] = ['uLightMask', 'uGlow', 'uVision', 'uMemory']
+export const SHARED_SLOTS: SharedTextureSlot[] = ['uLightMask', 'uGlow', 'uVision', 'uMemory', 'uHidden']
 
 /** A unit quad (0..1) carrying the map shader; position and scale it to the map's bounds. */
 export function createMapMesh() {
   const group = new UniformGroup({
     uBounds: { value: new Float32Array(4), type: 'vec4<f32>' },
     uHasMap: { value: 0, type: 'f32' },
+    uMapTurns: { value: 0, type: 'f32' },
     uBackground: { value: new Float32Array([0x2a / 255, 0x2a / 255, 0x30 / 255]), type: 'vec3<f32>' },
     uGrid: { value: new Float32Array(4), type: 'vec4<f32>' },
     uGridColor: { value: new Float32Array(4), type: 'vec4<f32>' },
@@ -160,6 +180,7 @@ export function createMapMesh() {
     uVisionUv: { value: new Float32Array([1, 1]), type: 'vec2<f32>' },
     uMemoryBrightness: { value: 0.4, type: 'f32' },
     uGmShade: { value: 0.55, type: 'f32' },
+    uHiddenMode: { value: 0, type: 'f32' },
   })
   const empty = Texture.EMPTY.source
   const shader = Shader.from({
@@ -172,6 +193,7 @@ export function createMapMesh() {
       uGlow: empty,
       uVision: empty,
       uMemory: empty,
+      uHidden: empty,
     },
   })
   const geometry = new MeshGeometry({
@@ -212,6 +234,7 @@ export function createObjectMesh(mapGroup: UniformGroup) {
       uGlow: empty,
       uVision: empty,
       uMemory: empty,
+      uHidden: empty,
     },
   })
   const geometry = new MeshGeometry({

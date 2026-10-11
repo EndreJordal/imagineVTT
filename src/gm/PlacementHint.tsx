@@ -1,5 +1,6 @@
 import { LIGHT_PRESETS } from '../shared/lights'
 import { useGm } from './store'
+import { LightKindIcon } from './icons'
 
 /** Banner shown while a light is waiting to be placed. */
 export function PlacementHint() {
@@ -8,7 +9,7 @@ export function PlacementHint() {
   const { icon, label } = LIGHT_PRESETS[kind]
   return (
     <div className="placement-hint" role="status">
-      {icon} Click the map to place the {label.toLowerCase()} · <kbd>Shift</kbd>-click to place more ·{' '}
+      <LightKindIcon icon={icon} /> Click the map to place the {label.toLowerCase()} · <kbd>Shift</kbd>-click to place more ·{' '}
       <kbd>Enter</kbd> or right-click when done · <kbd>Esc</kbd> to cancel
     </div>
   )
