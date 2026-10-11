@@ -1,5 +1,6 @@
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import type { FogMemory } from './fog'
+import type { AssetImage, AssetImages } from './mapObjects'
 import type { Orientation, Scene } from './types'
 
 /**
@@ -7,6 +8,7 @@ import type { Orientation, Scene } from './types'
  * - scene.json: the scene, PVB orientation and GM camera, plus a format tag and version
  * - map.<ext>: the original map image, byte for byte
  * - fog.bin: fog memory (what the party has explored), if any
+ * - assets/<n>.<ext>: the images of the objects placed (so the file needs no asset library)
  *
  * Calibration (a property of the TV) and GM preferences are not part of a scene.
  */
@@ -27,6 +29,8 @@ export interface SceneFile {
   camera: GmCamera | null
   mapImage: Blob | null
   fogMemory: FogMemory | null
+  /** Images of the assets the scene's objects show. */
+  objectImages: AssetImages
 }
 
 interface SceneJson {
@@ -37,6 +41,8 @@ interface SceneJson {
   camera: GmCamera | null
   map: { file: string; type: string } | null
   fog: { cols: number; rows: number } | null
+  /** Asset key -> image file in the zip, and its other details. */
+  assets?: Record<string, Omit<AssetImage, 'image'> & { file: string; type: string }>
 }
 
 const EXTENSIONS: Record<string, string> = {
@@ -57,6 +63,17 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     map = { file, type: s.mapImage.type }
   }
   if (s.fogMemory) files['fog.bin'] = s.fogMemory.data
+  // Only the images objects actually show.
+  const used = new Set((s.scene.objects ?? []).map((o) => o.asset))
+  const assets: NonNullable<SceneJson['assets']> = {}
+  let n = 0
+  for (const [key, img] of Object.entries(s.objectImages)) {
+    if (!used.has(key)) continue
+    const file = `assets/${n++}.${EXTENSIONS[img.image.type] ?? 'bin'}`
+    files[file] = [new Uint8Array(await img.image.arrayBuffer()), { level: 0 }]
+    const { image, ...rest } = img
+    assets[key] = { ...rest, file, type: image.type }
+  }
   const json: SceneJson = {
     format: FORMAT,
     version: VERSION,
@@ -65,6 +82,7 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     camera: s.camera,
     map,
     fog: s.fogMemory && { cols: s.fogMemory.cols, rows: s.fogMemory.rows },
+    assets,
   }
   files['scene.json'] = strToU8(JSON.stringify(json, null, 2))
   return new Blob([zipSync(files)], { type: 'application/zip' })
@@ -94,6 +112,11 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
 
   const mapBytes = json.map && entries[json.map.file]
   const fogBytes = entries['fog.bin']
+  const objectImages: AssetImages = {}
+  for (const [key, { file: name, type, ...rest }] of Object.entries(json.assets ?? {})) {
+    const bytes = entries[name]
+    if (bytes) objectImages[key] = { ...rest, image: new Blob([bytes as Uint8Array<ArrayBuffer>], { type }) }
+  }
   return {
     scene: json.scene,
     orientation: json.orientation ?? 0,
@@ -104,6 +127,7 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
       json.fog && fogBytes && fogBytes.length === json.fog.cols * json.fog.rows
         ? { cols: json.fog.cols, rows: json.fog.rows, data: fogBytes }
         : null,
+    objectImages,
   }
 }
 

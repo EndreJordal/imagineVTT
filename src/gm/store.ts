@@ -17,6 +17,7 @@ import {
   type Light,
   type LightKind,
 } from '../shared/lights'
+import { carryObject, type AssetImage, type AssetImages, type MapObject } from '../shared/mapObjects'
 import { load } from '../shared/persist'
 import type { GmCamera, SceneFile } from '../shared/sceneFile'
 import { createVisibilityTest, moveCrossesWall, visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
@@ -59,6 +60,10 @@ interface GmStore extends TableState {
   selectedLightIds: string[]
   /** Selected wall points (GM-only). */
   selectedWallPoints: WallPointRef[]
+  /** Selected objects (GM-only). */
+  selectedObjectIds: string[]
+  /** Images of the assets placed as objects, by asset key; kept with the scene. */
+  objectImages: AssetImages
   /** A light kind waiting to be placed with a click on the map (GM-only). */
   placingLight: LightKind | null
   /**
@@ -171,8 +176,18 @@ interface GmStore extends TableState {
   selectMany(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
   moveWallPoints(refs: WallPointRef[], dx: number, dy: number): void
   deleteWallPoints(refs: WallPointRef[]): void
-  /** Delete everything selected: lights and wall points. */
+  /** Delete everything selected: lights, wall points and objects. */
   deleteSelection(): void
+  /** Keep an asset's image (for objects showing it). */
+  setObjectImage(asset: string, image: AssetImage): void
+  /** Place an object; it becomes the selection. */
+  addObject(object: Omit<MapObject, 'id'>): void
+  updateObject(id: string, patch: Partial<Omit<MapObject, 'id'>>): void
+  removeObjects(ids: string[]): void
+  /** Select just this object (or nothing at all). */
+  selectObject(id: string | null): void
+  /** Bring an object to the front, or send it to the back. */
+  reorderObject(id: string, to: 'front' | 'back'): void
   /** Add a light to the selection, or take it out if it's already in. */
   toggleLightSelected(id: string): void
   /** Load a new map image at its natural size (null clears it). */
@@ -206,6 +221,7 @@ const defaultScene: Scene = {
   lights: [],
   fog: { enabled: false, safety: true },
   walls: [],
+  objects: [],
 }
 
 // Calibrated on the GM's own table TV: the nominal 96 CSS px per inch square measured 137 mm
@@ -224,6 +240,8 @@ export const useGm = create<GmStore>()((set) => ({
   tableConnected: false,
   selectedLightIds: [],
   selectedWallPoints: [],
+  selectedObjectIds: [],
+  objectImages: {},
   placingLight: null,
   gmVision: DEFAULT_GM_VISION,
   peeking: false,
@@ -299,8 +317,10 @@ export const useGm = create<GmStore>()((set) => ({
       gmCamera: null,
       cameraVersion: s.cameraVersion + 1,
       historyEpoch: s.historyEpoch + 1,
+      objectImages: {},
       selectedLightIds: [],
       selectedWallPoints: [],
+      selectedObjectIds: [],
       placingLight: null,
       buildingWalls: false,
       wallDraft: [],
@@ -320,9 +340,11 @@ export const useGm = create<GmStore>()((set) => ({
       fogVersion: s.fogVersion + 1,
       gmCamera: file.camera,
       cameraVersion: s.cameraVersion + 1,
+      objectImages: file.objectImages,
       // A fresh start for the GM's tools.
       selectedLightIds: [],
       selectedWallPoints: [],
+      selectedObjectIds: [],
       placingLight: null,
       buildingWalls: false,
       wallDraft: [],
@@ -508,9 +530,9 @@ export const useGm = create<GmStore>()((set) => ({
         selectedLightIds: s.selectedLightIds.filter((id) => !gone.has(id)),
       }
     }),
-  selectLight: (id) => set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [] }),
+  selectLight: (id) => set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [] }),
   selectWallPoint: (ref) =>
-    set((s) => ({ selectedWallPoints: withLinked(s.scene.walls, [ref]), selectedLightIds: [] })),
+    set((s) => ({ selectedWallPoints: withLinked(s.scene.walls, [ref]), selectedLightIds: [], selectedObjectIds: [] })),
   toggleWallPointSelected: (ref) =>
     set((s) => {
       const group = withLinked(s.scene.walls, [ref])
@@ -523,6 +545,7 @@ export const useGm = create<GmStore>()((set) => ({
     }),
   selectMany: (lightIds, wallPoints, add) =>
     set((s) => ({
+      selectedObjectIds: add ? s.selectedObjectIds : [],
       selectedLightIds: add ? [...new Set([...s.selectedLightIds, ...lightIds])] : lightIds,
       selectedWallPoints: add
         ? [...s.selectedWallPoints, ...wallPoints.filter((p) => !s.selectedWallPoints.some((r) => sameRef(r, p)))]
@@ -541,10 +564,44 @@ export const useGm = create<GmStore>()((set) => ({
       selectedWallPoints: [],
     })),
   deleteSelection: () => {
-    const { selectedLightIds, selectedWallPoints, removeLights, deleteWallPoints } = useGm.getState()
+    const { selectedLightIds, selectedWallPoints, selectedObjectIds, removeLights, deleteWallPoints, removeObjects } =
+      useGm.getState()
     if (selectedWallPoints.length) deleteWallPoints(selectedWallPoints)
     if (selectedLightIds.length) removeLights(selectedLightIds)
+    if (selectedObjectIds.length) removeObjects(selectedObjectIds)
   },
+  setObjectImage: (asset, image) => set((s) => ({ objectImages: { ...s.objectImages, [asset]: image } })),
+  addObject: (object) =>
+    set((s) => {
+      const placed: MapObject = { ...object, id: crypto.randomUUID() }
+      return {
+        scene: { ...s.scene, objects: [...s.scene.objects, placed] },
+        selectedObjectIds: [placed.id],
+        selectedLightIds: [],
+        selectedWallPoints: [],
+      }
+    }),
+  updateObject: (id, patch) =>
+    set((s) => ({
+      scene: { ...s.scene, objects: s.scene.objects.map((o) => (o.id === id ? { ...o, ...patch } : o)) },
+    })),
+  removeObjects: (ids) =>
+    set((s) => {
+      const gone = new Set(ids)
+      return {
+        scene: { ...s.scene, objects: s.scene.objects.filter((o) => !gone.has(o.id)) },
+        selectedObjectIds: s.selectedObjectIds.filter((id) => !gone.has(id)),
+      }
+    }),
+  selectObject: (id) =>
+    set({ selectedObjectIds: id ? [id] : [], selectedLightIds: [], selectedWallPoints: [] }),
+  reorderObject: (id, to) =>
+    set((s) => {
+      const o = s.scene.objects.find((x) => x.id === id)
+      if (!o) return s
+      const rest = s.scene.objects.filter((x) => x.id !== id)
+      return { scene: { ...s.scene, objects: to === 'front' ? [...rest, o] : [o, ...rest] } }
+    }),
   toggleLightSelected: (id) =>
     set((s) => ({
       selectedLightIds: s.selectedLightIds.includes(id)
@@ -646,12 +703,14 @@ export const useGm = create<GmStore>()((set) => ({
  * things drawn there. Lights travelling with the table view belong to the party, not the
  * map, so they stay put.
  */
-function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' | 'lights' | 'walls'> {
+function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' | 'lights' | 'walls' | 'objects'> {
   const from = scene.map
   const unchanged =
     !from || !map || (from.x === map.x && from.y === map.y && from.width === map.width)
-  if (unchanged) return { map, lights: scene.lights, walls: scene.walls }
+  if (unchanged) return { map, lights: scene.lights, walls: scene.walls, objects: scene.objects }
   return {
+    // Objects are on the map: they move and scale with it.
+    objects: scene.objects.map((o) => carryObject(o, from, map)),
     map,
     lights: scene.lights.map((l) => (l.followView ? l : { ...l, ...carryPoint(l, from, map) })),
     // Walls are drawn on the map, so they always go with it.
@@ -675,6 +734,7 @@ export function migrateScene(scene: Scene): Scene {
   const fog: Partial<Scene['fog']> = scene.fog ?? {}
   scene.fog = { enabled: fog.enabled ?? false, safety: fog.safety ?? true }
   scene.walls ??= []
+  scene.objects ??= []
   for (const l of scene.lights) {
     l.vision ??= LIGHT_PRESETS[l.kind].handheld
     l.visionRange ??= DEFAULT_VISION_RANGE
@@ -691,7 +751,7 @@ export function migrateScene(scene: Scene): Scene {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName] =
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
@@ -701,6 +761,7 @@ export async function hydrate() {
       load<FogMemory>('fogMemory'),
       load<GmCamera>('gmCamera'),
       load<{ name: string | null; unsaved: boolean }>('sceneName'),
+      load<AssetImages>('objectImages'),
     ])
   useGm.setState((s) => ({
     scene: scene ? migrateScene(scene) : defaultScene,
@@ -710,6 +771,7 @@ export async function hydrate() {
     gmVision: gmVision ?? DEFAULT_GM_VISION,
     fogMemory: fogMemory ?? null,
     gmCamera: gmCamera ?? null,
+    objectImages: objectImages ?? {},
     cameraVersion: s.cameraVersion + 1,
     sceneName: sceneName?.name ?? null,
     unsaved: sceneName?.unsaved ?? false,

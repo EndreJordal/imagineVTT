@@ -1,4 +1,5 @@
 import type { Light } from './lights'
+import type { MapObject } from './mapObjects'
 import type { Wall } from './visibility'
 
 export interface Point {
@@ -63,6 +64,8 @@ export interface Scene {
   fog: { enabled: boolean; safety: boolean }
   /** Walls block sight. Scene coordinates; they move and scale with the map. */
   walls: Wall[]
+  /** Images placed on the map (asset library), bottom first. They go with the map too. */
+  objects: MapObject[]
 }
 
 export type Orientation = 0 | 90 | 180 | 270

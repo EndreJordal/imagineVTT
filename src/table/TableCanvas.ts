@@ -3,6 +3,7 @@ import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
 import { CALIBRATION_MM, tableTransform } from '../shared/geometry'
 import type { FogMemory } from '../shared/fog'
+import type { AssetImages } from '../shared/mapObjects'
 import type { TableState } from '../shared/types'
 
 /** Display-only renderer for the table TV. Fixed physical scale, no input. */
@@ -19,6 +20,7 @@ export class TableCanvas extends PixiHost {
 
   protected setup() {
     this.app.stage.addChild(this.sceneLayer, this.calibration)
+    this.sceneLayer.onChange = () => this.requestRender()
     this.app.renderer.on('resize', () => this.render())
     void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
@@ -33,6 +35,12 @@ export class TableCanvas extends PixiHost {
   setFogMemory(memory: FogMemory | null) {
     this.fogMemory = memory
     if (this.ready) this.sceneLayer.setFogMemory(memory)
+    this.requestRender()
+  }
+
+  /** Images of the assets objects show. */
+  setObjectImages(images: AssetImages) {
+    this.sceneLayer.setObjectImages(images)
     this.requestRender()
   }
 

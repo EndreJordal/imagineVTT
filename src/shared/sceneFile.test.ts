@@ -12,7 +12,10 @@ const scene: Scene = {
   lights: [],
   fog: { enabled: true, safety: true },
   walls: [{ id: 'w', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] }],
+  objects: [{ id: 'o', asset: 'Fantasy/Objects/Fire/Brazier', name: 'Brazier', x: 50, y: 60, width: 100, height: 100, rotation: 0.5 }],
 }
+
+const frames = { count: 4, cols: 2, rows: 2, fps: 30, frameWidth: 64, frameHeight: 64, pad: 2 }
 
 const sample = (): SceneFile => ({
   scene,
@@ -20,6 +23,11 @@ const sample = (): SceneFile => ({
   camera: { x: 500, y: 300, zoom: 0.4 },
   mapImage: new Blob([new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])], { type: 'image/jpeg' }),
   fogMemory: { cols: 4, rows: 2, data: new Uint8Array([0, 255, 128, 0, 0, 0, 255, 255]) },
+  objectImages: {
+    'Fantasy/Objects/Fire/Brazier': { image: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' }), width: 512, height: 512, frames },
+    // Not shown by any object: not saved.
+    'Fantasy/Objects/Unused': { image: new Blob([new Uint8Array([9])], { type: 'image/png' }), width: 10, height: 10 },
+  },
 })
 
 describe('scene files', () => {
@@ -31,6 +39,10 @@ describe('scene files', () => {
     expect(back.mapImage?.type).toBe('image/jpeg')
     expect([...new Uint8Array(await back.mapImage!.arrayBuffer())]).toEqual([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9])
     expect(back.fogMemory).toEqual(sample().fogMemory)
+    expect(Object.keys(back.objectImages)).toEqual(['Fantasy/Objects/Fire/Brazier'])
+    const img = back.objectImages['Fantasy/Objects/Fire/Brazier']
+    expect([img.width, img.height, img.frames, img.image.type]).toEqual([512, 512, frames, 'image/webp'])
+    expect([...new Uint8Array(await img.image.arrayBuffer())]).toEqual([1, 2, 3])
   })
 
   it('saves a scene without a map or fog', async () => {

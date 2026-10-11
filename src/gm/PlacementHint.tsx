@@ -9,7 +9,7 @@ export function PlacementHint() {
   return (
     <div className="placement-hint" role="status">
       {icon} Click the map to place the {label.toLowerCase()} · <kbd>Shift</kbd>-click to place more ·{' '}
-      <kbd>Esc</kbd> or right-click to cancel
+      <kbd>Enter</kbd> or right-click when done · <kbd>Esc</kbd> to cancel
     </div>
   )
 }

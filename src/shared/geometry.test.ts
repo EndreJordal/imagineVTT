@@ -23,6 +23,7 @@ const scene: Scene = {
   lights: [],
   fog: { enabled: false, safety: true },
   walls: [],
+  objects: [],
 }
 const display: Display = { pxPerMm: 4, orientation: 0 }
 

@@ -47,6 +47,7 @@ export async function saveScene(saveAs = false) {
     camera: s.gmCamera,
     mapImage: s.mapImage,
     fogMemory: s.fogMemory,
+    objectImages: s.objectImages,
   })
   const suggestedName = `${s.sceneName ?? 'Untitled scene'}${SCENE_FILE_EXTENSION}`
 

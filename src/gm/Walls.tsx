@@ -50,6 +50,9 @@ export function DoorToolbox() {
       </p>
       <ul className="key-list">
         <li>
+          <kbd>Enter</kbd> or right-click: done
+        </li>
+        <li>
           <kbd>Esc</kbd> {started ? 'cancel this door' : 'stop building doors'}
         </li>
         <li>Click a door’s middle button to open or close it.</li>
@@ -78,7 +81,7 @@ export function WallToolbox() {
       <p className="hint">Click to add wall points; the red dot shows where the next one goes.</p>
       <ul className="key-list">
         <li>
-          <kbd>Enter</kbd> confirm wall points
+          <kbd>Enter</kbd> or right-click: confirm the wall; again to stop building
         </li>
         <li>
           <kbd>Esc</kbd> cancel wall points

@@ -361,6 +361,45 @@ describe('vision safety', () => {
   })
 })
 
+describe('objects', () => {
+  const gm = () => useGm.getState()
+  const map = { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 }
+  beforeEach(() => {
+    useGm.setState((s) => ({ scene: { ...s.scene, map, objects: [] }, selectedObjectIds: [], selectedLightIds: [] }))
+  })
+  const place = (name: string) =>
+    gm().addObject({ asset: `A/${name}`, name, x: 100, y: 200, width: 50, height: 25, rotation: 0 })
+
+  it('places, selects, updates, reorders and removes objects', () => {
+    place('a')
+    place('b')
+    const [a, b] = gm().scene.objects
+    expect(gm().selectedObjectIds).toEqual([b.id])
+    gm().updateObject(a.id, { x: 300, rotation: 1 })
+    expect(gm().scene.objects[0]).toMatchObject({ x: 300, y: 200, rotation: 1 })
+    gm().reorderObject(a.id, 'front')
+    expect(gm().scene.objects.map((o) => o.name)).toEqual(['b', 'a'])
+    gm().selectObject(a.id)
+    gm().deleteSelection()
+    expect(gm().scene.objects.map((o) => o.name)).toEqual(['b'])
+    expect(gm().selectedObjectIds).toEqual([])
+  })
+
+  it('selecting a light (or nothing) drops the object selection', () => {
+    place('a')
+    gm().selectLight(null)
+    expect(gm().selectedObjectIds).toEqual([])
+  })
+
+  it('carries objects with the map when it moves or scales', () => {
+    place('a')
+    gm().setMapPosition({ x: 100, y: 0 })
+    expect(gm().scene.objects[0]).toMatchObject({ x: 200, y: 200, width: 50 })
+    gm().setMapScale(2)
+    expect(gm().scene.objects[0]).toMatchObject({ x: 300, y: 400, width: 100, height: 50 })
+  })
+})
+
 describe('new scene', () => {
   it('empties the scene and forgets its name, keeping calibration', () => {
     const gm = () => useGm.getState()
@@ -394,6 +433,7 @@ describe('opening a scene file', () => {
         camera: { x: 1, y: 2, zoom: 0.5 },
         mapImage: image,
         fogMemory: { cols: 1, rows: 1, data: new Uint8Array([255]) },
+        objectImages: {},
       },
       'Goblin cave',
     )

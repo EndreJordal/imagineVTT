@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 import { tableScale } from '../shared/geometry'
+import { AssetsSection } from './Assets'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
@@ -217,6 +218,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           </Field>
         </details>
       </Section>
+      <AssetsSection />
     </aside>
   )
 }

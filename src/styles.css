@@ -678,3 +678,120 @@ input[type='color'].swatch {
   color: var(--muted);
   pointer-events: none;
 }
+
+/* Asset library */
+.asset-search {
+  width: 100%;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chips button {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.asset-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  min-width: 0;
+  background: #24242b;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.asset-tile.active {
+  border-color: var(--accent);
+}
+
+.asset-tile img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  /* A checkerboard behind transparent art. */
+  background: repeating-conic-gradient(#2c2c34 0% 25%, #24242b 0% 50%) 50% / 12px 12px;
+  border-radius: 3px;
+}
+
+.asset-none {
+  width: 100%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.asset-name {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.asset-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0 4px;
+  font-size: 9px;
+  border-radius: 3px;
+  background: rgb(0 0 0 / 60%);
+  color: #fff;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.asset-preview-image {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  max-height: 260px;
+  padding: 6px;
+  border-radius: 6px;
+  background: repeating-conic-gradient(#2c2c34 0% 25%, #24242b 0% 50%) 50% / 16px 16px;
+  cursor: grab;
+  overflow: hidden;
+}
+
+.asset-preview-image img {
+  max-width: 100%;
+  max-height: 248px;
+  object-fit: contain;
+}
+
+.asset-preview-image img.loading {
+  opacity: 0.6;
+}
+
+.asset-preview-image .sprite {
+  width: 100%;
+  max-height: 248px;
+  background-repeat: no-repeat;
+}

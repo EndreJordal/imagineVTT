@@ -1,0 +1,265 @@
+import { create } from 'zustand'
+import { ASSET_KINDS, defaultSquares, parseAssetMeta, type AssetKind } from '../shared/arkenAsset'
+import type { AssetImage } from '../shared/mapObjects'
+import { load, save } from '../shared/persist'
+import type { Point } from '../shared/types'
+import type { AssetImageRequest, AssetImageResponse } from './assetImage.worker'
+import { useGm } from './store'
+
+/**
+ * The asset library: a folder of Arkenforge assets on this computer, read in place (Chrome
+ * and Edge can be given access to a folder, and remember it). Its visual assets are indexed
+ * once, with their thumbnails, and the index kept, so browsing is instant afterwards; it's
+ * brought up to date on a rescan. Images are read from the folder when an asset is placed.
+ *
+ * Expected layout: <genre>/<kind>/<category>/.../<name>.rwmeta + <name>.rwfile, with kind
+ * one of Objects, Textures, Lines, Tokens.
+ */
+
+export interface LibraryAsset {
+  /** Path in the folder without extension, e.g. "Fantasy/Objects/Trees/Tree 1": the asset's key. */
+  path: string
+  name: string
+  genre: string
+  kind: AssetKind
+  /** Folders under the kind, e.g. "Trees › Animated". */
+  category: string
+  tags: string[]
+  thumb: Blob | null
+  scale: { x: number; y: number }
+  fps: number
+  animated: boolean
+  /** The .rwmeta file's date and size, to tell when it changed. */
+  modified: number
+  size: number
+}
+
+type Status =
+  | { kind: 'unsupported' }
+  | { kind: 'none' }
+  | { kind: 'reconnect' }
+  | { kind: 'scanning'; done: number; total: number }
+  | { kind: 'ready' }
+  | { kind: 'error'; message: string }
+
+interface LibraryState {
+  status: Status
+  folderName: string | null
+  assets: LibraryAsset[]
+  /** The asset shown in the preview panel. */
+  previewing: string | null
+  setPreviewing(path: string | null): void
+}
+
+export const useAssets = create<LibraryState>()((set) => ({
+  status: { kind: 'none' },
+  folderName: null,
+  assets: [],
+  previewing: null,
+  setPreviewing: (previewing) => set({ previewing }),
+}))
+
+// Folder access (File System Access API: in Chromium; not yet in TypeScript's DOM types).
+interface DirHandle {
+  kind: 'directory'
+  name: string
+  values(): AsyncIterable<DirHandle | FileHandle>
+  getDirectoryHandle(name: string): Promise<DirHandle>
+  getFileHandle(name: string): Promise<FileHandle>
+  queryPermission(o: { mode: 'read' }): Promise<PermissionState>
+  requestPermission(o: { mode: 'read' }): Promise<PermissionState>
+}
+interface FileHandle {
+  kind: 'file'
+  name: string
+  getFile(): Promise<File>
+}
+type Picker = (o: { id?: string; mode?: 'read' }) => Promise<DirHandle>
+const picker = () => (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker
+
+let folder: DirHandle | null = null
+
+/** At startup: the remembered folder and index, if any. */
+export async function initAssetLibrary() {
+  if (!picker()) {
+    useAssets.setState({ status: { kind: 'unsupported' } })
+    return
+  }
+  const [handle, index] = await Promise.all([load<DirHandle>('assetFolder'), load<LibraryAsset[]>('assetIndex')])
+  if (!handle) return
+  folder = handle
+  useAssets.setState({ folderName: handle.name, assets: index ?? [] })
+  const permission = await handle.queryPermission({ mode: 'read' }).catch(() => 'prompt' as const)
+  useAssets.setState({ status: { kind: permission === 'granted' ? 'ready' : 'reconnect' } })
+  if (permission === 'granted' && !index?.length) void scanFolder()
+}
+
+/** Ask for an asset folder, and index it. */
+export async function chooseAssetFolder() {
+  const pick = picker()
+  if (!pick) return
+  let handle: DirHandle
+  try {
+    handle = await pick({ id: 'imaginevtt-assets', mode: 'read' })
+  } catch {
+    return // cancelled
+  }
+  folder = handle
+  // Remembered for later visits where the browser can store it; works for this one anyway.
+  await save('assetFolder', handle).catch(() => {})
+  useAssets.setState({ folderName: handle.name })
+  await scanFolder()
+}
+
+/** Access to the remembered folder again (browsers ask once per visit). */
+export async function reconnectAssetFolder() {
+  if (!folder) return chooseAssetFolder()
+  const permission = await folder.requestPermission({ mode: 'read' }).catch(() => 'denied' as const)
+  if (permission === 'granted') useAssets.setState({ status: { kind: 'ready' } })
+}
+
+/** Index the folder's visual assets, reusing what's unchanged from the last index. */
+export async function scanFolder() {
+  if (!folder) return
+  const previous = new Map(useAssets.getState().assets.map((a) => [a.path, a]))
+  useAssets.setState({ status: { kind: 'scanning', done: 0, total: 0 } })
+  try {
+    // Find the entries first, for progress.
+    const found: { path: string; genre: string; kind: AssetKind; category: string; handle: FileHandle }[] = []
+    for await (const genre of folder.values()) {
+      if (genre.kind !== 'directory' || genre.name.startsWith('_')) continue
+      for await (const kindDir of genre.values()) {
+        if (kindDir.kind !== 'directory' || !ASSET_KINDS.includes(kindDir.name as AssetKind)) continue
+        await walk(kindDir, [], (dirs, handle) => {
+          const name = handle.name.replace(/\.rwmeta$/i, '')
+          found.push({
+            path: [genre.name, kindDir.name, ...dirs, name].join('/'),
+            genre: genre.name,
+            kind: kindDir.name as AssetKind,
+            category: dirs.join(' › ') || 'General',
+            handle,
+          })
+        })
+      }
+    }
+    const assets: LibraryAsset[] = []
+    for (let i = 0; i < found.length; i++) {
+      const f = found[i]
+      const file = await f.handle.getFile()
+      const old = previous.get(f.path)
+      if (old && old.modified === file.lastModified && old.size === file.size) {
+        assets.push(old)
+      } else {
+        try {
+          const meta = parseAssetMeta(new Uint8Array(await file.arrayBuffer()))
+          assets.push({
+            path: f.path,
+            name: meta.name || f.path.split('/').at(-1)!,
+            genre: f.genre,
+            kind: f.kind,
+            category: f.category,
+            tags: meta.tags,
+            thumb: meta.thumbnail ? new Blob([meta.thumbnail as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : null,
+            scale: meta.scale,
+            fps: meta.fps,
+            // Some animations don't say so in their entry; their folder does.
+            animated: meta.frames > 0 || /animated/i.test(f.path),
+            modified: file.lastModified,
+            size: file.size,
+          })
+        } catch {
+          // Not an asset entry we can read: leave it out.
+        }
+      }
+      if (i % 25 === 0) {
+        useAssets.setState({ status: { kind: 'scanning', done: i, total: found.length } })
+        await new Promise((r) => setTimeout(r)) // let the page breathe
+      }
+    }
+    assets.sort((a, b) => a.name.localeCompare(b.name))
+    useAssets.setState({ assets, status: { kind: 'ready' } })
+    await save('assetIndex', assets)
+  } catch (err) {
+    useAssets.setState({ status: { kind: 'error', message: String(err) } })
+  }
+}
+
+async function walk(dir: DirHandle, dirs: string[], onMeta: (dirs: string[], file: FileHandle) => void) {
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'directory') await walk(entry, [...dirs, entry.name], onMeta)
+    else if (entry.name.toLowerCase().endsWith('.rwmeta')) onMeta(dirs, entry)
+  }
+}
+
+/** An asset's file in the folder. */
+async function assetFile(path: string): Promise<File> {
+  if (!folder) throw new Error('No asset folder')
+  const parts = path.split('/')
+  let dir = folder
+  for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part)
+  return (await dir.getFileHandle(`${parts.at(-1)}.rwfile`)).getFile()
+}
+
+/** Images made this visit, by asset (previewing then placing an asset reuses it). */
+const images = new Map<string, Promise<AssetImage>>()
+
+/** An asset's image, ready to show: from the scene if it's placed already, else made from its file. */
+export function assetImage(asset: LibraryAsset): Promise<AssetImage> {
+  const placed = useGm.getState().objectImages[asset.path]
+  if (placed) return Promise.resolve(placed)
+  let p = images.get(asset.path)
+  if (!p) {
+    p = makeImage(asset)
+    images.set(asset.path, p)
+    p.catch(() => images.delete(asset.path))
+  }
+  return p
+}
+
+async function makeImage(asset: LibraryAsset): Promise<AssetImage> {
+  const file = await assetFile(asset.path)
+  const worker = new Worker(new URL('./assetImage.worker.ts', import.meta.url), { type: 'module' })
+  try {
+    return await new Promise<AssetImage>((resolve, reject) => {
+      worker.onmessage = (e: MessageEvent<AssetImageResponse>) =>
+        e.data.ok ? resolve(e.data.image) : reject(new Error(e.data.error))
+      worker.onerror = (e) => reject(new Error(e.message))
+      worker.postMessage({ file, fps: asset.fps } satisfies AssetImageRequest)
+    })
+  } finally {
+    worker.terminate()
+  }
+}
+
+/** Place an asset on the map, centred at `at` (scene coordinates), at its natural size. */
+export async function placeAsset(path: string, at: Point) {
+  const asset = useAssets.getState().assets.find((a) => a.path === path)
+  if (!asset) return
+  const gm = useGm.getState()
+  if (useAssets.getState().status.kind !== 'ready' && !gm.objectImages[path]) {
+    gm.notify('Reconnect the asset folder (Assets, in the sidebar) to place new assets.')
+    return
+  }
+  let image: AssetImage
+  try {
+    image = await assetImage(asset)
+  } catch (err) {
+    gm.notify(`Couldn’t load “${asset.name}”: ${(err as Error).message}`)
+    return
+  }
+  const squares = defaultSquares(asset.kind, image.width, image.height, asset.scale)
+  const size = useGm.getState().scene.grid.size
+  useGm.getState().setObjectImage(path, image)
+  useGm.getState().addObject({
+    asset: path,
+    name: asset.name,
+    x: at.x,
+    y: at.y,
+    width: squares.width * size,
+    height: squares.height * size,
+    rotation: 0,
+  })
+}
+
+/** Drag-and-drop type carrying an asset's path from the browser to the map. */
+export const ASSET_DRAG_TYPE = 'application/x-imaginevtt-asset'

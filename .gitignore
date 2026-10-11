@@ -26,3 +26,6 @@ dist-ssr
 # Third-party battlemaps used for grid-detection tests (copyrighted; not ours to commit)
 test-maps/
 scratch/
+
+# Arkenforge asset packs (licensed; several GB; never commit)
+media-assets/

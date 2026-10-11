@@ -19,6 +19,7 @@ export function startGmSync(): () => void {
         channel.post({ type: 'state', state: tableState(useGm.getState()) })
         channel.post({ type: 'map', image: useGm.getState().mapImage })
         channel.post({ type: 'fog', memory: useGm.getState().fogMemory })
+        channel.post({ type: 'assets', images: useGm.getState().objectImages })
         break
       case 'screen':
         useGm.getState().setTableScreen(msg.screen)
@@ -105,6 +106,10 @@ export function startGmSync(): () => void {
     if (s.mapImage !== prev.mapImage) {
       channel.post({ type: 'map', image: s.mapImage })
       void save('mapImage', s.mapImage)
+    }
+    if (s.objectImages !== prev.objectImages) {
+      channel.post({ type: 'assets', images: s.objectImages })
+      void save('objectImages', s.objectImages)
     }
   })
 

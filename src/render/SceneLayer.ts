@@ -2,10 +2,12 @@ import { Container, ImageSource, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import { sceneBounds } from '../shared/geometry'
 import { MEMORY_BRIGHTNESS, NIGHT_DESATURATION, NIGHT_DIMMING } from '../shared/night'
+import type { AssetImages } from '../shared/mapObjects'
 import type { Scene } from '../shared/types'
 import { FogLayer } from './FogLayer'
 import { LightingLayer } from './LightingLayer'
-import { createMapMesh } from './mapShader'
+import { createMapMesh, SHARED_SLOTS } from './mapShader'
+import { ObjectsLayer } from './ObjectsLayer'
 
 /**
  * Who the scene is drawn for under fog of war: the players see black, greyscale memory and
@@ -32,15 +34,27 @@ export class SceneLayer extends Container {
   /** Decoded map pixels; closed explicitly when replaced (Pixi doesn't, and they're big). */
   private bitmap: ImageBitmap | null = null
   private fogMode: 'off' | FogViewer = 'off'
+  /** Images placed on the map, drawn over it with the same shading. */
+  private objects = new ObjectsLayer(this.map.group)
 
   constructor() {
     super()
-    this.addChild(this.map.mesh)
+    this.addChild(this.map.mesh, this.objects)
   }
 
-  /** Whether frames are needed with nothing changed (flickering lights). */
+  /** Called when something loaded in the background needs a redraw (object images). */
+  set onChange(fn: () => void) {
+    this.objects.onChange = fn
+  }
+
+  /** Whether frames are needed with nothing changed (flickering lights, animated objects). */
   isAnimating() {
-    return this.lighting.animated
+    return this.lighting.animated || this.objects.animated
+  }
+
+  /** The images of the assets objects show (from the GM; kept with the scene). */
+  setObjectImages(images: AssetImages) {
+    this.objects.setImages(images)
   }
 
   /** Call before each frame: animates light flicker, redraws sight when vision tokens move. */
@@ -58,12 +72,26 @@ export class SceneLayer extends Container {
     u.uVisionUv[1] = this.fog.uvScale.y
     u.uLightsOn = this.lighting.active ? 1 : 0
     this.map.uniformsChanged()
+    this.shareTextures()
+    this.objects.animate(seconds)
+  }
+
+  /** Objects read the same light, sight and memory maps as the map. */
+  private shareTextures() {
+    const sources = {
+      uLightMask: this.lighting.maskTexture,
+      uGlow: this.lighting.glowTexture,
+      uVision: this.fog.visionTexture,
+      uMemory: this.fog.memorySource,
+    }
+    for (const slot of SHARED_SLOTS) this.objects.setShared(slot, sources[slot] ?? null)
   }
 
   /** Fog memory from the GM (the same grid object is redrawn when its version changes). */
   setFogMemory(memory: FogMemory | null) {
     this.fog.setMemory(memory)
     this.map.setTexture('uMemory', this.fog.memorySource)
+    this.objects.setShared('uMemory', this.fog.memorySource)
   }
 
   async setMapImage(image: Blob | null) {
@@ -97,6 +125,7 @@ export class SceneLayer extends Container {
     this.mapTexture = null
     this.lighting.destroy()
     this.fog.destroy()
+    this.objects.destroy()
     super.destroy(options)
   }
 
@@ -108,6 +137,7 @@ export class SceneLayer extends Container {
     this.map.mesh.scale.set(bounds.width, bounds.height)
     this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness)
     this.fog.sync(scene.lights, bounds, scene.grid.size, scene.walls)
+    this.objects.sync(scene.objects ?? [])
 
     const u = this.map.uniforms
     u.uBounds.set([bounds.x, bounds.y, bounds.width, bounds.height])

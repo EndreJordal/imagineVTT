@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { GmCanvas } from './GmCanvas'
 import { LightPanel } from './LightPanel'
+import { ASSET_DRAG_TYPE, initAssetLibrary, placeAsset } from './assetLibrary'
+import { AssetPreview } from './Assets'
+import { ObjectPanel } from './ObjectPanel'
 import { PlacementHint } from './PlacementHint'
 import { openDroppedScene, openScene, saveScene } from './sceneFiles'
 import { GmNotice } from './GmNotice'
@@ -11,6 +14,22 @@ import { gmDarkness, hydrate, tableState, useGm } from './store'
 import { startGmSync } from './sync'
 import { redo, startHistory, undo } from './history'
 import { ToolPalette } from './ToolPalette'
+
+/**
+ * Enter, or right-click on the map, with a tool: confirm. Walls: finish the wall being
+ * drawn, or with none, stop building. Doors and lights: done, stop using the tool.
+ */
+function confirmTool() {
+  const gm = useGm.getState()
+  if (gm.buildingWalls) {
+    if (gm.wallDraft.length >= 2) gm.confirmWallDraft()
+    else gm.setBuildingWalls(false)
+  } else if (gm.buildingDoors) {
+    gm.setBuildingDoors(false)
+  } else if (gm.placingLight) {
+    gm.setPlacingLight(null)
+  }
+}
 
 export function GmApp() {
   const [hydrated, setHydrated] = useState(false)
@@ -25,6 +44,7 @@ export function GmApp() {
       if (cancelled) return
       stop = startGmSync()
       stopHistory = startHistory()
+      void initAssetLibrary()
       setHydrated(true)
     })
     return () => {
@@ -57,7 +77,7 @@ export function GmApp() {
         addLight(placingLight, at)
         if (!keepPlacing) setPlacingLight(null)
       },
-      onPlaceCancel: () => useGm.getState().setPlacingLight(null),
+      onToolConfirm: confirmTool,
       onWallPoint: (p) => useGm.getState().addWallPoint(p),
       onWallPointSelect: (ref) => useGm.getState().selectWallPoint(ref),
       onWallPointToggle: (ref) => useGm.getState().toggleWallPointSelected(ref),
@@ -68,19 +88,21 @@ export function GmApp() {
         moveWallPoints(refs, to.x - from.x, to.y - from.y)
       },
       onDoorPoint: (p) => useGm.getState().placeDoorPoint(p),
-      onDoorCancel: () => {
-        const gm = useGm.getState()
-        if (gm.doorDraft) gm.cancelDoorDraft()
-        else gm.setBuildingDoors(false)
-      },
       onDoorToggle: (id) => useGm.getState().toggleDoor(id),
+      onObjectSelect: (id) => useGm.getState().selectObject(id),
+      onObjectChange: (id, patch) => useGm.getState().updateObject(id, patch),
       onBoxSelect: (lightIds, points, add) => useGm.getState().selectMany(lightIds, points, add),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),
     })
     canvasRef.current = canvas
     if (import.meta.env.DEV) Object.assign(window, { gmCanvas: canvas, gmStore: useGm })
     let cameraVersion = -1
+    let objectImages: unknown = null
     const push = (s = useGm.getState()) => {
+      if (s.objectImages !== objectImages) {
+        objectImages = s.objectImages
+        canvas.setObjectImages(s.objectImages)
+      }
       // Jump to a restored or opened camera (before the image, which would otherwise fit).
       if (s.cameraVersion !== cameraVersion) {
         cameraVersion = s.cameraVersion
@@ -101,6 +123,7 @@ export function GmApp() {
         snap: s.snap,
         wallDraft: s.wallDraft,
         selectedWallPoints: s.selectedWallPoints,
+        selectedObjectIds: s.selectedObjectIds,
         buildingDoors: s.buildingDoors,
         doorDraft: s.doorDraft,
       })
@@ -154,11 +177,11 @@ export function GmApp() {
         return
       }
       const gm = useGm.getState()
+      if (e.key === 'Enter' && !typing && (gm.buildingWalls || gm.buildingDoors || gm.placingLight)) {
+        confirmTool()
+        return
+      }
       if (gm.buildingWalls && !typing) {
-        if (e.key === 'Enter') {
-          gm.confirmWallDraft()
-          return
-        }
         if (e.key === 'Escape') {
           if (gm.wallDraft.length) gm.cancelWallDraft()
           else gm.setBuildingWalls(false)
@@ -218,13 +241,33 @@ export function GmApp() {
       <div className="gm-body">
         <Sidebar canvas={canvasRef} />
         <div className="gm-stage">
-          <div className="gm-map" ref={hostRef} />
+          <div
+            className="gm-map"
+            ref={hostRef}
+            // Assets dragged from the library are placed where they're dropped.
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+              }
+            }}
+            onDrop={(e) => {
+              const path = e.dataTransfer.getData(ASSET_DRAG_TYPE)
+              const at = path && canvasRef.current?.sceneAt(e.clientX, e.clientY)
+              if (!path || !at) return
+              e.preventDefault()
+              e.stopPropagation()
+              void placeAsset(path, at)
+            }}
+          />
           <ToolPalette />
           <div className="side-panels">
             <WallToolbox />
             <DoorToolbox />
             <WallPointsPanel />
             <LightPanel />
+            <ObjectPanel />
+            <AssetPreview />
           </div>
           <PlacementHint />
           <GmNotice />

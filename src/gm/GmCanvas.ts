@@ -11,6 +11,7 @@ import {
 } from '../shared/geometry'
 import { emitsLight, isDirectional, LIGHT_PRESETS, type Light, type LightKind } from '../shared/lights'
 import type { FogMemory } from '../shared/fog'
+import { hitsObject, objectCorners, type AssetImages, type MapObject } from '../shared/mapObjects'
 import type { GmCamera } from '../shared/sceneFile'
 import {
   inRect,
@@ -66,7 +67,8 @@ interface Handlers {
   onLightToggle(id: string): void
   /** In placement mode, the GM clicked the map here. Shift keeps placing more. */
   onPlaceLight(at: Point, keepPlacing: boolean): void
-  onPlaceCancel(): void
+  /** Right-click while using a tool: the same as Enter (confirm / done). */
+  onToolConfirm(): void
   /** In wall building mode, the GM clicked: add this (already snapped) wall point. */
   onWallPoint(p: Point): void
   /** Select just this wall point. */
@@ -80,10 +82,12 @@ interface Handlers {
   onWallPointDrag(refs: WallPointRef[], anchor: WallPointRef, to: Point): void
   /** In door building mode, the GM clicked a valid door point (on a wall line). */
   onDoorPoint(p: Point): void
-  /** Right-click in door mode: drop the half-placed door, or leave door mode. */
-  onDoorCancel(): void
   /** The GM clicked a door's open/close button. */
   onDoorToggle(id: string): void
+  /** Select just this object. */
+  onObjectSelect(id: string): void
+  /** The GM moved, resized or rotated an object. */
+  onObjectChange(id: string, patch: Partial<Pick<MapObject, 'x' | 'y' | 'width' | 'height' | 'rotation'>>): void
   /** Shift-drag box selection; `add` keeps what was already selected (Ctrl/Cmd). */
   onBoxSelect(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
   /** The GM panned or zoomed (or the view was fitted). */
@@ -107,6 +111,7 @@ export interface GmUi {
   /** Points of the wall being drawn. */
   wallDraft: Point[]
   selectedWallPoints: WallPointRef[]
+  selectedObjectIds: string[]
   /** Door building mode: two clicks on a wall line make a door. */
   buildingDoors: boolean
   /** First point of the door being placed. */
@@ -128,13 +133,17 @@ type Drag =
   | { mode: 'wallPoint'; ref: WallPointRef; refs: WallPointRef[]; wasSelected: boolean }
   // Shift-drag selection box, in scene coordinates.
   | { mode: 'box'; start: Point; end: Point }
+  | { mode: 'object'; id: string; grab: Point }
+  // Resizing scales about the centre, keeping the shape: by the pointer's distance from it.
+  | { mode: 'objectResize'; id: string; startDist: number; startW: number; startH: number }
+  | { mode: 'objectRotate'; id: string }
 
 /**
  * What the pointer is over, in priority order of grabbing. 'locked' is the resize handle of
  * a map locked to the grid.
  */
 type Target =
-  | { kind: 'door' | 'aim' | 'light'; id: string }
+  | { kind: 'door' | 'aim' | 'light' | 'object' | 'objectResize' | 'objectRotate'; id: string }
   | { kind: 'wallPoint'; ref: WallPointRef }
   | { kind: 'view' | 'map' | 'resize' | 'locked' }
   | null
@@ -150,6 +159,9 @@ const CURSORS: Record<Drag['mode'] | 'locked' | 'door', string> = {
   wallPoint: 'move',
   box: 'crosshair',
   door: 'pointer',
+  object: 'move',
+  objectResize: 'nwse-resize',
+  objectRotate: 'grab',
 }
 
 
@@ -166,6 +178,11 @@ const WALL_DOT_PX = 3.5
 /** The snap marker under the cursor while building walls, in GM screen px. */
 const SNAP_MARKER_PX = 6
 const DOOR_COLOR = 0x33ff66
+const OBJECT_COLOR = 0x4da3ff
+/** Selected object's corner handles (half-size) and rotation handle (radius, distance out), GM px. */
+const OBJECT_HANDLE_PX = 5
+const ROTATE_HANDLE_PX = 6
+const ROTATE_OUT_PX = 26
 /** A door's open/close button (in its middle), radius in GM screen px. */
 const DOOR_BUTTON_PX = 10
 /** How far from a wall line (GM screen px) the door tool still finds a door point. */
@@ -234,6 +251,9 @@ export class GmCanvas extends PixiHost {
   private visionRings = new Graphics()
   /** Walls (GM-only: players only see their effect on sight). */
   private wallsLayer = new Graphics()
+  /** Outline and handles of the selected objects. */
+  private objectHandles = new Graphics()
+  private selectedObjectIds = new Set<string>()
   /** The wall being drawn, its preview segment and the snap marker. */
   private wallDraftLayer = new Graphics()
   private buildingWalls = false
@@ -279,6 +299,7 @@ export class GmCanvas extends PixiHost {
       this.viewOverlay,
       this.mapHandle,
       this.viewMarker,
+      this.objectHandles,
       this.wallsLayer,
       this.visionRings,
       this.lightTokens,
@@ -287,6 +308,7 @@ export class GmCanvas extends PixiHost {
       this.selectionBox,
     )
     this.app.stage.addChild(this.camera)
+    this.sceneLayer.onChange = () => this.requestRender()
     void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
 
@@ -309,6 +331,7 @@ export class GmCanvas extends PixiHost {
     this.snap = ui.snap
     this.wallDraft = ui.wallDraft
     this.selectedWallPoints = ui.selectedWallPoints
+    this.selectedObjectIds = new Set(ui.selectedObjectIds)
     this.doorDraft = ui.doorDraft
     if (
       ui.placingLight !== this.placingLight ||
@@ -327,6 +350,20 @@ export class GmCanvas extends PixiHost {
   }
 
   /** Fog memory changed (the grid object is updated in place; version tells when). */
+  /** Images of the assets objects show. */
+  setObjectImages(images: AssetImages) {
+    this.sceneLayer.setObjectImages(images)
+    this.requestRender()
+  }
+
+  /** The scene point under a page position (for dropping things onto the map). */
+  sceneAt(clientX: number, clientY: number): Point | null {
+    if (!this.ready) return null
+    const rect = this.app.canvas.getBoundingClientRect()
+    const p = this.camera.toLocal({ x: clientX - rect.left, y: clientY - rect.top })
+    return { x: p.x, y: p.y }
+  }
+
   setFogMemory(memory: FogMemory | null, version: number) {
     if (version === this.fogVersion) return
     this.fogVersion = version
@@ -420,6 +457,7 @@ export class GmCanvas extends PixiHost {
     this.drawMapHandle()
     this.drawLights()
     this.drawWalls()
+    this.drawObjectHandles()
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -572,6 +610,33 @@ export class GmCanvas extends PixiHost {
     this.drawWallDraft()
   }
 
+  /** Selected objects: an outline, corner handles to resize, a handle above to rotate. */
+  private drawObjectHandles() {
+    const g = this.objectHandles.clear()
+    const px = this.px
+    for (const o of this.selectedObjects()) {
+      const corners = objectCorners(o)
+      g.poly(corners).stroke({ width: 3 * px, color: 0x000000, alpha: 0.5 })
+      g.poly(corners).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
+      const r = OBJECT_HANDLE_PX * px
+      for (const c of corners) g.rect(c.x - r, c.y - r, 2 * r, 2 * r).fill(0xffffff).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
+      const top = { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 }
+      const h = this.rotateHandle(o)
+      g.moveTo(top.x, top.y).lineTo(h.x, h.y).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
+      g.circle(h.x, h.y, ROTATE_HANDLE_PX * px).fill(0xffffff).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
+    }
+  }
+
+  private selectedObjects(): MapObject[] {
+    return (this.state?.scene.objects ?? []).filter((o) => this.selectedObjectIds.has(o.id))
+  }
+
+  /** Where an object's rotation handle is: above its top edge, turning with it. */
+  private rotateHandle(o: MapObject): Point {
+    const d = o.height / 2 + ROTATE_OUT_PX * this.px
+    return { x: o.x + Math.sin(o.rotation) * d, y: o.y - Math.cos(o.rotation) * d }
+  }
+
   private drawWallDraft() {
     this.requestRender()
     const px = this.px
@@ -707,17 +772,10 @@ export class GmCanvas extends PixiHost {
     return best
   }
 
-  /**
-   * Where a light placed at pointer position p goes: with whole-square snapping, the middle
-   * of a square (where a mini stands); with finer snapping, the nearest snap point.
-   */
+  /** Where a light placed at pointer position p goes: the nearest snap point, like walls. */
   private lightPointAt(p: Point): Point {
     const grid = this.state?.scene.grid
-    if (!grid || this.snap <= 0) return p
-    if (this.snap < 1) return snapToGrid(p, grid, this.snap)
-    const half = grid.size / 2
-    const q = snapToGrid({ x: p.x - half, y: p.y - half }, grid, 1)
-    return { x: q.x + half, y: q.y + half }
+    return grid ? snapToGrid(p, grid, this.snap) : p
   }
 
   /** The selected light, if exactly one is selected. */
@@ -767,6 +825,19 @@ export class GmCanvas extends PixiHost {
       }
     }
 
+    // Objects: the selected ones' handles, then any object (topmost first).
+    for (const o of this.selectedObjects()) {
+      const h = this.rotateHandle(o)
+      if (Math.hypot(p.x - h.x, p.y - h.y) <= (ROTATE_HANDLE_PX + SLACK_PX) * px) return { kind: 'objectRotate', id: o.id }
+      for (const c of objectCorners(o)) {
+        if (Math.hypot(p.x - c.x, p.y - c.y) <= (OBJECT_HANDLE_PX + SLACK_PX) * px) return { kind: 'objectResize', id: o.id }
+      }
+    }
+    const objects = state.scene.objects
+    for (let i = objects.length - 1; i >= 0; i--) {
+      if (hitsObject(objects[i], p)) return { kind: 'object', id: objects[i].id }
+    }
+
     if (map) {
       const r = ((map.lockToGrid ? LOCKED_HANDLE_PX : HANDLE_PX) + SLACK_PX) * px
       const cx = map.x + map.width
@@ -809,18 +880,18 @@ export class GmCanvas extends PixiHost {
   private onPointerDown = (e: PointerEvent) => {
     if (e.button > 2) return
     const p = this.toScene(e)
-    // Wall building: left-click adds a snapped point; middle still pans.
+    // With a tool, right-click confirms like Enter; middle still pans.
+    if ((this.buildingWalls || this.buildingDoors || this.placingLight) && e.button === 2) {
+      this.handlers.onToolConfirm()
+      return
+    }
+    // Wall building: left-click adds a snapped point.
     if (this.buildingWalls && e.button === 0) {
       this.handlers.onWallPoint(this.wallPointAt(p))
       return
     }
-    // Door building: left-click toggles a door's button or places a door point; right-click
-    // cancels; middle still pans.
-    if (this.buildingDoors && e.button !== 1) {
-      if (e.button === 2) {
-        this.handlers.onDoorCancel()
-        return
-      }
+    // Door building: left-click toggles a door's button or places a door point.
+    if (this.buildingDoors && e.button === 0) {
       const target = this.targetAt(p)
       if (target?.kind === 'door') {
         this.handlers.onDoorToggle(target.id)
@@ -830,10 +901,9 @@ export class GmCanvas extends PixiHost {
       if (at) this.handlers.onDoorPoint(at)
       return
     }
-    // Placement mode: left-click places, right-click cancels; middle still pans.
-    if (this.placingLight && e.button !== 1) {
-      if (e.button === 0) this.handlers.onPlaceLight(this.lightPointAt(p), e.shiftKey)
-      else this.handlers.onPlaceCancel()
+    // Placement mode: left-click places.
+    if (this.placingLight && e.button === 0) {
+      this.handlers.onPlaceLight(this.lightPointAt(p), e.shiftKey)
       return
     }
     const target = e.button === 0 ? this.targetAt(p) : null
@@ -861,6 +931,18 @@ export class GmCanvas extends PixiHost {
         ? [target.ref]
         : withLinked(walls, wasSelected ? this.selectedWallPoints : [target.ref])
       this.drag = { mode: 'wallPoint', ref: target.ref, refs, wasSelected }
+    } else if (target?.kind === 'object') {
+      const o = scene?.objects.find((x) => x.id === target.id)
+      if (!o) return
+      if (!this.selectedObjectIds.has(o.id)) this.handlers.onObjectSelect(o.id)
+      this.drag = { mode: 'object', id: o.id, grab: { x: o.x - p.x, y: o.y - p.y } }
+    } else if (target?.kind === 'objectResize') {
+      const o = scene?.objects.find((x) => x.id === target.id)
+      if (!o) return
+      const startDist = Math.max(1e-6, Math.hypot(p.x - o.x, p.y - o.y))
+      this.drag = { mode: 'objectResize', id: o.id, startDist, startW: o.width, startH: o.height }
+    } else if (target?.kind === 'objectRotate') {
+      this.drag = { mode: 'objectRotate', id: target.id }
     } else if (target?.kind === 'aim') {
       this.drag = { mode: 'aim', id: target.id }
     } else if (target?.kind === 'light') {
@@ -925,6 +1007,23 @@ export class GmCanvas extends PixiHost {
       this.handlers.onWallPointDrag(drag.refs, drag.ref, this.wallPointAt(p, drag.refs))
       return
     }
+    if (drag.mode === 'object' || drag.mode === 'objectResize' || drag.mode === 'objectRotate') {
+      const o = this.state?.scene.objects.find((x) => x.id === drag.id)
+      if (!o) return
+      if (drag.mode === 'object') {
+        this.handlers.onObjectChange(o.id, { x: p.x + drag.grab.x, y: p.y + drag.grab.y })
+      } else if (drag.mode === 'objectResize') {
+        const k = Math.max(0.02, Math.hypot(p.x - o.x, p.y - o.y) / drag.startDist)
+        const min = (this.state?.scene.grid.size ?? 100) * 0.1
+        const kk = Math.max(k, min / Math.min(drag.startW, drag.startH))
+        this.handlers.onObjectChange(o.id, { width: drag.startW * kk, height: drag.startH * kk })
+      } else {
+        let rotation = Math.atan2(p.y - o.y, p.x - o.x) + Math.PI / 2
+        if (e.shiftKey) rotation = Math.round(rotation / (Math.PI / 12)) * (Math.PI / 12)
+        this.handlers.onObjectChange(o.id, { rotation: ((rotation % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) })
+      }
+      return
+    }
     if (drag.mode === 'aim') {
       const light = this.state?.scene.lights.find((l) => l.id === drag.id)
       if (light) this.handlers.onLightAim(drag.id, Math.atan2(p.y - light.y, p.x - light.x))
@@ -950,7 +1049,8 @@ export class GmCanvas extends PixiHost {
     const start = this.pressedAt
     const clicked = start && Math.hypot(c.x - start.x, c.y - start.y) < CLICK_PX
     const drag = this.drag
-    const onSomething = drag && ['light', 'aim', 'wallPoint', 'box'].includes(drag.mode)
+    const onSomething =
+      drag && ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate'].includes(drag.mode)
     if (drag?.mode === 'box') {
       const r = rectBetween(drag.start, drag.end)
       const lights = (this.state?.scene.lights ?? []).filter((l) => inRect(l, r)).map((l) => l.id)

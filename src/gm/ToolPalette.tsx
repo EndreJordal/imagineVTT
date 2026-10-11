@@ -4,7 +4,7 @@ import { useGm } from './store'
 import { useDropdown } from './useDropdown'
 
 const SNAPS = [
-  { fraction: 1, label: '1', title: 'Whole squares: wall corners, light in the middle of a square' },
+  { fraction: 1, label: '1', title: 'Grid corners' },
   { fraction: 0.5, label: '½', title: 'Half squares' },
   { fraction: 0.25, label: '¼', title: 'Quarter squares' },
   { fraction: 0, label: 'Off', title: 'No snapping' },

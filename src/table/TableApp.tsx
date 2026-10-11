@@ -39,6 +39,9 @@ export function TableApp() {
         case 'fog':
           canvas.setFogMemory(msg.memory)
           break
+        case 'assets':
+          canvas.setObjectImages(msg.images)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break
