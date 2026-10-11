@@ -9,6 +9,7 @@ import {
   pointInPolygon,
   tableScale,
   tableViewCorners,
+  upMarker,
 } from './geometry'
 import type { Display, Scene } from './types'
 
@@ -19,6 +20,7 @@ const scene: Scene = {
   view: { x: 500, y: 500 },
   darkness: 0,
   lights: [],
+  fog: { enabled: false },
 }
 const display: Display = { pxPerMm: 4, orientation: 0 }
 
@@ -129,6 +131,22 @@ describe('boundingRect', () => {
     const c = tableViewCorners(scene, { ...display, orientation: 90 }, { width: 400, height: 200 })
     const r = boundingRect(c)
     expect([Math.round(r.width), Math.round(r.height)]).toEqual([200, 400])
+  })
+})
+
+describe('upMarker', () => {
+  // Which side of the view centre the marker sits on, per table orientation. The sidebar's
+  // orientation buttons draw the triangle on these sides, so they must stay in step.
+  const side = (orientation: 0 | 90 | 180 | 270) => {
+    const corners = tableViewCorners(scene, { ...display, orientation }, { width: 400, height: 200 })
+    const tip = upMarker(corners, scene.view, 10)[2]
+    const dx = Math.round(tip.x - scene.view.x)
+    const dy = Math.round(tip.y - scene.view.y)
+    return Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'top' : 'bottom'
+  }
+
+  it('sits on the edge that is up on the table', () => {
+    expect([side(0), side(90), side(180), side(270)]).toEqual(['top', 'left', 'bottom', 'right'])
   })
 })
 

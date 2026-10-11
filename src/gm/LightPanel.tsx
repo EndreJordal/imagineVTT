@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { LIGHT_PRESETS, type Light } from '../shared/lights'
+import { emitsLight, LIGHT_PRESETS, type Light } from '../shared/lights'
 import { useGm } from './store'
 
 /**
@@ -19,18 +19,25 @@ export function LightPanel() {
   const set = (patch: Partial<Light> | ((l: Light) => Partial<Light>)) => updateLights(ids, patch)
 
   const handheld = lights.filter((l) => LIGHT_PRESETS[l.kind].handheld)
+  // Pure vision tokens give no light, so light settings apply to the others only.
+  const emitters = lights.filter(emitsLight)
+  // Hand-held lights can see; vision tokens always do (they're nothing else).
+  const canToggleVision = emitters.filter((l) => LIGHT_PRESETS[l.kind].handheld)
+  const seeing = lights.filter((l) => l.vision)
+  const range = common(seeing, (l) => l.visionRange)
+  const fogOn = useGm.getState().scene.fog.enabled
   const directional = lights.filter((l) => LIGHT_PRESETS[l.kind].shape !== 'radial')
   const cones = lights.filter((l) => LIGHT_PRESETS[l.kind].shape === 'cone')
   // Settings only some lights have apply to just those.
   const only = (subset: Light[], patch: Partial<Light>) => (l: Light) =>
     subset.includes(l) ? patch : {}
 
-  const radius = common(lights, (l) => l.radius)
-  const intensity = common(lights, (l) => l.intensity)
-  const color = common(lights, (l) => l.color)
+  const radius = common(emitters, (l) => l.radius)
+  const intensity = common(emitters, (l) => l.intensity)
+  const color = common(emitters, (l) => l.color)
   const degrees = common(directional, (l) => Math.round(((((l.angle * 180) / Math.PI) % 360) + 360) % 360))
   const cone = common(cones, (l) => l.cone)
-  const first = lights[0]
+  const first = emitters[0] ?? lights[0]
   const single = lights.length === 1 ? LIGHT_PRESETS[first.kind] : null
 
   return (
@@ -54,11 +61,9 @@ export function LightPanel() {
         </button>
       </header>
 
-      <TriCheck
-        label="Lit"
-        values={lights.map((l) => l.on)}
-        onChange={(on) => set({ on })}
-      />
+      {emitters.length > 0 && (
+        <TriCheck label="Lit" values={emitters.map((l) => l.on)} onChange={(on) => set(only(emitters, { on }))} />
+      )}
       {handheld.length > 0 && (
         <TriCheck
           label="Travel with the PVB"
@@ -67,34 +72,59 @@ export function LightPanel() {
           onChange={(followView) => set(only(handheld, { followView }))}
         />
       )}
-      <Row label={radius === undefined ? 'Radius mixed' : `Radius ${radius} sq`}>
-        <input
-          type="range"
-          min={1}
-          max={30}
-          step={0.5}
-          value={radius ?? first.radius}
-          onChange={(e) => set({ radius: e.target.valueAsNumber })}
+      {canToggleVision.length > 0 && (
+        <TriCheck
+          label="Vision"
+          title="Breaks fog of war: the party sees from here"
+          values={canToggleVision.map((l) => l.vision)}
+          onChange={(vision) => set(only(canToggleVision, { vision }))}
         />
-      </Row>
-      <Row label={intensity === undefined ? 'Brightness mixed' : `Brightness ${Math.round(intensity * 100)}%`}>
-        <input
-          type="range"
-          min={0.1}
-          max={1}
-          step={0.05}
-          value={intensity ?? first.intensity}
-          onChange={(e) => set({ intensity: e.target.valueAsNumber })}
-        />
-      </Row>
-      <Row label={color === undefined ? 'Colour mixed' : 'Colour'}>
-        <input
-          type="color"
-          className="swatch"
-          value={color ?? first.color}
-          onChange={(e) => set({ color: e.target.value })}
-        />
-      </Row>
+      )}
+      {seeing.length > 0 && (
+        <Row label={range === undefined ? 'Vision mixed' : `Vision ${range} sq`}>
+          <input
+            type="range"
+            min={1}
+            max={100}
+            step={1}
+            value={range ?? seeing[0].visionRange}
+            onChange={(e) => set(only(seeing, { visionRange: e.target.valueAsNumber }))}
+          />
+        </Row>
+      )}
+      {seeing.length > 0 && !fogOn && <p className="hint">Vision shows once fog of war is on.</p>}
+      {emitters.length > 0 && (
+        <>
+          <Row label={radius === undefined ? 'Radius mixed' : `Radius ${radius} sq`}>
+            <input
+              type="range"
+              min={1}
+              max={30}
+              step={0.5}
+              value={radius ?? first.radius}
+              onChange={(e) => set(only(emitters, { radius: e.target.valueAsNumber }))}
+            />
+          </Row>
+          <Row label={intensity === undefined ? 'Brightness mixed' : `Brightness ${Math.round(intensity * 100)}%`}>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={intensity ?? first.intensity}
+              onChange={(e) => set(only(emitters, { intensity: e.target.valueAsNumber }))}
+            />
+          </Row>
+          <Row label={color === undefined ? 'Colour mixed' : 'Colour'}>
+            <input
+              type="color"
+              className="swatch"
+              value={color ?? first.color}
+              onChange={(e) => set(only(emitters, { color: e.target.value }))}
+            />
+          </Row>
+        </>
+      )}
       {directional.length > 0 && (
         <Row label={degrees === undefined ? 'Direction mixed' : `Direction ${degrees}°`}>
           <input
@@ -119,7 +149,9 @@ export function LightPanel() {
           />
         </Row>
       )}
-      {darkness === 0 && <p className="hint">It's day: lights show once you slide towards night.</p>}
+      {darkness === 0 && emitters.length > 0 && (
+        <p className="hint">It's day: lights show once you slide towards night.</p>
+      )}
       {lights.length === 1 && <p className="hint">Ctrl-click other lights to edit several at once.</p>}
       <button onClick={() => removeLights(ids)}>
         {lights.length === 1 ? 'Remove light' : `Remove ${lights.length} lights`}

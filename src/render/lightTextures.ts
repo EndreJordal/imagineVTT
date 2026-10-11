@@ -1,4 +1,5 @@
 import { Texture } from 'pixi.js'
+import { visionFalloff } from '../shared/fog'
 
 /**
  * Soft white light shapes, drawn once on a canvas. Lights are these, tinted and scaled.
@@ -40,6 +41,21 @@ export function radialTexture(): Texture {
     return radialFalloff(Math.hypot(dx, dy))
   })
   return radial
+}
+
+let vision: Texture | null = null
+
+/**
+ * A viewer's sight: full almost to its range, easing out at the edge (the same curve as fog
+ * memory, so what's seen and what's remembered line up). Half-width = range.
+ */
+export function visionTexture(): Texture {
+  vision ??= texture(SIZE, SIZE, (x, y) => {
+    const dx = (x + 0.5) / (SIZE / 2) - 1
+    const dy = (y + 0.5) / (SIZE / 2) - 1
+    return visionFalloff(Math.hypot(dx, dy))
+  })
+  return vision
 }
 
 let cone: Texture | null = null

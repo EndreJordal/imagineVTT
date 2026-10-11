@@ -1,4 +1,7 @@
-/** Light sources: presets for each kind, and their flicker animation. */
+/**
+ * Light sources and vision tokens: presets for each kind, and light flicker animation.
+ * A vision token is a "light" with no light (shape 'none'): it only lets the party see.
+ */
 
 export type LightKind =
   | 'fixture'
@@ -11,6 +14,7 @@ export type LightKind =
   | 'candle'
   | 'flashlight'
   | 'lantern'
+  | 'vision'
 
 export interface Light {
   id: string
@@ -31,13 +35,17 @@ export interface Light {
   on: boolean
   /** Moves along when the GM moves the table view (hand-held lights carried by the party). */
   followView?: boolean
+  /** Breaks fog of war around it: the party sees from here. */
+  vision: boolean
+  /** How far it sees, in grid squares. */
+  visionRange: number
 }
 
 /** How a light's brightness behaves over time. */
 export type Animation = 'steady' | 'fire' | 'candle' | 'lantern' | 'faultyFixture' | 'faultyNeon'
 
-/** How the light spreads: round, a cone, or along a tube. */
-export type Shape = 'radial' | 'cone' | 'tube'
+/** How the light spreads: round, a cone, along a tube, or not at all (vision only). */
+export type Shape = 'radial' | 'cone' | 'tube' | 'none'
 
 export interface LightPreset {
   label: string
@@ -52,6 +60,9 @@ export interface LightPreset {
   cone?: number
 }
 
+/** Hand-held lights and vision tokens see this far by default (100ft in 5ft squares). */
+export const DEFAULT_VISION_RANGE = 20
+
 /** Radii roughly follow 5e (squares of 5ft): a torch lights 20ft bright + 20ft dim. */
 export const LIGHT_PRESETS: Record<LightKind, LightPreset> = {
   fixture: { label: 'Light fixture', icon: '💡', handheld: false, shape: 'radial', animation: 'steady', radius: 7, color: '#fff4e0', intensity: 0.95 },
@@ -64,7 +75,11 @@ export const LIGHT_PRESETS: Record<LightKind, LightPreset> = {
   candle: { label: 'Candle', icon: '🕯️', handheld: true, shape: 'radial', animation: 'candle', radius: 2.5, color: '#ffb766', intensity: 0.8 },
   flashlight: { label: 'Flashlight', icon: '🔦', handheld: true, shape: 'cone', animation: 'steady', radius: 12, color: '#f4f8ff', intensity: 0.95, cone: 50 },
   lantern: { label: 'Lantern', icon: '🏮', handheld: true, shape: 'radial', animation: 'lantern', radius: 10, color: '#ffc070', intensity: 0.9 },
+  vision: { label: 'Vision token', icon: '👤', handheld: true, shape: 'none', animation: 'steady', radius: 0, color: '#9ad0ff', intensity: 0 },
 }
+
+/** Gives light (as opposed to a pure vision token). */
+export const emitsLight = (light: Light) => LIGHT_PRESETS[light.kind].shape !== 'none'
 
 /** Menu order: modern lights first, then fire, then hand-held. */
 export const LIGHT_MENU: { kind: LightKind; label: string }[] = [
@@ -78,6 +93,7 @@ export const LIGHT_MENU: { kind: LightKind; label: string }[] = [
   { kind: 'torch', label: 'Torch' },
   { kind: 'lantern', label: 'Lantern' },
   { kind: 'candle', label: 'Candle' },
+  { kind: 'vision', label: 'Vision token (no light)' },
 ]
 
 export function createLight(kind: LightKind, x: number, y: number, id: string): Light {
@@ -94,6 +110,9 @@ export function createLight(kind: LightKind, x: number, y: number, id: string): 
     cone: p.cone ?? 50,
     // Hand-held lights start unlit so the GM decides when the party lights them.
     on: !p.handheld,
+    // What the party carries is where they see from.
+    vision: p.handheld,
+    visionRange: DEFAULT_VISION_RANGE,
   }
 }
 

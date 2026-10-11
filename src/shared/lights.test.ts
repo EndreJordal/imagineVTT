@@ -43,6 +43,6 @@ describe('presets', () => {
       .filter(([, p]) => p.handheld)
       .map(([k]) => k)
       .sort()
-    expect(handheld).toEqual(['candle', 'flashlight', 'lantern', 'torch'])
+    expect(handheld).toEqual(['candle', 'flashlight', 'lantern', 'torch', 'vision'])
   })
 })

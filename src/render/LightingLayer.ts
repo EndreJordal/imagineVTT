@@ -1,5 +1,5 @@
 import { Container, RenderTexture, Sprite, type Renderer } from 'pixi.js'
-import { animateLight, LIGHT_PRESETS, seedOf, type Light, type LightFrame } from '../shared/lights'
+import { animateLight, emitsLight, LIGHT_PRESETS, seedOf, type Light, type LightFrame } from '../shared/lights'
 import type { Rect } from '../shared/types'
 import { coneTexture, radialTexture } from './lightTextures'
 
@@ -55,11 +55,12 @@ export class LightingLayer {
 
   /** Whether anything is lit; the scene layer hides the lit copy otherwise. */
   get active() {
-    return this.darkness > 0 && this.lights.some((l) => l.on)
+    return this.darkness > 0 && this.lights.some((l) => l.on && emitsLight(l))
   }
 
-  sync(lights: Light[], bounds: Rect, gridSize: number, darkness: number) {
-    if (lights !== this.lights || gridSize !== this.gridSize || darkness !== this.darkness) {
+  sync(all: Light[], bounds: Rect, gridSize: number, darkness: number) {
+    const lights = all.filter(emitsLight) // vision tokens give no light
+    if (!sameLights(lights, this.lights) || gridSize !== this.gridSize || darkness !== this.darkness) {
       this.dirty = true
     }
     this.lights = lights
@@ -180,6 +181,11 @@ export class LightingLayer {
     this.maskMap?.destroy(true)
     this.glowMap?.destroy(true)
   }
+}
+
+/** Same light objects in the same order (the store replaces a light object when it changes). */
+function sameLights(a: Light[], b: Light[]) {
+  return a.length === b.length && a.every((l, i) => l === b[i])
 }
 
 function setSprite(s: Sprite, x: number, y: number, rotation: number, sx: number, sy: number, alpha: number) {

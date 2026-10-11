@@ -25,8 +25,38 @@ export function Toolbar() {
         <span aria-hidden>🌙</span>
       </label>
       <GmVision />
+      <FogToggle />
       <LightMenu />
     </header>
+  )
+}
+
+/** Fog of war on/off, and forgetting what the party has explored. */
+function FogToggle() {
+  const enabled = useGm((s) => s.scene.fog.enabled)
+  const { setFogEnabled, resetFog } = useGm.getState()
+  return (
+    <div className="toolbar-item">
+      <button
+        className={enabled ? 'active' : ''}
+        aria-pressed={enabled}
+        title="Fog of war: players see only what vision tokens see, and greyscale memory of where they've been"
+        onClick={() => setFogEnabled(!enabled)}
+      >
+        🌫 Fog{enabled ? ' on' : ''}
+      </button>
+      {enabled && (
+        <button
+          className="icon-button"
+          title="Reset fog: forget everything the party has explored"
+          onClick={() => {
+            if (confirm('Forget everything the party has explored?')) resetFog()
+          }}
+        >
+          ↺
+        </button>
+      )}
+    </div>
   )
 }
 

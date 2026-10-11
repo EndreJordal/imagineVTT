@@ -64,7 +64,9 @@ export function GmApp() {
         tableConnected: s.tableConnected,
         selectedLightIds: s.selectedLightIds,
         placingLight: s.placingLight,
+        peeking: s.peeking,
       })
+      canvas.setFogMemory(s.fogMemory, s.fogVersion)
     }
     push()
     const unsubscribe = useGm.subscribe((s) => push(s))

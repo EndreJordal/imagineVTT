@@ -2,6 +2,7 @@ import { Container, Graphics, Text } from 'pixi.js'
 import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
 import { CALIBRATION_MM, tableTransform } from '../shared/geometry'
+import type { FogMemory } from '../shared/fog'
 import type { TableState } from '../shared/types'
 
 /** Display-only renderer for the table TV. Fixed physical scale, no input. */
@@ -10,6 +11,7 @@ export class TableCanvas extends PixiHost {
   private calibration = new Container()
   private state: TableState | null = null
   private image: Blob | null = null
+  private fogMemory: FogMemory | null = null
 
   constructor(host: HTMLElement) {
     super(host, '#000000')
@@ -20,12 +22,18 @@ export class TableCanvas extends PixiHost {
     this.app.renderer.on('resize', () => this.render())
     this.app.ticker.add(() => this.sceneLayer.animate(this.app.renderer, performance.now() / 1000))
     void this.sceneLayer.setMapImage(this.image)
+    this.sceneLayer.setFogMemory(this.fogMemory)
     this.render()
   }
 
   setState(state: TableState) {
     this.state = state
     this.render()
+  }
+
+  setFogMemory(memory: FogMemory | null) {
+    this.fogMemory = memory
+    if (this.ready) this.sceneLayer.setFogMemory(memory)
   }
 
   setMapImage(image: Blob | null) {
@@ -39,7 +47,7 @@ export class TableCanvas extends PixiHost {
     const screen = this.app.screen
 
     this.sceneLayer.visible = !calibrating
-    this.sceneLayer.update(scene)
+    this.sceneLayer.update(scene, 'players')
     const t = tableTransform(scene, display, screen)
     this.sceneLayer.scale.set(t.scale)
     this.sceneLayer.rotation = t.rotation

@@ -9,6 +9,7 @@ import {
   upMarker,
 } from '../shared/geometry'
 import { LIGHT_PRESETS, type Light, type LightKind } from '../shared/lights'
+import type { FogMemory } from '../shared/fog'
 import type { Point, Size, TableState } from '../shared/types'
 
 const MIN_ZOOM = 0.05
@@ -60,6 +61,8 @@ export interface GmUi {
   selectedLightIds: string[]
   /** Light kind waiting to be placed with a click, if any. */
   placingLight: LightKind | null
+  /** Showing the GM exactly what the players see (fog of war included). */
+  peeking: boolean
 }
 
 type Drag =
@@ -160,8 +163,13 @@ export class GmCanvas extends PixiHost {
   private lightTokens = new Container()
   private tokens = new Map<string, Token>()
   private aimHandle = new Graphics()
+  /** Faint rings showing how far the selected vision tokens see. */
+  private visionRings = new Graphics()
   private selectedLightIds = new Set<string>()
   private placingLight: LightKind | null = null
+  private peeking = false
+  private fogMemory: FogMemory | null = null
+  private fogVersion = -1
   /** Where the current press started (canvas px), to tell clicks from drags. */
   private pressedAt: Point | null = null
   private state: TableState | null = null
@@ -184,11 +192,13 @@ export class GmCanvas extends PixiHost {
       this.viewOverlay,
       this.mapHandle,
       this.viewMarker,
+      this.visionRings,
       this.lightTokens,
       this.aimHandle,
     )
     this.app.stage.addChild(this.camera)
     void this.sceneLayer.setMapImage(this.image)
+    this.sceneLayer.setFogMemory(this.fogMemory)
 
     const canvas = this.app.canvas
     canvas.addEventListener('pointerdown', this.onPointerDown)
@@ -206,11 +216,20 @@ export class GmCanvas extends PixiHost {
     this.tableScreen = ui.tableScreen
     this.tableConnected = ui.tableConnected
     this.selectedLightIds = new Set(ui.selectedLightIds)
+    this.peeking = ui.peeking
     if (ui.placingLight !== this.placingLight) {
       this.placingLight = ui.placingLight
       if (this.ready) this.app.canvas.style.cursor = this.cursorFor(null)
     }
     this.render()
+  }
+
+  /** Fog memory changed (the grid object is updated in place; version tells when). */
+  setFogMemory(memory: FogMemory | null, version: number) {
+    if (version === this.fogVersion) return
+    this.fogVersion = version
+    this.fogMemory = memory
+    if (this.ready) this.sceneLayer.setFogMemory(memory)
   }
 
   setMapImage(image: Blob | null) {
@@ -244,7 +263,7 @@ export class GmCanvas extends PixiHost {
 
   private render() {
     if (!this.ready || !this.state) return
-    this.sceneLayer.update(this.state.scene)
+    this.sceneLayer.update(this.state.scene, this.peeking ? 'players' : 'gm')
     if (!this.fitted) {
       this.fitted = true
       this.fit()
@@ -350,6 +369,15 @@ export class GmCanvas extends PixiHost {
         .fill({ color: 0x1d1d22, alpha: 0.85 })
         .stroke({ width: 2.5, color: light.color })
       if (selected) t.ring.circle(0, 0, TOKEN_PX + 3.5).stroke({ width: 2, color: 0xffffff })
+    }
+
+    const rings = this.visionRings.clear()
+    const gridSize = this.state?.scene.grid.size ?? 100
+    for (const light of lights) {
+      if (!light.vision || !this.selectedLightIds.has(light.id)) continue
+      rings
+        .circle(light.x, light.y, light.visionRange * gridSize)
+        .stroke({ width: 1.5 * this.px, color: 0x9ad0ff, alpha: 0.5 })
     }
 
     // Aim handle for the selected directional light (when it's the only one selected).

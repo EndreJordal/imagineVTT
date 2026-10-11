@@ -23,6 +23,9 @@ export function TableApp() {
         case 'map':
           canvas.setMapImage(msg.image)
           break
+        case 'fog':
+          canvas.setFogMemory(msg.memory)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break

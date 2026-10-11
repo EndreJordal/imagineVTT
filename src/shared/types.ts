@@ -52,8 +52,10 @@ export interface Scene {
   view: Point
   /** Time of day, 0 (day: map as drawn) to 1 (night: dimmed and desaturated). */
   darkness: number
-  /** Light sources; they light up the map at night. */
+  /** Light sources and vision tokens. Lights light up the map at night. */
   lights: Light[]
+  /** Fog of war: players see only what vision tokens see now (and greyscale memory). */
+  fog: { enabled: boolean }
 }
 
 export type Orientation = 0 | 90 | 180 | 270

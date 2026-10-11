@@ -101,3 +101,57 @@ describe('gmDarkness', () => {
     expect(gmDarkness({ scene: scene(0.9), gmVision: 1, peeking: true })).toBe(0.9)
   })
 })
+
+describe('fog of war', () => {
+  const seen = (x: number, y: number) => {
+    const { fogMemory: m, scene } = useGm.getState()
+    const b = scene.map!
+    const cx = Math.floor(((x - b.x) / b.width) * m!.cols)
+    const cy = Math.floor(((y - b.y) / b.height) * m!.rows)
+    return m!.data[cy * m!.cols + cx]
+  }
+
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      scene: {
+        ...s.scene,
+        lights: [],
+        grid: { ...s.scene.grid, size: 100 },
+        map: { x: 0, y: 0, width: 5000, height: 5000, naturalWidth: 5000, naturalHeight: 5000 },
+        fog: { enabled: false },
+      },
+      fogMemory: null,
+      fogVersion: 0,
+    }))
+  })
+
+  it('reveals around vision tokens (lit or not), and not around fixed lights', () => {
+    const { addLight, setFogEnabled, updateLight } = useGm.getState()
+    addLight('torch', { x: 1000, y: 1000 }) // unlit, but sees
+    addLight('vision', { x: 4000, y: 1000 })
+    addLight('fixture', { x: 1000, y: 4000 }) // lit, no vision
+    updateLight(lights()[1].id, { visionRange: 5 })
+
+    setFogEnabled(true)
+    expect(seen(1000, 1000)).toBe(255)
+    expect(seen(1000 + 1500, 1000)).toBe(255) // 15 squares: inside the torch's 20
+    expect(seen(4000 + 700, 1000)).toBe(0) // beyond the vision token's 5
+    expect(seen(1000, 4000)).toBe(0)
+  })
+
+  it('remembers where vision tokens have been, until reset', () => {
+    const { addLight, setFogEnabled, updateLight, stampFog, resetFog } = useGm.getState()
+    addLight('vision', { x: 500, y: 500 })
+    updateLight(lights()[0].id, { visionRange: 3 })
+    setFogEnabled(true)
+    updateLight(lights()[0].id, { x: 3000, y: 3000 })
+    stampFog() // the GM's sync does this on every scene change
+    expect(seen(500, 500)).toBe(255) // still remembered
+    expect(seen(3000, 3000)).toBe(255)
+
+    resetFog()
+    expect(seen(500, 500)).toBe(0) // forgotten
+    expect(seen(3000, 3000)).toBe(255) // still in sight now
+  })
+})
+

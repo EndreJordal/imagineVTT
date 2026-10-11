@@ -4,10 +4,18 @@ import {
   boundingRect,
   carryPoint,
   fitMapToRect,
+  sceneBounds,
   followGrid,
   tableViewCorners,
 } from '../shared/geometry'
-import { createLight, type Light, type LightKind } from '../shared/lights'
+import { createFogMemory, fitsBounds, stampVision, type FogMemory } from '../shared/fog'
+import {
+  createLight,
+  DEFAULT_VISION_RANGE,
+  LIGHT_PRESETS,
+  type Light,
+  type LightKind,
+} from '../shared/lights'
 import { load } from '../shared/persist'
 import type { Display, GridSettings, MapInfo, Point, Scene, Size, TableState } from '../shared/types'
 
@@ -39,6 +47,12 @@ interface GmStore extends TableState {
   gmVision: number
   /** Temporarily show the GM exactly what the players see (while a peek key/button is held). */
   peeking: boolean
+  /**
+   * What the party has seen under fog of war. The grid is updated in place, so fogVersion
+   * changes whenever it does (that is what subscribers watch).
+   */
+  fogMemory: FogMemory | null
+  fogVersion: number
 
   setGrid(patch: Partial<GridSettings>): void
   setDisplay(patch: Partial<Display>): void
@@ -46,6 +60,11 @@ interface GmStore extends TableState {
   setView(view: Point): void
   setDarkness(darkness: number): void
   setGmVision(vision: number): void
+  setFogEnabled(enabled: boolean): void
+  /** Record what vision tokens see now into fog memory (when fog is on). */
+  stampFog(): void
+  /** Forget everything the party has seen. */
+  resetFog(): void
   setPeeking(peeking: boolean): void
   /** Add a light at a scene position and select it. */
   addLight(kind: LightKind, at: Point): void
@@ -89,6 +108,7 @@ const defaultScene: Scene = {
   view: { x: 2000, y: 1250 },
   darkness: 0,
   lights: [],
+  fog: { enabled: false },
 }
 
 // 96 CSS px per inch is the nominal value; real TVs differ, hence calibration.
@@ -108,6 +128,8 @@ export const useGm = create<GmStore>()((set) => ({
   placingLight: null,
   gmVision: DEFAULT_GM_VISION,
   peeking: false,
+  fogMemory: null,
+  fogVersion: 0,
 
   setGrid: (patch) =>
     set((s) => {
@@ -131,6 +153,27 @@ export const useGm = create<GmStore>()((set) => ({
     }),
   setDarkness: (darkness) => set((s) => ({ scene: { ...s.scene, darkness } })),
   setGmVision: (gmVision) => set({ gmVision }),
+  setFogEnabled: (enabled) => {
+    set((s) => ({ scene: { ...s.scene, fog: { enabled } } }))
+    useGm.getState().stampFog()
+  },
+  stampFog: () =>
+    set((s) => {
+      if (!s.scene.fog.enabled) return s
+      const bounds = sceneBounds(s.scene)
+      // A memory made for another map (different shape) starts over.
+      const memory = s.fogMemory && fitsBounds(s.fogMemory, bounds) ? s.fogMemory : createFogMemory(bounds)
+      const viewers = s.scene.lights
+        .filter((l) => l.vision)
+        .map((l) => ({ x: l.x, y: l.y, range: l.visionRange * s.scene.grid.size }))
+      const changed = stampVision(memory, bounds, viewers)
+      if (!changed && memory === s.fogMemory) return s
+      return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
+    }),
+  resetFog: () => {
+    set((s) => ({ fogMemory: createFogMemory(sceneBounds(s.scene)), fogVersion: s.fogVersion + 1 }))
+    useGm.getState().stampFog()
+  },
   setPeeking: (peeking) => set({ peeking }),
   addLight: (kind, at) =>
     set((s) => {
@@ -174,6 +217,9 @@ export const useGm = create<GmStore>()((set) => ({
   setMap: (mapImage, size) =>
     set((s) => ({
       mapImage,
+      // Memory belongs to the old map.
+      fogMemory: null,
+      fogVersion: s.fogVersion + 1,
       scene: {
         ...s.scene,
         map: size && { x: 0, y: 0, ...size, naturalWidth: size.width, naturalHeight: size.height },
@@ -272,18 +318,24 @@ export function tableState(s: GmStore): TableState {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision] = await Promise.all([
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory] = await Promise.all([
     load<Scene>('scene'),
     load<Display>('display'),
     load<Blob | null>('mapImage'),
     load<Size>('tableScreen'),
     load<number>('gmVision'),
+    load<FogMemory>('fogMemory'),
   ])
   // Fill in fields missing from scenes saved by earlier versions.
   if (scene) {
     scene.grid = { ...DEFAULT_GRID_STYLE, ...scene.grid }
     scene.darkness ??= 0
     scene.lights ??= []
+    scene.fog ??= { enabled: false }
+    for (const l of scene.lights) {
+      l.vision ??= LIGHT_PRESETS[l.kind].handheld
+      l.visionRange ??= DEFAULT_VISION_RANGE
+    }
   }
   const map = scene?.map as (Partial<MapInfo> & Size) | null | undefined
   if (map) {
@@ -298,5 +350,6 @@ export async function hydrate() {
     mapImage: mapImage ?? null,
     tableScreen: tableScreen ?? defaultTableScreen,
     gmVision: gmVision ?? DEFAULT_GM_VISION,
+    fogMemory: fogMemory ?? null,
   })
 }

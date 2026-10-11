@@ -1,8 +1,8 @@
 import { useState, type ReactNode, type RefObject } from 'react'
 import { CALIBRATION_MM, tableScale } from '../shared/geometry'
-import type { Orientation } from '../shared/types'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
+import { PvbOrientation } from './PvbOrientation'
 import { MM_PER_INCH, useGm } from './store'
 
 function openTableWindow() {
@@ -23,7 +23,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   return (
     <aside className="sidebar">
 
-      <Section title="Table display">
+      <Section title="Player View Box (PVB)">
         <button onClick={openTableWindow}>Open table window</button>
         <p className="hint">
           {s.tableConnected
@@ -35,19 +35,16 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           {(s.tableScreen.height / tableScale(s.scene, s.display) / grid.size).toFixed(1)} squares
           {!s.tableConnected && ` (last known ${s.tableScreen.width}×${s.tableScreen.height})`}
         </p>
-        <div className="row">
-          <button onClick={() => rotate(-90)}>⟲ Rotate</button>
-          <button onClick={() => rotate(90)}>Rotate ⟳</button>
-        </div>
+        <PvbOrientation />
         <button
           onClick={() => {
             const c = canvas.current?.centre()
             if (c) s.setView(c)
           }}
         >
-          Move table view here
+          Move PVB here
         </button>
-        <p className="hint">Drag the yellow triangle to move the table view.</p>
+        <p className="hint">Drag the yellow triangle to move the PVB.</p>
       </Section>
 
       <Section title="Calibration">
@@ -229,11 +226,6 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       </Section>
     </aside>
   )
-
-  function rotate(by: number) {
-    const orientation = (((s.display.orientation + by) % 360) + 360) % 360
-    s.setDisplay({ orientation: orientation as Orientation })
-  }
 }
 
 /** Measure the on-table square with a ruler and enter the result to correct the scale. */
