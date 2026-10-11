@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LIGHT_MENU, LIGHT_PRESETS, type LightKind } from '../shared/lights'
+import { openScene, saveScene } from './sceneFiles'
 import { useGm } from './store'
 
 export function Toolbar() {
@@ -9,6 +10,7 @@ export function Toolbar() {
   return (
     <header className="toolbar">
       <span className="toolbar-title">imagineVTT</span>
+      <SceneFile />
       <label className="toolbar-item" title="Time of day: dims and desaturates the map, on the table too">
         <span aria-hidden>☀</span>
         <input
@@ -28,6 +30,33 @@ export function Toolbar() {
       <FogToggle />
       <LightMenu />
     </header>
+  )
+}
+
+/** The open scene's name (• when there are unsaved changes), and opening/saving files. */
+function SceneFile() {
+  const name = useGm((s) => s.sceneName) ?? 'Untitled scene'
+  const unsaved = useGm((s) => s.unsaved)
+  useEffect(() => {
+    document.title = `${unsaved ? '• ' : ''}${name} — imagineVTT GM`
+  }, [name, unsaved])
+  return (
+    <div className="toolbar-item scene-file">
+      <span className="scene-name" title={unsaved ? 'Unsaved changes' : 'Saved'}>
+        {name}
+        {unsaved && <span className="unsaved-dot"> •</span>}
+      </span>
+      <button className="icon-button" title="Open a scene (Ctrl+O)" onClick={() => void openScene()}>
+        📂
+      </button>
+      <button
+        className="icon-button"
+        title="Save the scene (Ctrl+S; Ctrl+Shift+S to save as a new file)"
+        onClick={(e) => void saveScene(e.shiftKey)}
+      >
+        💾
+      </button>
+    </div>
   )
 }
 

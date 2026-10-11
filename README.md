@@ -2,6 +2,8 @@
 
 A lightweight, local-only virtual tabletop for in-person play with a TV laid flat on the table under physical minis. See [SPEC.md](SPEC.md).
 
+**Live:** https://endrejordal.github.io/imagineVTT/ (deployed from `main` by GitHub Actions)
+
 ## Run
 
 ```bash

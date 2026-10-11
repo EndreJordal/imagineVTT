@@ -3,6 +3,7 @@ import { CALIBRATION_MM, tableScale } from '../shared/geometry'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
+import { WallsSection } from './Walls'
 import { MM_PER_INCH, useGm } from './store'
 
 function openTableWindow() {
@@ -172,6 +173,8 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
         )}
         <button onClick={() => canvas.current?.fit()}>Zoom to map</button>
       </Section>
+
+      <WallsSection />
 
       <Section title="Grid">
         <label className="check">

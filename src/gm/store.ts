@@ -17,6 +17,16 @@ import {
   type LightKind,
 } from '../shared/lights'
 import { load } from '../shared/persist'
+import type { GmCamera, SceneFile } from '../shared/sceneFile'
+import { createVisibilityTest, visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
+import {
+  deleteWallPoints,
+  moveWallPoints,
+  sameRef,
+  sameSpot,
+  withLinked,
+  type WallPointRef,
+} from '../shared/walls'
 import type { Display, GridSettings, MapInfo, Point, Scene, Size, TableState } from '../shared/types'
 
 export const MM_PER_INCH = 25.4
@@ -38,6 +48,8 @@ interface GmStore extends TableState {
   tableConnected: boolean
   /** Lights whose tokens are selected in the GM view (GM-only, not sent to the table). */
   selectedLightIds: string[]
+  /** Selected wall points (GM-only). */
+  selectedWallPoints: WallPointRef[]
   /** A light kind waiting to be placed with a click on the map (GM-only). */
   placingLight: LightKind | null
   /**
@@ -53,6 +65,20 @@ interface GmStore extends TableState {
    */
   fogMemory: FogMemory | null
   fogVersion: number
+  /** Wall building mode (GM-only): clicks add points to the wall being drawn. */
+  buildingWalls: boolean
+  /** Snap wall points to every 1, 1/2 or 1/4 square; 0 = no snapping. */
+  wallSnap: number
+  /** Points of the wall being drawn, not yet confirmed. */
+  wallDraft: Point[]
+  /** The GM's pan and zoom (saved with the session and in scene files). */
+  gmCamera: GmCamera | null
+  /** Bumped when the GM's camera should jump to gmCamera (session restore, scene open). */
+  cameraVersion: number
+  /** Name of the open scene file, if it came from or was saved to one. */
+  sceneName: string | null
+  /** Changes since the scene was last saved to or opened from a file. */
+  unsaved: boolean
 
   setGrid(patch: Partial<GridSettings>): void
   setDisplay(patch: Partial<Display>): void
@@ -60,11 +86,27 @@ interface GmStore extends TableState {
   setView(view: Point): void
   setDarkness(darkness: number): void
   setGmVision(vision: number): void
+  /** The GM panned or zoomed (doesn't move the camera; the canvas already did). */
+  setGmCamera(camera: GmCamera): void
+  /** Replace the scene with one from a file. */
+  loadScene(file: SceneFile, name: string): void
+  /** The scene was just saved under this name. */
+  markSaved(name: string): void
+  markUnsaved(): void
   setFogEnabled(enabled: boolean): void
   /** Record what vision tokens see now into fog memory (when fog is on). */
   stampFog(): void
   /** Forget everything the party has seen. */
   resetFog(): void
+  setBuildingWalls(on: boolean): void
+  setWallSnap(fraction: number): void
+  addWallPoint(p: Point): void
+  /** Take back the last point of the wall being drawn. */
+  undoWallPoint(): void
+  cancelWallDraft(): void
+  /** Turn the drawn points into a wall (needs at least two). */
+  confirmWallDraft(): void
+  clearWalls(): void
   setPeeking(peeking: boolean): void
   /** Add a light at a scene position and select it. */
   addLight(kind: LightKind, at: Point): void
@@ -75,8 +117,18 @@ interface GmStore extends TableState {
   updateLights(ids: string[], patch: Partial<Light> | ((light: Light) => Partial<Light>)): void
   moveLights(ids: string[], dx: number, dy: number): void
   removeLights(ids: string[]): void
-  /** Select just this light (or none). */
+  /** Select just this light (or nothing at all). */
   selectLight(id: string | null): void
+  /** Select just this wall point (and the points linked with it). */
+  selectWallPoint(ref: WallPointRef): void
+  /** Add a wall point (and its linked points) to the selection, or take them out. */
+  toggleWallPointSelected(ref: WallPointRef): void
+  /** Box selection: these lights and wall points (added to the selection if `add`). */
+  selectMany(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
+  moveWallPoints(refs: WallPointRef[], dx: number, dy: number): void
+  deleteWallPoints(refs: WallPointRef[]): void
+  /** Delete everything selected: lights and wall points. */
+  deleteSelection(): void
   /** Add a light to the selection, or take it out if it's already in. */
   toggleLightSelected(id: string): void
   /** Load a new map image at its natural size (null clears it). */
@@ -109,6 +161,7 @@ const defaultScene: Scene = {
   darkness: 0,
   lights: [],
   fog: { enabled: false },
+  walls: [],
 }
 
 // 96 CSS px per inch is the nominal value; real TVs differ, hence calibration.
@@ -125,11 +178,19 @@ export const useGm = create<GmStore>()((set) => ({
   tableScreen: defaultTableScreen,
   tableConnected: false,
   selectedLightIds: [],
+  selectedWallPoints: [],
   placingLight: null,
   gmVision: DEFAULT_GM_VISION,
   peeking: false,
   fogMemory: null,
   fogVersion: 0,
+  buildingWalls: false,
+  wallSnap: 1,
+  wallDraft: [],
+  gmCamera: null,
+  cameraVersion: 0,
+  sceneName: null,
+  unsaved: false,
 
   setGrid: (patch) =>
     set((s) => {
@@ -153,6 +214,28 @@ export const useGm = create<GmStore>()((set) => ({
     }),
   setDarkness: (darkness) => set((s) => ({ scene: { ...s.scene, darkness } })),
   setGmVision: (gmVision) => set({ gmVision }),
+  setGmCamera: (gmCamera) => set({ gmCamera }),
+  loadScene: (file, name) => {
+    set((s) => ({
+      scene: migrateScene(file.scene),
+      display: { ...s.display, orientation: file.orientation },
+      mapImage: file.mapImage,
+      fogMemory: file.fogMemory,
+      fogVersion: s.fogVersion + 1,
+      gmCamera: file.camera,
+      cameraVersion: s.cameraVersion + 1,
+      // A fresh start for the GM's tools.
+      selectedLightIds: [],
+      selectedWallPoints: [],
+      placingLight: null,
+      buildingWalls: false,
+      wallDraft: [],
+    }))
+    // After the scene change, which marks unsaved (see sync).
+    set({ sceneName: name, unsaved: false })
+  },
+  markSaved: (sceneName) => set({ sceneName, unsaved: false }),
+  markUnsaved: () => set({ unsaved: true }),
   setFogEnabled: (enabled) => {
     set((s) => ({ scene: { ...s.scene, fog: { enabled } } }))
     useGm.getState().stampFog()
@@ -163,13 +246,53 @@ export const useGm = create<GmStore>()((set) => ({
       const bounds = sceneBounds(s.scene)
       // A memory made for another map (different shape) starts over.
       const memory = s.fogMemory && fitsBounds(s.fogMemory, bounds) ? s.fogMemory : createFogMemory(bounds)
+      const segments = wallSegments(s.scene.walls)
       const viewers = s.scene.lights
         .filter((l) => l.vision)
-        .map((l) => ({ x: l.x, y: l.y, range: l.visionRange * s.scene.grid.size }))
+        .map((l) => {
+          const range = l.visionRange * s.scene.grid.size
+          // Walls block sight: only what's in line of sight is remembered.
+          const sees = segments.length
+            ? createVisibilityTest(l, visibilityPolygon(l, range, segments))
+            : undefined
+          return { x: l.x, y: l.y, range, sees }
+        })
       const changed = stampVision(memory, bounds, viewers)
       if (!changed && memory === s.fogMemory) return s
       return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
     }),
+  setBuildingWalls: (buildingWalls) =>
+    // One tool at a time: building walls cancels placing a light.
+    set((s) => ({
+      buildingWalls,
+      wallDraft: [],
+      placingLight: buildingWalls ? null : s.placingLight,
+      // The wall toolbox takes the selection panels' place.
+      selectedLightIds: buildingWalls ? [] : s.selectedLightIds,
+      selectedWallPoints: buildingWalls ? [] : s.selectedWallPoints,
+    })),
+  setWallSnap: (wallSnap) => set({ wallSnap }),
+  addWallPoint: (p) =>
+    set((s) => {
+      const draft = s.wallDraft
+      const last = draft.at(-1)
+      if (last && sameSpot(last, p)) return s // a double click, not a new point
+      // Back at the start of a shape: close it and finish the wall.
+      if (draft.length >= 3 && sameSpot(draft[0], p)) {
+        const wall: Wall = { id: crypto.randomUUID(), points: [...draft, { ...draft[0] }] }
+        return { scene: { ...s.scene, walls: [...s.scene.walls, wall] }, wallDraft: [] }
+      }
+      return { wallDraft: [...draft, p] }
+    }),
+  undoWallPoint: () => set((s) => ({ wallDraft: s.wallDraft.slice(0, -1) })),
+  cancelWallDraft: () => set({ wallDraft: [] }),
+  confirmWallDraft: () =>
+    set((s) => {
+      if (s.wallDraft.length < 2) return { wallDraft: [] }
+      const wall: Wall = { id: crypto.randomUUID(), points: s.wallDraft }
+      return { scene: { ...s.scene, walls: [...s.scene.walls, wall] }, wallDraft: [] }
+    }),
+  clearWalls: () => set((s) => ({ scene: { ...s.scene, walls: [] }, wallDraft: [], selectedWallPoints: [] })),
   resetFog: () => {
     set((s) => ({ fogMemory: createFogMemory(sceneBounds(s.scene)), fogVersion: s.fogVersion + 1 }))
     useGm.getState().stampFog()
@@ -178,7 +301,11 @@ export const useGm = create<GmStore>()((set) => ({
   addLight: (kind, at) =>
     set((s) => {
       const light = createLight(kind, at.x, at.y, crypto.randomUUID())
-      return { scene: { ...s.scene, lights: [...s.scene.lights, light] }, selectedLightIds: [light.id] }
+      return {
+        scene: { ...s.scene, lights: [...s.scene.lights, light] },
+        selectedLightIds: [light.id],
+        selectedWallPoints: [],
+      }
     }),
   updateLight: (id, patch) =>
     set((s) => ({
@@ -206,14 +333,55 @@ export const useGm = create<GmStore>()((set) => ({
         selectedLightIds: s.selectedLightIds.filter((id) => !gone.has(id)),
       }
     }),
-  selectLight: (id) => set({ selectedLightIds: id ? [id] : [] }),
+  selectLight: (id) => set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [] }),
+  selectWallPoint: (ref) =>
+    set((s) => ({ selectedWallPoints: withLinked(s.scene.walls, [ref]), selectedLightIds: [] })),
+  toggleWallPointSelected: (ref) =>
+    set((s) => {
+      const group = withLinked(s.scene.walls, [ref])
+      const selected = s.selectedWallPoints.some((r) => sameRef(r, ref))
+      return {
+        selectedWallPoints: selected
+          ? s.selectedWallPoints.filter((r) => !group.some((g) => sameRef(g, r)))
+          : [...s.selectedWallPoints, ...group.filter((g) => !s.selectedWallPoints.some((r) => sameRef(r, g)))],
+      }
+    }),
+  selectMany: (lightIds, wallPoints, add) =>
+    set((s) => ({
+      selectedLightIds: add ? [...new Set([...s.selectedLightIds, ...lightIds])] : lightIds,
+      selectedWallPoints: add
+        ? [...s.selectedWallPoints, ...wallPoints.filter((p) => !s.selectedWallPoints.some((r) => sameRef(r, p)))]
+        : wallPoints,
+    })),
+  moveWallPoints: (refs, dx, dy) =>
+    set((s) => ({ scene: { ...s.scene, walls: moveWallPoints(s.scene.walls, refs, dx, dy) } })),
+  deleteWallPoints: (refs) =>
+    set((s) => ({
+      // Linked points go together: deleting a corner deletes it from every wall meeting there.
+      scene: {
+        ...s.scene,
+        walls: deleteWallPoints(s.scene.walls, withLinked(s.scene.walls, refs), () => crypto.randomUUID()),
+      },
+      // Indices shift when walls are cut, so the wall point selection is done with.
+      selectedWallPoints: [],
+    })),
+  deleteSelection: () => {
+    const { selectedLightIds, selectedWallPoints, removeLights, deleteWallPoints } = useGm.getState()
+    if (selectedWallPoints.length) deleteWallPoints(selectedWallPoints)
+    if (selectedLightIds.length) removeLights(selectedLightIds)
+  },
   toggleLightSelected: (id) =>
     set((s) => ({
       selectedLightIds: s.selectedLightIds.includes(id)
         ? s.selectedLightIds.filter((x) => x !== id)
         : [...s.selectedLightIds, id],
     })),
-  setPlacingLight: (placingLight) => set({ placingLight }),
+  setPlacingLight: (placingLight) =>
+    set((s) => ({
+      placingLight,
+      buildingWalls: placingLight ? false : s.buildingWalls,
+      wallDraft: placingLight ? [] : s.wallDraft,
+    })),
   setMap: (mapImage, size) =>
     set((s) => ({
       mapImage,
@@ -301,14 +469,16 @@ export const useGm = create<GmStore>()((set) => ({
  * things drawn there. Lights travelling with the table view belong to the party, not the
  * map, so they stay put.
  */
-function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' | 'lights'> {
+function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' | 'lights' | 'walls'> {
   const from = scene.map
   const unchanged =
     !from || !map || (from.x === map.x && from.y === map.y && from.width === map.width)
-  if (unchanged) return { map, lights: scene.lights }
+  if (unchanged) return { map, lights: scene.lights, walls: scene.walls }
   return {
     map,
     lights: scene.lights.map((l) => (l.followView ? l : { ...l, ...carryPoint(l, from, map) })),
+    // Walls are drawn on the map, so they always go with it.
+    walls: scene.walls.map((w) => ({ ...w, points: w.points.map((p) => carryPoint(p, from, map)) })),
   }
 }
 
@@ -317,39 +487,53 @@ export function tableState(s: GmStore): TableState {
 }
 
 /** Restore the last session from IndexedDB. */
-export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory] = await Promise.all([
-    load<Scene>('scene'),
-    load<Display>('display'),
-    load<Blob | null>('mapImage'),
-    load<Size>('tableScreen'),
-    load<number>('gmVision'),
-    load<FogMemory>('fogMemory'),
-  ])
-  // Fill in fields missing from scenes saved by earlier versions.
-  if (scene) {
-    scene.grid = { ...DEFAULT_GRID_STYLE, ...scene.grid }
-    scene.darkness ??= 0
-    scene.lights ??= []
-    scene.fog ??= { enabled: false }
-    for (const l of scene.lights) {
-      l.vision ??= LIGHT_PRESETS[l.kind].handheld
-      l.visionRange ??= DEFAULT_VISION_RANGE
-    }
+/**
+ * Fill in fields missing from scenes saved by earlier versions (in the session store or in
+ * a scene file), so old saves keep opening.
+ */
+export function migrateScene(scene: Scene): Scene {
+  scene.grid = { ...DEFAULT_GRID_STYLE, ...scene.grid }
+  scene.darkness ??= 0
+  scene.lights ??= []
+  scene.fog ??= { enabled: false }
+  scene.walls ??= []
+  for (const l of scene.lights) {
+    l.vision ??= LIGHT_PRESETS[l.kind].handheld
+    l.visionRange ??= DEFAULT_VISION_RANGE
   }
-  const map = scene?.map as (Partial<MapInfo> & Size) | null | undefined
+  const map = scene.map as (Partial<MapInfo> & Size) | null
   if (map) {
     map.naturalWidth ??= map.width
     map.naturalHeight ??= map.height
     map.x ??= 0
     map.y ??= 0
   }
-  useGm.setState({
-    scene: scene ?? defaultScene,
+  return scene
+}
+
+/** Restore the last session from IndexedDB. */
+export async function hydrate() {
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName] =
+    await Promise.all([
+      load<Scene>('scene'),
+      load<Display>('display'),
+      load<Blob | null>('mapImage'),
+      load<Size>('tableScreen'),
+      load<number>('gmVision'),
+      load<FogMemory>('fogMemory'),
+      load<GmCamera>('gmCamera'),
+      load<{ name: string | null; unsaved: boolean }>('sceneName'),
+    ])
+  useGm.setState((s) => ({
+    scene: scene ? migrateScene(scene) : defaultScene,
     display: display ?? defaultDisplay,
     mapImage: mapImage ?? null,
     tableScreen: tableScreen ?? defaultTableScreen,
     gmVision: gmVision ?? DEFAULT_GM_VISION,
     fogMemory: fogMemory ?? null,
-  })
+    gmCamera: gmCamera ?? null,
+    cameraVersion: s.cameraVersion + 1,
+    sceneName: sceneName?.name ?? null,
+    unsaved: sceneName?.unsaved ?? false,
+  }))
 }

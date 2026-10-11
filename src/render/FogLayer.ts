@@ -1,7 +1,8 @@
-import { Container, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js'
+import { Container, Graphics, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import type { Light } from '../shared/lights'
 import type { Rect } from '../shared/types'
+import { visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
 import { visionTexture } from './lightTextures'
 
 /** Longest side of the vision map; sight edges are soft, so coarse is fine. */
@@ -24,7 +25,8 @@ export class FogLayer {
 
   private visionRoot = new Container()
   private visionMap: RenderTexture | null = null
-  private viewers = new Map<string, Sprite>()
+  /** Per vision token: its sight, clipped to its line of sight by a polygon mask. */
+  private viewers = new Map<string, { root: Container; sight: Sprite; clip: Graphics; key: string }>()
   private bounds: Rect = { x: 0, y: 0, width: 0, height: 0 }
   private factor = 1
   private dirty = true
@@ -33,32 +35,45 @@ export class FogLayer {
   private memoryTexture: Texture | null = null
   private memory: FogMemory | null = null
 
-  /** Place the vision tokens' sight (lights with vision on). */
-  sync(lights: Light[], bounds: Rect, gridSize: number) {
+  /** Place the vision tokens' sight (lights with vision on), blocked by walls. */
+  sync(lights: Light[], bounds: Rect, gridSize: number, walls: Wall[]) {
     this.resize(bounds)
     const seeing = lights.filter((l) => l.vision)
     const ids = new Set(seeing.map((l) => l.id))
-    for (const [id, sprite] of this.viewers) {
+    for (const [id, v] of this.viewers) {
       if (ids.has(id)) continue
-      sprite.destroy()
+      v.root.destroy({ children: true })
       this.viewers.delete(id)
       this.dirty = true
     }
+    const segments = walls.length ? wallSegments(walls) : []
     for (const l of seeing) {
-      let sprite = this.viewers.get(l.id)
-      if (!sprite) {
-        sprite = new Sprite({ texture: visionTexture(), anchor: 0.5, blendMode: 'add' })
-        this.visionRoot.addChild(sprite)
-        this.viewers.set(l.id, sprite)
+      let v = this.viewers.get(l.id)
+      if (!v) {
+        const sight = new Sprite({ texture: visionTexture(), anchor: 0.5, blendMode: 'add' })
+        const clip = new Graphics()
+        const root = new Container()
+        root.addChild(sight, clip)
+        sight.mask = clip
+        this.visionRoot.addChild(root)
+        v = { root, sight, clip, key: '' }
+        this.viewers.set(l.id, v)
       }
-      const scale = (l.visionRange * gridSize) / (sprite.texture.width / 2)
-      if (sprite.x !== l.x || sprite.y !== l.y || sprite.scale.x !== scale) {
-        sprite.position.set(l.x, l.y)
-        sprite.scale.set(scale)
-        this.dirty = true
-      }
+      const range = l.visionRange * gridSize
+      // Recompute line of sight only when the viewer, its range or the walls changed.
+      const key = `${l.x},${l.y},${range},${walls === this.walls ? this.wallsVersion : ++this.wallsVersion}`
+      this.walls = walls
+      if (key === v.key) continue
+      v.key = key
+      v.sight.position.set(l.x, l.y)
+      v.sight.scale.set(range / (v.sight.texture.width / 2))
+      v.clip.clear().poly(visibilityPolygon(l, range, segments)).fill(0xffffff)
+      this.dirty = true
     }
   }
+
+  private walls: Wall[] = []
+  private wallsVersion = 0
 
   /** Show this memory grid (the same grid object is redrawn when its version changes). */
   setMemory(memory: FogMemory | null) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { animateLight, LIGHT_MENU, LIGHT_PRESETS, seedOf, type Animation } from './lights'
+import { animateLight, createLight, isDirectional, LIGHT_MENU, LIGHT_PRESETS, seedOf, type Animation } from './lights'
 
 const sample = (animation: Animation, seed = 0.3, seconds = 20, fps = 60) =>
   Array.from({ length: seconds * fps }, (_, i) => animateLight(animation, i / fps, seed))
@@ -30,6 +30,23 @@ describe('animateLight', () => {
     const dark = b.filter((v) => v < 0.5).length / b.length
     expect(dark).toBeGreaterThan(0)
     expect(dark).toBeLessThan(0.1)
+  })
+})
+
+describe('createLight', () => {
+  it('places hand-held lights unlit and seeing, and vision tokens switched off at 1 square', () => {
+    const torch = createLight('torch', 0, 0, 't')
+    expect([torch.on, torch.vision, torch.visionRange]).toEqual([false, true, 20])
+    const eye = createLight('vision', 0, 0, 'v')
+    expect([eye.vision, eye.visionRange]).toEqual([false, 1])
+    expect(createLight('brazier', 0, 0, 'b').vision).toBe(false)
+  })
+
+  it('gives only beams and tubes a direction', () => {
+    const directional = (Object.keys(LIGHT_PRESETS) as (keyof typeof LIGHT_PRESETS)[])
+      .filter((k) => isDirectional(createLight(k, 0, 0, k)))
+      .sort()
+    expect(directional).toEqual(['flashlight', 'neon', 'neonFlicker'])
   })
 })
 

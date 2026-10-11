@@ -3,13 +3,24 @@ import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
 import {
   mapScaleForCorner,
+  snapToGrid,
   pointInPolygon,
   sceneBounds,
   tableViewCorners,
   upMarker,
 } from '../shared/geometry'
-import { LIGHT_PRESETS, type Light, type LightKind } from '../shared/lights'
+import { emitsLight, isDirectional, LIGHT_PRESETS, type Light, type LightKind } from '../shared/lights'
 import type { FogMemory } from '../shared/fog'
+import type { GmCamera } from '../shared/sceneFile'
+import {
+  inRect,
+  rectBetween,
+  sameRef,
+  uniquePositions,
+  wallPointsIn,
+  withLinked,
+  type WallPointRef,
+} from '../shared/walls'
 import type { Point, Size, TableState } from '../shared/types'
 
 const MIN_ZOOM = 0.05
@@ -51,6 +62,21 @@ interface Handlers {
   /** In placement mode, the GM clicked the map here. Shift keeps placing more. */
   onPlaceLight(at: Point, keepPlacing: boolean): void
   onPlaceCancel(): void
+  /** In wall building mode, the GM clicked: add this (already snapped) wall point. */
+  onWallPoint(p: Point): void
+  /** Select just this wall point. */
+  onWallPointSelect(ref: WallPointRef): void
+  /** Ctrl/Cmd-click: add the wall point to the selection, or take it out. */
+  onWallPointToggle(ref: WallPointRef): void
+  /**
+   * The GM dragged a wall point: move `refs` (the points moving together) so that `anchor`,
+   * the one under the pointer, ends up at `to` (already snapped).
+   */
+  onWallPointDrag(refs: WallPointRef[], anchor: WallPointRef, to: Point): void
+  /** Shift-drag box selection; `add` keeps what was already selected (Ctrl/Cmd). */
+  onBoxSelect(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
+  /** The GM panned or zoomed (or the view was fitted). */
+  onCameraChange(camera: GmCamera): void
 }
 
 /** GM-only state the canvas shows but doesn't own. */
@@ -63,6 +89,13 @@ export interface GmUi {
   placingLight: LightKind | null
   /** Showing the GM exactly what the players see (fog of war included). */
   peeking: boolean
+  /** Wall building mode: clicks add snapped wall points. */
+  buildingWalls: boolean
+  /** Snap fraction of a square for wall points (0 = none). */
+  wallSnap: number
+  /** Points of the wall being drawn. */
+  wallDraft: Point[]
+  selectedWallPoints: WallPointRef[]
 }
 
 type Drag =
@@ -75,6 +108,11 @@ type Drag =
   // a multi-selection down to it, while a drag moves the whole selection.
   | { mode: 'light'; id: string; grab: Point; wasSelected: boolean }
   | { mode: 'aim'; id: string }
+  // refs: the points moving together, fixed when the drag starts (so passing over another
+  // point doesn't pick it up). Alt drags just the one point, pulling linked points apart.
+  | { mode: 'wallPoint'; ref: WallPointRef; refs: WallPointRef[]; wasSelected: boolean }
+  // Shift-drag selection box, in scene coordinates.
+  | { mode: 'box'; start: Point; end: Point }
 
 /**
  * What the pointer is over, in priority order of grabbing. 'locked' is the resize handle of
@@ -82,6 +120,7 @@ type Drag =
  */
 type Target =
   | { kind: 'aim' | 'light'; id: string }
+  | { kind: 'wallPoint'; ref: WallPointRef }
   | { kind: 'view' | 'map' | 'resize' | 'locked' }
   | null
 
@@ -93,16 +132,23 @@ const CURSORS: Record<Drag['mode'] | 'locked', string> = {
   locked: 'not-allowed',
   light: 'move',
   aim: 'crosshair',
+  wallPoint: 'move',
+  box: 'crosshair',
 }
 
-/** Directional lights get an aim handle. */
-const isDirectional = (light: Light) => LIGHT_PRESETS[light.kind].shape !== 'radial'
 
 interface Token {
   root: Container
   ring: Graphics
   icon: Sprite
 }
+
+const WALL_COLOR = 0xff3344
+/** Wall line width and point dot radius, in GM screen px. */
+const WALL_PX = 3
+const WALL_DOT_PX = 3.5
+/** The snap marker under the cursor while building walls, in GM screen px. */
+const SNAP_MARKER_PX = 6
 
 /** CSS cursor showing a light's icon, with the hotspot in its centre. */
 const iconCursors = new Map<string, string>()
@@ -165,6 +211,18 @@ export class GmCanvas extends PixiHost {
   private aimHandle = new Graphics()
   /** Faint rings showing how far the selected vision tokens see. */
   private visionRings = new Graphics()
+  /** Walls (GM-only: players only see their effect on sight). */
+  private wallsLayer = new Graphics()
+  /** The wall being drawn, its preview segment and the snap marker. */
+  private wallDraftLayer = new Graphics()
+  private buildingWalls = false
+  private wallSnap = 1
+  private wallDraft: Point[] = []
+  private selectedWallPoints: WallPointRef[] = []
+  /** The Shift-drag selection box. */
+  private selectionBox = new Graphics()
+  /** Snapped point under the cursor while building walls. */
+  private wallCursor: Point | null = null
   private selectedLightIds = new Set<string>()
   private placingLight: LightKind | null = null
   private peeking = false
@@ -179,6 +237,8 @@ export class GmCanvas extends PixiHost {
   private marker: Point[] | null = null
   private drag: Drag | null = null
   private fitted = false
+  /** A camera to show instead of fitting the map, once the canvas is ready. */
+  private pendingCamera: GmCamera | null = null
   private handlers: Handlers
 
   constructor(host: HTMLElement, handlers: Handlers) {
@@ -192,9 +252,12 @@ export class GmCanvas extends PixiHost {
       this.viewOverlay,
       this.mapHandle,
       this.viewMarker,
+      this.wallsLayer,
       this.visionRings,
       this.lightTokens,
       this.aimHandle,
+      this.wallDraftLayer,
+      this.selectionBox,
     )
     this.app.stage.addChild(this.camera)
     void this.sceneLayer.setMapImage(this.image)
@@ -217,8 +280,13 @@ export class GmCanvas extends PixiHost {
     this.tableConnected = ui.tableConnected
     this.selectedLightIds = new Set(ui.selectedLightIds)
     this.peeking = ui.peeking
-    if (ui.placingLight !== this.placingLight) {
+    this.wallSnap = ui.wallSnap
+    this.wallDraft = ui.wallDraft
+    this.selectedWallPoints = ui.selectedWallPoints
+    if (ui.placingLight !== this.placingLight || ui.buildingWalls !== this.buildingWalls) {
       this.placingLight = ui.placingLight
+      this.buildingWalls = ui.buildingWalls
+      if (!this.buildingWalls) this.wallCursor = null
       if (this.ready) this.app.canvas.style.cursor = this.cursorFor(null)
     }
     this.render()
@@ -252,6 +320,31 @@ export class GmCanvas extends PixiHost {
       (screen.height - bounds.height * zoom) / 2 - bounds.y * zoom,
     )
     this.drawOverlay()
+    this.reportCamera()
+  }
+
+  /**
+   * Jump to a saved camera (session restore, scene open). Applied when the scene is next
+   * drawn, in place of fitting the map; null fits the map.
+   */
+  setCamera(camera: GmCamera | null) {
+    // Not drawn here: the scene and map image for it may arrive just after.
+    this.pendingCamera = camera
+    this.fitted = false
+  }
+
+  /** Centre the view on the camera's point at its zoom (works for any window size). */
+  private applyCamera(c: GmCamera) {
+    const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, c.zoom))
+    const screen = this.app.screen
+    this.camera.scale.set(zoom)
+    this.camera.position.set(screen.width / 2 - c.x * zoom, screen.height / 2 - c.y * zoom)
+    this.drawOverlay()
+  }
+
+  private reportCamera() {
+    const c = this.centre()
+    if (c) this.handlers.onCameraChange({ x: c.x, y: c.y, zoom: this.camera.scale.x })
   }
 
   /** Scene-space point at the centre of the GM view. */
@@ -266,7 +359,9 @@ export class GmCanvas extends PixiHost {
     this.sceneLayer.update(this.state.scene, this.peeking ? 'players' : 'gm')
     if (!this.fitted) {
       this.fitted = true
-      this.fit()
+      if (this.pendingCamera) this.applyCamera(this.pendingCamera)
+      else this.fit()
+      this.pendingCamera = null
     }
     this.drawOverlay()
   }
@@ -279,6 +374,7 @@ export class GmCanvas extends PixiHost {
   private drawOverlay() {
     this.drawMapHandle()
     this.drawLights()
+    this.drawWalls()
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -360,7 +456,8 @@ export class GmCanvas extends PixiHost {
       const selected = this.selectedLightIds.has(light.id)
       t.root.position.set(light.x, light.y)
       t.root.scale.set(this.px)
-      t.root.alpha = light.on ? 1 : 0.55
+      // Dimmed when switched off: lights by being unlit, vision tokens by not seeing.
+      t.root.alpha = (emitsLight(light) ? light.on : light.vision) ? 1 : 0.55
       t.icon.texture = iconTexture(LIGHT_PRESETS[light.kind].icon)
       t.icon.setSize(ICON_PX)
       t.ring
@@ -392,6 +489,86 @@ export class GmCanvas extends PixiHost {
         .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.8 })
       g.circle(a.x, a.y, AIM_HANDLE_PX * px).fill(0xffffff).stroke({ width: 1.5 * px, color: 0x000000 })
     }
+  }
+
+  /** Walls as red lines with dots at their points; the wall being drawn, while building. */
+  private drawWalls() {
+    const px = this.px
+    const g = this.wallsLayer.clear()
+    for (const wall of this.state?.scene.walls ?? []) {
+      g.poly(wall.points, false).stroke({ width: WALL_PX * px, color: WALL_COLOR, join: 'round', cap: 'round' })
+    }
+    // Linked points (same spot) are one point: one dot, one ring.
+    const all = (this.state?.scene.walls ?? []).flatMap((w) => w.points)
+    for (const p of uniquePositions(all)) g.circle(p.x, p.y, WALL_DOT_PX * px).fill(WALL_COLOR)
+    const selected = this.selectedWallPoints.map((r) => this.wallPoint(r)).filter((p) => !!p)
+    for (const p of uniquePositions(selected)) {
+      g.circle(p.x, p.y, (WALL_DOT_PX + 3) * px).stroke({ width: 2 * px, color: 0xffffff })
+    }
+    this.drawWallDraft()
+  }
+
+  private drawWallDraft() {
+    const px = this.px
+    const g = this.wallDraftLayer.clear()
+    if (!this.buildingWalls) return
+    const draft = this.wallDraft
+    const cursor = this.wallCursor
+    if (draft.length > 1) {
+      g.poly(draft, false).stroke({ width: WALL_PX * px, color: WALL_COLOR, join: 'round', cap: 'round' })
+    }
+    // Preview of the next segment, from the last point to the snapped cursor.
+    const last = draft.at(-1)
+    if (last && cursor) {
+      g.moveTo(last.x, last.y)
+        .lineTo(cursor.x, cursor.y)
+        .stroke({ width: WALL_PX * px, color: WALL_COLOR, alpha: 0.6, cap: 'round' })
+    }
+    for (const p of draft) g.circle(p.x, p.y, WALL_DOT_PX * px).fill(WALL_COLOR)
+    if (cursor) {
+      g.circle(cursor.x, cursor.y, SNAP_MARKER_PX * px)
+        .fill({ color: WALL_COLOR, alpha: 0.85 })
+        .stroke({ width: 1.5 * px, color: 0xffffff })
+    }
+  }
+
+  private wallPoint(ref: WallPointRef): Point | undefined {
+    return this.state?.scene.walls.find((w) => w.id === ref.wallId)?.points[ref.index]
+  }
+
+  private drawSelectionBox() {
+    const g = this.selectionBox.clear()
+    if (this.drag?.mode !== 'box') return
+    const r = rectBetween(this.drag.start, this.drag.end)
+    g.rect(r.x, r.y, r.width, r.height)
+      .fill({ color: 0x4da3ff, alpha: 0.1 })
+      .stroke({ width: 1.5 * this.px, color: 0x4da3ff })
+  }
+
+  /**
+   * Where a wall point would go for pointer position p: onto an existing wall point under the
+   * pointer (so walls join exactly, even without grid snap), else the nearest grid snap point.
+   * `moving` points are skipped, so a dragged point doesn't snap onto itself.
+   */
+  private wallPointAt(p: Point, moving: WallPointRef[] = []): Point {
+    let best: Point | undefined
+    let bestDist = (WALL_DOT_PX + SLACK_PX) * this.px
+    const consider = (q: Point) => {
+      const d = Math.hypot(p.x - q.x, p.y - q.y)
+      if (d <= bestDist) {
+        best = q
+        bestDist = d
+      }
+    }
+    for (const w of this.state?.scene.walls ?? []) {
+      w.points.forEach((q, index) => {
+        if (!moving.some((r) => r.wallId === w.id && r.index === index)) consider(q)
+      })
+    }
+    for (const q of this.wallDraft) consider(q)
+    if (best) return { x: best.x, y: best.y }
+    const grid = this.state?.scene.grid
+    return grid ? snapToGrid(p, grid, this.wallSnap) : p
   }
 
   /** The selected light, if exactly one is selected. */
@@ -426,6 +603,14 @@ export class GmCanvas extends PixiHost {
       const l = lights[i]
       if (Math.hypot(p.x - l.x, p.y - l.y) <= (TOKEN_PX + 2) * px) return { kind: 'light', id: l.id }
     }
+    for (const w of state.scene.walls) {
+      for (let index = w.points.length - 1; index >= 0; index--) {
+        const q = w.points[index]
+        if (Math.hypot(p.x - q.x, p.y - q.y) <= (WALL_DOT_PX + SLACK_PX) * px) {
+          return { kind: 'wallPoint', ref: { wallId: w.id, index } }
+        }
+      }
+    }
 
     if (map) {
       const r = ((map.lockToGrid ? LOCKED_HANDLE_PX : HANDLE_PX) + SLACK_PX) * px
@@ -450,6 +635,7 @@ export class GmCanvas extends PixiHost {
 
   private cursorFor(target: Target) {
     if (this.placingLight) return iconCursor(LIGHT_PRESETS[this.placingLight].icon)
+    if (this.buildingWalls) return iconCursor('🧱')
     return CURSORS[target?.kind ?? 'pan']
   }
 
@@ -467,6 +653,11 @@ export class GmCanvas extends PixiHost {
   private onPointerDown = (e: PointerEvent) => {
     if (e.button > 2) return
     const p = this.toScene(e)
+    // Wall building: left-click adds a snapped point; middle still pans.
+    if (this.buildingWalls && e.button === 0) {
+      this.handlers.onWallPoint(this.wallPointAt(p))
+      return
+    }
     // Placement mode: left-click places, right-click cancels; middle still pans.
     if (this.placingLight && e.button !== 1) {
       if (e.button === 0) this.handlers.onPlaceLight(p, e.shiftKey)
@@ -478,7 +669,23 @@ export class GmCanvas extends PixiHost {
     if (target?.kind === 'locked') return // the resize handle is disabled while locked to the grid
     this.pressedAt = this.toCanvas(e)
 
-    if (target?.kind === 'aim') {
+    if (e.button === 0 && e.shiftKey) {
+      // Shift-drag draws a selection box, whatever is under the pointer.
+      this.drag = { mode: 'box', start: p, end: p }
+    } else if (target?.kind === 'wallPoint') {
+      if (e.ctrlKey || e.metaKey) {
+        this.handlers.onWallPointToggle(target.ref)
+        this.pressedAt = null
+        return
+      }
+      const walls = scene?.walls ?? []
+      const wasSelected = this.selectedWallPoints.some((r) => sameRef(r, target.ref))
+      if (!wasSelected) this.handlers.onWallPointSelect(target.ref)
+      const refs = e.altKey
+        ? [target.ref]
+        : withLinked(walls, wasSelected ? this.selectedWallPoints : [target.ref])
+      this.drag = { mode: 'wallPoint', ref: target.ref, refs, wasSelected }
+    } else if (target?.kind === 'aim') {
       this.drag = { mode: 'aim', id: target.id }
     } else if (target?.kind === 'light') {
       const light = scene?.lights.find((l) => l.id === target.id)
@@ -507,6 +714,10 @@ export class GmCanvas extends PixiHost {
 
   private onPointerMove = (e: PointerEvent) => {
     const drag = this.drag
+    if (this.buildingWalls) {
+      this.wallCursor = this.wallPointAt(this.toScene(e))
+      this.drawWallDraft()
+    }
     if (!drag) {
       this.app.canvas.style.cursor = this.cursorFor(this.targetAt(this.toScene(e)))
       return
@@ -520,6 +731,15 @@ export class GmCanvas extends PixiHost {
     }
 
     const p = this.toScene(e)
+    if (drag.mode === 'box') {
+      drag.end = p
+      this.drawSelectionBox()
+      return
+    }
+    if (drag.mode === 'wallPoint') {
+      this.handlers.onWallPointDrag(drag.refs, drag.ref, this.wallPointAt(p, drag.refs))
+      return
+    }
     if (drag.mode === 'aim') {
       const light = this.state?.scene.lights.find((l) => l.id === drag.id)
       if (light) this.handlers.onLightAim(drag.id, Math.atan2(p.y - light.y, p.x - light.x))
@@ -545,11 +765,22 @@ export class GmCanvas extends PixiHost {
     const start = this.pressedAt
     const clicked = start && Math.hypot(c.x - start.x, c.y - start.y) < CLICK_PX
     const drag = this.drag
-    if (clicked && drag?.mode === 'light' && drag.wasSelected) {
+    const onSomething = drag && ['light', 'aim', 'wallPoint', 'box'].includes(drag.mode)
+    if (drag?.mode === 'box') {
+      const r = rectBetween(drag.start, drag.end)
+      const lights = (this.state?.scene.lights ?? []).filter((l) => inRect(l, r)).map((l) => l.id)
+      const points = wallPointsIn(this.state?.scene.walls ?? [], r)
+      this.handlers.onBoxSelect(lights, points, e.ctrlKey || e.metaKey)
+      this.drag = null
+      this.drawSelectionBox()
+    } else if (clicked && drag?.mode === 'light' && drag.wasSelected) {
       this.handlers.onLightSelect(drag.id)
-    } else if (clicked && drag && drag.mode !== 'light' && drag.mode !== 'aim' && !e.ctrlKey && !e.metaKey) {
-      this.handlers.onLightSelect(null)
+    } else if (clicked && drag?.mode === 'wallPoint' && drag.wasSelected) {
+      this.handlers.onWallPointSelect(drag.ref)
+    } else if (clicked && drag && !onSomething && !e.ctrlKey && !e.metaKey) {
+      this.handlers.onLightSelect(null) // clears the whole selection
     }
+    if (drag?.mode === 'pan') this.reportCamera()
     this.pressedAt = null
     this.drag = null
     this.app.canvas.style.cursor = this.cursorFor(this.targetAt(this.toScene(e)))
@@ -569,6 +800,7 @@ export class GmCanvas extends PixiHost {
     this.camera.scale.set(zoom)
     this.camera.position.set(c.x - before.x * zoom, c.y - before.y * zoom)
     this.drawOverlay()
+    this.reportCamera()
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  snapToGrid,
   alignMapToGrid,
   carryPoint,
   followGrid,
@@ -21,6 +22,7 @@ const scene: Scene = {
   darkness: 0,
   lights: [],
   fog: { enabled: false },
+  walls: [],
 }
 const display: Display = { pxPerMm: 4, orientation: 0 }
 
@@ -123,6 +125,16 @@ describe('carryPoint', () => {
     const to = { x: 100, y: -50, width: 2000, height: 1000 }
     // A quarter across, a fifth down stays a quarter across, a fifth down.
     expect(carryPoint({ x: 250, y: 100 }, from, to)).toEqual({ x: 600, y: 150 })
+  })
+})
+
+describe('snapToGrid', () => {
+  const grid = { size: 100, offsetX: 10, offsetY: 0, visible: true, color: '#ffffff', opacity: 0.35 }
+  it('snaps to grid corners, half and quarter squares, or not at all', () => {
+    expect(snapToGrid({ x: 150, y: 40 }, grid, 1)).toEqual({ x: 110, y: 0 })
+    expect(snapToGrid({ x: 160, y: 40 }, grid, 0.5)).toEqual({ x: 160, y: 50 })
+    expect(snapToGrid({ x: 147, y: 40 }, grid, 0.25)).toEqual({ x: 135, y: 50 })
+    expect(snapToGrid({ x: 147, y: 40 }, grid, 0)).toEqual({ x: 147, y: 40 })
   })
 })
 

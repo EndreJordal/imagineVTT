@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { emitsLight, LIGHT_PRESETS, type Light } from '../shared/lights'
+import { emitsLight, isDirectional, LIGHT_PRESETS, type Light } from '../shared/lights'
 import { useGm } from './store'
 
 /**
@@ -21,12 +21,12 @@ export function LightPanel() {
   const handheld = lights.filter((l) => LIGHT_PRESETS[l.kind].handheld)
   // Pure vision tokens give no light, so light settings apply to the others only.
   const emitters = lights.filter(emitsLight)
-  // Hand-held lights can see; vision tokens always do (they're nothing else).
-  const canToggleVision = emitters.filter((l) => LIGHT_PRESETS[l.kind].handheld)
-  const seeing = lights.filter((l) => l.vision)
-  const range = common(seeing, (l) => l.visionRange)
+  // Hand-held lights and vision tokens can see; the range can be set before switching on.
+  const canSee = lights.filter((l) => LIGHT_PRESETS[l.kind].handheld)
+  const seeing = canSee.filter((l) => l.vision)
+  const range = common(canSee, (l) => l.visionRange)
   const fogOn = useGm.getState().scene.fog.enabled
-  const directional = lights.filter((l) => LIGHT_PRESETS[l.kind].shape !== 'radial')
+  const directional = lights.filter(isDirectional)
   const cones = lights.filter((l) => LIGHT_PRESETS[l.kind].shape === 'cone')
   // Settings only some lights have apply to just those.
   const only = (subset: Light[], patch: Partial<Light>) => (l: Light) =>
@@ -72,23 +72,23 @@ export function LightPanel() {
           onChange={(followView) => set(only(handheld, { followView }))}
         />
       )}
-      {canToggleVision.length > 0 && (
+      {canSee.length > 0 && (
         <TriCheck
           label="Vision"
           title="Breaks fog of war: the party sees from here"
-          values={canToggleVision.map((l) => l.vision)}
-          onChange={(vision) => set(only(canToggleVision, { vision }))}
+          values={canSee.map((l) => l.vision)}
+          onChange={(vision) => set(only(canSee, { vision }))}
         />
       )}
-      {seeing.length > 0 && (
+      {canSee.length > 0 && (
         <Row label={range === undefined ? 'Vision mixed' : `Vision ${range} sq`}>
           <input
             type="range"
             min={1}
             max={100}
             step={1}
-            value={range ?? seeing[0].visionRange}
-            onChange={(e) => set(only(seeing, { visionRange: e.target.valueAsNumber }))}
+            value={range ?? canSee[0].visionRange}
+            onChange={(e) => set(only(canSee, { visionRange: e.target.valueAsNumber }))}
           />
         </Row>
       )}
@@ -152,7 +152,9 @@ export function LightPanel() {
       {darkness === 0 && emitters.length > 0 && (
         <p className="hint">It's day: lights show once you slide towards night.</p>
       )}
-      {lights.length === 1 && <p className="hint">Ctrl-click other lights to edit several at once.</p>}
+      {lights.length === 1 && (
+        <p className="hint">Ctrl-click other lights, or Shift-drag a box, to edit several at once.</p>
+      )}
       <button onClick={() => removeLights(ids)}>
         {lights.length === 1 ? 'Remove light' : `Remove ${lights.length} lights`}
       </button>

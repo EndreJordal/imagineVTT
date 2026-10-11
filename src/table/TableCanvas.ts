@@ -58,22 +58,36 @@ export class TableCanvas extends PixiHost {
     this.calibration.visible = calibrating
     if (!calibrating) return
 
-    const side = CALIBRATION_MM * display.pxPerMm
-    const cx = screen.width / 2
-    const cy = screen.height / 2
-    const g = new Graphics()
-      .rect(cx - side / 2, cy - side / 2, side, side)
-      .moveTo(cx - side / 2, cy)
-      .lineTo(cx + side / 2, cy)
-      .moveTo(cx, cy - side / 2)
-      .lineTo(cx, cy + side / 2)
-      .stroke({ width: 2, color: 0xffcc00 })
+    // One square, CALIBRATION_MM a side. The top edge is marked like a ruler (a tick every
+    // 10 mm, longer at the middle) with a dimension arrow above it: that's the edge to measure.
+    const mm = display.pxPerMm
+    const side = CALIBRATION_MM * mm
+    const left = screen.width / 2 - side / 2
+    const top = screen.height / 2 - side / 2
+    const color = 0xffcc00
+    const g = new Graphics().rect(left, top, side, side).stroke({ width: 2, color })
+    for (let at = 10; at < CALIBRATION_MM; at += 10) {
+      const length = at === CALIBRATION_MM / 2 ? 18 : 9
+      g.moveTo(left + at * mm, top).lineTo(left + at * mm, top + length)
+    }
+    g.stroke({ width: 2, color })
+
+    // Dimension line with arrowheads, above the top edge.
+    const y = top - 22
+    const head = 8
+    g.moveTo(left, y).lineTo(left + side, y)
+    g.moveTo(left, y - 10).lineTo(left, top - 4) // end marks, down towards the corners
+    g.moveTo(left + side, y - 10).lineTo(left + side, top - 4)
+    g.stroke({ width: 2, color })
+    g.poly([left, y, left + head, y - head / 2, left + head, y + head / 2]).fill(color)
+    g.poly([left + side, y, left + side - head, y - head / 2, left + side - head, y + head / 2]).fill(color)
+
     const label = new Text({
-      text: `${CALIBRATION_MM} mm`,
-      style: { fill: 0xffcc00, fontSize: 18, fontFamily: 'system-ui, sans-serif' },
+      text: `Measure this edge: it should be ${CALIBRATION_MM} mm`,
+      style: { fill: color, fontSize: 18, fontFamily: 'system-ui, sans-serif' },
     })
-    label.anchor.set(0.5, 0)
-    label.position.set(cx, cy + side / 2 + 8)
+    label.anchor.set(0.5, 1)
+    label.position.set(left + side / 2, y - 8)
     this.calibration.addChild(g, label)
   }
 }

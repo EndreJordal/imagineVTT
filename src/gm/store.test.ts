@@ -119,6 +119,7 @@ describe('fog of war', () => {
         grid: { ...s.scene.grid, size: 100 },
         map: { x: 0, y: 0, width: 5000, height: 5000, naturalWidth: 5000, naturalHeight: 5000 },
         fog: { enabled: false },
+        walls: [],
       },
       fogMemory: null,
       fogVersion: 0,
@@ -130,7 +131,7 @@ describe('fog of war', () => {
     addLight('torch', { x: 1000, y: 1000 }) // unlit, but sees
     addLight('vision', { x: 4000, y: 1000 })
     addLight('fixture', { x: 1000, y: 4000 }) // lit, no vision
-    updateLight(lights()[1].id, { visionRange: 5 })
+    updateLight(lights()[1].id, { vision: true, visionRange: 5 })
 
     setFogEnabled(true)
     expect(seen(1000, 1000)).toBe(255)
@@ -142,7 +143,7 @@ describe('fog of war', () => {
   it('remembers where vision tokens have been, until reset', () => {
     const { addLight, setFogEnabled, updateLight, stampFog, resetFog } = useGm.getState()
     addLight('vision', { x: 500, y: 500 })
-    updateLight(lights()[0].id, { visionRange: 3 })
+    updateLight(lights()[0].id, { vision: true, visionRange: 3 })
     setFogEnabled(true)
     updateLight(lights()[0].id, { x: 3000, y: 3000 })
     stampFog() // the GM's sync does this on every scene change
@@ -152,6 +153,149 @@ describe('fog of war', () => {
     resetFog()
     expect(seen(500, 500)).toBe(0) // forgotten
     expect(seen(3000, 3000)).toBe(255) // still in sight now
+  })
+})
+
+describe('walls', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      scene: {
+        ...s.scene,
+        walls: [],
+        lights: [],
+        map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
+      },
+      buildingWalls: false,
+      wallDraft: [],
+    }))
+  })
+
+  it('draws a wall point by point, with undo, and confirms it', () => {
+    const { setBuildingWalls, addWallPoint, undoWallPoint, confirmWallDraft } = useGm.getState()
+    setBuildingWalls(true)
+    addWallPoint({ x: 0, y: 0 })
+    addWallPoint({ x: 0, y: 0 }) // a double click doesn't add a duplicate
+    addWallPoint({ x: 100, y: 0 })
+    addWallPoint({ x: 100, y: 100 })
+    undoWallPoint()
+    expect(useGm.getState().wallDraft).toEqual([{ x: 0, y: 0 }, { x: 100, y: 0 }])
+    confirmWallDraft()
+    expect(useGm.getState().scene.walls.map((w) => w.points)).toEqual([[{ x: 0, y: 0 }, { x: 100, y: 0 }]])
+    expect(useGm.getState().wallDraft).toEqual([])
+  })
+
+  it('needs two points for a wall, and cancelling drops the points', () => {
+    const { setBuildingWalls, addWallPoint, confirmWallDraft, cancelWallDraft } = useGm.getState()
+    setBuildingWalls(true)
+    addWallPoint({ x: 0, y: 0 })
+    confirmWallDraft()
+    expect(useGm.getState().scene.walls).toEqual([])
+    addWallPoint({ x: 0, y: 0 })
+    addWallPoint({ x: 50, y: 0 })
+    cancelWallDraft()
+    expect(useGm.getState().wallDraft).toEqual([])
+    expect(useGm.getState().scene.walls).toEqual([])
+  })
+
+  it('moves and scales walls with the map', () => {
+    const { setBuildingWalls, addWallPoint, confirmWallDraft, setMapPosition, setMapScale } = useGm.getState()
+    setBuildingWalls(true)
+    addWallPoint({ x: 100, y: 200 })
+    addWallPoint({ x: 300, y: 200 })
+    confirmWallDraft()
+    setMapPosition({ x: 50, y: 0 })
+    setMapScale(2)
+    expect(useGm.getState().scene.walls[0].points).toEqual([{ x: 250, y: 400 }, { x: 650, y: 400 }])
+  })
+
+  it('box-selects lights and wall points together, adds to it, and deletes it all', () => {
+    const gm = () => useGm.getState()
+    gm().setBuildingWalls(true)
+    gm().addWallPoint({ x: 0, y: 0 })
+    gm().addWallPoint({ x: 100, y: 0 })
+    gm().addWallPoint({ x: 200, y: 0 })
+    gm().confirmWallDraft()
+    gm().setBuildingWalls(false)
+    gm().addLight('brazier', { x: 50, y: 50 })
+    gm().addLight('candle', { x: 900, y: 900 })
+    const wallId = gm().scene.walls[0].id
+    const [brazier, candle] = gm().scene.lights.map((l) => l.id)
+
+    gm().selectMany([brazier], [{ wallId, index: 2 }], false)
+    gm().selectMany([candle], [{ wallId, index: 2 }], true) // add; no duplicate point
+    expect(gm().selectedLightIds).toEqual([brazier, candle])
+    expect(gm().selectedWallPoints).toEqual([{ wallId, index: 2 }])
+
+    gm().deleteSelection()
+    expect(gm().scene.lights).toEqual([])
+    expect(gm().scene.walls.map((w) => w.points.length)).toEqual([2]) // cut at the deleted end
+    expect([gm().selectedLightIds, gm().selectedWallPoints]).toEqual([[], []])
+  })
+
+  it('clicking a light clears the wall point selection, and vice versa', () => {
+    const gm = () => useGm.getState()
+    gm().selectWallPoint({ wallId: 'w', index: 0 })
+    gm().selectLight('x')
+    expect(gm().selectedWallPoints).toEqual([])
+    gm().selectWallPoint({ wallId: 'w', index: 0 })
+    expect(gm().selectedLightIds).toEqual([])
+  })
+
+  it('closes a shape when the first point is clicked again, and treats that corner as one point', () => {
+    const gm = () => useGm.getState()
+    gm().setBuildingWalls(true)
+    for (const p of [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 }]) {
+      gm().addWallPoint(p)
+    }
+    // Finished without Enter: one closed wall, nothing left in the draft.
+    expect(gm().wallDraft).toEqual([])
+    const [room] = gm().scene.walls
+    expect(room.points).toHaveLength(5)
+
+    // Clicking the start corner selects both its points.
+    gm().selectWallPoint({ wallId: room.id, index: 0 })
+    expect(gm().selectedWallPoints).toEqual([
+      { wallId: room.id, index: 0 },
+      { wallId: room.id, index: 4 },
+    ])
+    // Deleting the corner opens the room there: one wall from (100,0) round to (0,100).
+    gm().deleteWallPoints([{ wallId: room.id, index: 4 }])
+    expect(gm().scene.walls.map((w) => w.points)).toEqual([
+      [{ x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }],
+    ])
+  })
+})
+
+describe('opening a scene file', () => {
+  it('replaces the scene, orientation, map, fog and camera, and resets the tools', () => {
+    const gm = () => useGm.getState()
+    gm().selectLight('something')
+    gm().setBuildingWalls(true)
+    const before = gm().cameraVersion
+    const image = new Blob(['img'], { type: 'image/png' })
+    const old = { ...gm().scene, darkness: 0.3, lights: [], walls: [], fog: { enabled: true } } as const
+    // An "old" file: no grid style, vision fields or walls, which loading fills in.
+    const saved = JSON.parse(JSON.stringify({ ...old, grid: { size: 70, offsetX: 0, offsetY: 0, visible: true } }))
+    delete saved.walls
+    gm().loadScene(
+      {
+        scene: saved,
+        orientation: 180,
+        camera: { x: 1, y: 2, zoom: 0.5 },
+        mapImage: image,
+        fogMemory: { cols: 1, rows: 1, data: new Uint8Array([255]) },
+      },
+      'Goblin cave',
+    )
+    expect(gm().scene.grid).toMatchObject({ size: 70, color: '#ffffff', opacity: 0.35 })
+    expect(gm().scene.walls).toEqual([])
+    expect(gm().display.orientation).toBe(180)
+    expect(gm().mapImage).toBe(image)
+    expect(gm().fogMemory?.data[0]).toBe(255)
+    expect(gm().gmCamera).toEqual({ x: 1, y: 2, zoom: 0.5 })
+    expect(gm().cameraVersion).toBe(before + 1)
+    expect([gm().sceneName, gm().unsaved]).toEqual(['Goblin cave', false])
+    expect([gm().selectedLightIds, gm().buildingWalls]).toEqual([[], false])
   })
 })
 

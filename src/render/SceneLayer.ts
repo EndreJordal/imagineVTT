@@ -160,7 +160,7 @@ export class SceneLayer extends Container {
       sprite.position.set(x, y)
     }
     this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness)
-    this.fog.sync(scene.lights, bounds, scene.grid.size)
+    this.fog.sync(scene.lights, bounds, scene.grid.size, scene.walls)
     this.updateLitVisibility()
 
     const { size, offsetX, offsetY, visible, color, opacity } = scene.grid

@@ -1,4 +1,5 @@
 import type { Light } from './lights'
+import type { Wall } from './visibility'
 
 export interface Point {
   x: number
@@ -56,6 +57,8 @@ export interface Scene {
   lights: Light[]
   /** Fog of war: players see only what vision tokens see now (and greyscale memory). */
   fog: { enabled: boolean }
+  /** Walls block sight. Scene coordinates; they move and scale with the map. */
+  walls: Wall[]
 }
 
 export type Orientation = 0 | 90 | 180 | 270

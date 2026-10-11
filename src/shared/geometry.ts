@@ -132,6 +132,19 @@ export function carryPoint(p: Point, from: Rect, to: Rect): Point {
   return { x: to.x + (p.x - from.x) * k, y: to.y + (p.y - from.y) * k }
 }
 
+/**
+ * Nearest snap point to p: grid line intersections every `fraction` of a square (1, 1/2,
+ * 1/4), aligned with the grid's offset. 0 means no snapping.
+ */
+export function snapToGrid(p: Point, grid: GridSettings, fraction: number): Point {
+  if (fraction <= 0) return { x: p.x, y: p.y }
+  const step = grid.size * fraction
+  return {
+    x: grid.offsetX + Math.round((p.x - grid.offsetX) / step) * step,
+    y: grid.offsetY + Math.round((p.y - grid.offsetY) / step) * step,
+  }
+}
+
 /** Corners of the "up" marker on the table view's top edge (corners from tableViewCorners). */
 export function upMarker(corners: Point[], centre: Point, size: number): Point[] {
   const [a, b] = corners

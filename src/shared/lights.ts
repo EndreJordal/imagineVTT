@@ -58,10 +58,19 @@ export interface LightPreset {
   color: string
   intensity: number
   cone?: number
+  /** Vision when placed (default: on for hand-held lights) and its range in squares. */
+  vision?: boolean
+  visionRange?: number
 }
 
-/** Hand-held lights and vision tokens see this far by default (100ft in 5ft squares). */
+/** Hand-held lights see this far by default (100ft in 5ft squares). */
 export const DEFAULT_VISION_RANGE = 20
+
+/** Points somewhere (flashlight beam, neon tube); everything else, vision included, is all-round. */
+export const isDirectional = (light: Light) => {
+  const shape = LIGHT_PRESETS[light.kind].shape
+  return shape === 'cone' || shape === 'tube'
+}
 
 /** Radii roughly follow 5e (squares of 5ft): a torch lights 20ft bright + 20ft dim. */
 export const LIGHT_PRESETS: Record<LightKind, LightPreset> = {
@@ -75,7 +84,8 @@ export const LIGHT_PRESETS: Record<LightKind, LightPreset> = {
   candle: { label: 'Candle', icon: '🕯️', handheld: true, shape: 'radial', animation: 'candle', radius: 2.5, color: '#ffb766', intensity: 0.8 },
   flashlight: { label: 'Flashlight', icon: '🔦', handheld: true, shape: 'cone', animation: 'steady', radius: 12, color: '#f4f8ff', intensity: 0.95, cone: 50 },
   lantern: { label: 'Lantern', icon: '🏮', handheld: true, shape: 'radial', animation: 'lantern', radius: 10, color: '#ffc070', intensity: 0.9 },
-  vision: { label: 'Vision token', icon: '👤', handheld: true, shape: 'none', animation: 'steady', radius: 0, color: '#9ad0ff', intensity: 0 },
+  // Placed switched off at the smallest range, so the GM opens it up deliberately.
+  vision: { label: 'Vision token', icon: '👤', handheld: true, shape: 'none', animation: 'steady', radius: 0, color: '#9ad0ff', intensity: 0, vision: false, visionRange: 1 },
 }
 
 /** Gives light (as opposed to a pure vision token). */
@@ -111,8 +121,8 @@ export function createLight(kind: LightKind, x: number, y: number, id: string): 
     // Hand-held lights start unlit so the GM decides when the party lights them.
     on: !p.handheld,
     // What the party carries is where they see from.
-    vision: p.handheld,
-    visionRange: DEFAULT_VISION_RANGE,
+    vision: p.vision ?? p.handheld,
+    visionRange: p.visionRange ?? DEFAULT_VISION_RANGE,
   }
 }
 

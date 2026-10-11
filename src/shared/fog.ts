@@ -19,6 +19,8 @@ export interface Viewer {
   x: number
   y: number
   range: number
+  /** Whether a scene point is in its line of sight (walls); everything if absent. */
+  sees?: (p: { x: number; y: number }) => boolean
 }
 
 export function createFogMemory(bounds: Size): FogMemory {
@@ -62,13 +64,17 @@ export function stampVision(memory: FogMemory, bounds: Rect, viewers: Viewer[]):
     const x1 = Math.min(cols - 1, Math.ceil(cx + rx))
     const y0 = Math.max(0, Math.floor(cy - ry))
     const y1 = Math.min(rows - 1, Math.ceil(cy + ry))
+    const cell = { x: 0, y: 0 }
     for (let y = y0; y <= y1; y++) {
       const dy = (y + 0.5 - cy) / ry
       for (let x = x0; x <= x1; x++) {
         const dx = (x + 0.5 - cx) / rx
         const value = Math.round(255 * visionFalloff(Math.hypot(dx, dy)))
         const i = y * cols + x
-        if (value > data[i]) {
+        if (value <= data[i]) continue
+        cell.x = bounds.x + (x + 0.5) / sx
+        cell.y = bounds.y + (y + 0.5) / sy
+        if (!v.sees || v.sees(cell)) {
           data[i] = value
           changed = true
         }

@@ -5,6 +5,7 @@ import { tableState, useGm } from './store'
 const SAVE_DELAY_MS = 300
 const FOG_SEND_MS = 120
 const FOG_SAVE_MS = 1000
+const CAMERA_SAVE_MS = 500
 
 /** Broadcast GM state to the table window and persist it. Returns a stop function. */
 export function startGmSync(): () => void {
@@ -39,7 +40,23 @@ export function startGmSync(): () => void {
     }, FOG_SEND_MS)
   }
 
+  let cameraSaveTimer: number | undefined
+
   const unsubscribe = useGm.subscribe((s, prev) => {
+    // Anything that goes into a scene file counts as a change to save.
+    const sceneChanged =
+      s.scene !== prev.scene ||
+      s.display.orientation !== prev.display.orientation ||
+      s.mapImage !== prev.mapImage ||
+      s.fogVersion !== prev.fogVersion
+    if (sceneChanged && !s.unsaved) useGm.getState().markUnsaved()
+    if (s.sceneName !== prev.sceneName || s.unsaved !== prev.unsaved) {
+      void save('sceneName', { name: s.sceneName, unsaved: s.unsaved })
+    }
+    if (s.gmCamera !== prev.gmCamera) {
+      clearTimeout(cameraSaveTimer)
+      cameraSaveTimer = window.setTimeout(() => void save('gmCamera', useGm.getState().gmCamera), CAMERA_SAVE_MS)
+    }
     // Vision tokens moving (or the map under them) reveal more of the fog.
     if (s.scene.fog.enabled && s.scene !== prev.scene) useGm.getState().stampFog()
     if (s.fogVersion !== prev.fogVersion) {
@@ -86,6 +103,7 @@ export function startGmSync(): () => void {
     clearTimeout(saveTimer)
     clearTimeout(fogSaveTimer)
     clearTimeout(fogSendTimer)
+    clearTimeout(cameraSaveTimer)
     channel.close()
   }
 }

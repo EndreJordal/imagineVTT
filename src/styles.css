@@ -53,9 +53,30 @@ body,
   border-bottom: 1px solid var(--border);
 }
 
+.toolbar button,
+.toolbar-label,
+.toolbar-value {
+  white-space: nowrap;
+}
+
+.scene-file {
+  gap: 4px;
+  margin-right: auto;
+}
+
+.scene-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.unsaved-dot {
+  color: var(--accent);
+}
+
 .toolbar-title {
   font-weight: 600;
-  width: 256px;
 }
 
 .toolbar-item {
@@ -156,6 +177,29 @@ body,
   opacity: 0.8;
 }
 
+.snap-options button {
+  padding: 2px 6px;
+}
+
+.key-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.key-list kbd,
+.wall-toolbox kbd {
+  font: inherit;
+  font-size: 12px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #26262d;
+}
+
 /* Light placement banner */
 
 .placement-hint {
@@ -179,13 +223,26 @@ body,
   border-radius: 3px;
 }
 
-/* Selected light */
+/* Selected light, wall points, wall toolbox: stacked on the right of the map */
 
-.light-panel {
+.side-panels {
   position: absolute;
   top: 12px;
   right: 12px;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.side-panels > * {
+  pointer-events: auto;
+}
+
+.light-panel {
   width: 260px;
   display: flex;
   flex-direction: column;
