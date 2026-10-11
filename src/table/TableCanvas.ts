@@ -20,8 +20,7 @@ export class TableCanvas extends PixiHost {
   protected setup() {
     this.app.stage.addChild(this.sceneLayer, this.calibration)
     this.app.renderer.on('resize', () => this.render())
-    this.app.ticker.add(() => this.sceneLayer.animate(this.app.renderer, performance.now() / 1000))
-    void this.sceneLayer.setMapImage(this.image)
+    void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
     this.render()
   }
@@ -34,14 +33,24 @@ export class TableCanvas extends PixiHost {
   setFogMemory(memory: FogMemory | null) {
     this.fogMemory = memory
     if (this.ready) this.sceneLayer.setFogMemory(memory)
+    this.requestRender()
   }
 
   setMapImage(image: Blob | null) {
     this.image = image
-    if (this.ready) void this.sceneLayer.setMapImage(image)
+    if (this.ready) void this.sceneLayer.setMapImage(image).then(() => this.requestRender())
+  }
+
+  protected override isAnimating() {
+    return this.sceneLayer.isAnimating()
+  }
+
+  protected override beforeRender(seconds: number) {
+    this.sceneLayer.animate(this.app.renderer, seconds)
   }
 
   private render() {
+    this.requestRender()
     if (!this.ready || !this.state) return
     const { scene, display, calibrating } = this.state
     const screen = this.app.screen

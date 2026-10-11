@@ -54,6 +54,11 @@ export class LightingLayer {
   private dirty = true
 
   /** Whether anything is lit; the scene layer hides the lit copy otherwise. */
+  /** Whether any lit light flickers, so the scene needs animation frames. */
+  get animated() {
+    return this.active && this.lights.some((l) => l.on && LIGHT_PRESETS[l.kind].animation !== 'steady')
+  }
+
   get active() {
     return this.darkness > 0 && this.lights.some((l) => l.on && emitsLight(l))
   }

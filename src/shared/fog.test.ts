@@ -40,6 +40,16 @@ describe('fog memory', () => {
   })
 })
 
+describe('stampVision with a reach', () => {
+  it('only records inside the area sight can reach', () => {
+    const m = createFogMemory(bounds)
+    const reach = { x: 500, y: 450, width: 200, height: 200 }
+    stampVision(m, bounds, [{ x: 600, y: 550, range: 400, reach }])
+    expect(at(m, 600, 550)).toBe(255)
+    expect(at(m, 600 + 300, 550)).toBe(0) // within range, outside reach
+  })
+})
+
 describe('visionFalloff', () => {
   it('is full for most of the range and eases out to zero', () => {
     expect(visionFalloff(0)).toBe(1)

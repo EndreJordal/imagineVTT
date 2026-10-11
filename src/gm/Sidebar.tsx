@@ -29,7 +29,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
         <p className="hint">
           {s.tableConnected
             ? `Connected · ${s.tableScreen.width}×${s.tableScreen.height}`
-            : 'Not connected. Open it, drag it to the TV and double-click it for fullscreen.'}
+            : 'Not connected. Open it, drag it to the TV, click it and press F11 for fullscreen.'}
         </p>
         <p className="hint">
           Shows {(s.tableScreen.width / tableScale(s.scene, s.display) / grid.size).toFixed(1)} ×{' '}
@@ -233,27 +233,35 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
 
 /** Measure the on-table square with a ruler and enter the result to correct the scale. */
 function Calibrate() {
-  const [measured, setMeasured] = useState('')
   const { display, setDisplay } = useGm()
+  const applied = display.lastMeasuredMm
+  // Shows the last applied measurement; a new one can be typed over it.
+  const [measured, setMeasured] = useState(applied === undefined ? '' : String(applied))
   const mm = parseFloat(measured)
+  // Applying the same measurement twice would correct twice: wait for a new one.
+  const isNew = mm > 0 && mm !== applied
   return (
-    <div className="row">
-      <input
-        type="number"
-        placeholder={`Measured (${CALIBRATION_MM} mm)`}
-        value={measured}
-        onChange={(e) => setMeasured(e.target.value)}
-      />
-      <button
-        disabled={!(mm > 0)}
-        onClick={() => {
-          setDisplay({ pxPerMm: (display.pxPerMm * CALIBRATION_MM) / mm })
-          setMeasured('')
-        }}
-      >
-        Apply
-      </button>
-    </div>
+    <>
+      <div className="row">
+        <input
+          type="number"
+          placeholder={`Measured (${CALIBRATION_MM} mm)`}
+          value={measured}
+          onChange={(e) => setMeasured(e.target.value)}
+        />
+        <button
+          disabled={!isNew}
+          onClick={() => setDisplay({ pxPerMm: (display.pxPerMm * CALIBRATION_MM) / mm, lastMeasuredMm: mm })}
+        >
+          Apply
+        </button>
+      </div>
+      {applied !== undefined && !isNew && (
+        <p className="hint">
+          Applied {applied} mm: the square should now measure {CALIBRATION_MM} mm. Measure again to check.
+        </p>
+      )}
+    </>
   )
 }
 

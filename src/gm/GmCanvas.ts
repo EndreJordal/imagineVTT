@@ -260,7 +260,7 @@ export class GmCanvas extends PixiHost {
       this.selectionBox,
     )
     this.app.stage.addChild(this.camera)
-    void this.sceneLayer.setMapImage(this.image)
+    void this.sceneLayer.setMapImage(this.image).then(() => this.requestRender())
     this.sceneLayer.setFogMemory(this.fogMemory)
 
     const canvas = this.app.canvas
@@ -270,7 +270,6 @@ export class GmCanvas extends PixiHost {
     canvas.addEventListener('pointercancel', this.onPointerUp)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     canvas.addEventListener('contextmenu', (e) => e.preventDefault())
-    this.app.ticker.add(() => this.sceneLayer.animate(this.app.renderer, performance.now() / 1000))
     this.render()
   }
 
@@ -298,13 +297,14 @@ export class GmCanvas extends PixiHost {
     this.fogVersion = version
     this.fogMemory = memory
     if (this.ready) this.sceneLayer.setFogMemory(memory)
+    this.requestRender()
   }
 
   setMapImage(image: Blob | null) {
     if (image === this.image) return
     this.image = image
     this.fitted = false
-    if (this.ready) void this.sceneLayer.setMapImage(image)
+    if (this.ready) void this.sceneLayer.setMapImage(image).then(() => this.requestRender())
     this.render()
   }
 
@@ -354,8 +354,17 @@ export class GmCanvas extends PixiHost {
     return { x: p.x, y: p.y }
   }
 
+  protected override isAnimating() {
+    return this.sceneLayer.isAnimating()
+  }
+
+  protected override beforeRender(seconds: number) {
+    this.sceneLayer.animate(this.app.renderer, seconds)
+  }
+
   private render() {
     if (!this.ready || !this.state) return
+    this.requestRender()
     this.sceneLayer.update(this.state.scene, this.peeking ? 'players' : 'gm')
     if (!this.fitted) {
       this.fitted = true
@@ -372,6 +381,7 @@ export class GmCanvas extends PixiHost {
   }
 
   private drawOverlay() {
+    this.requestRender()
     this.drawMapHandle()
     this.drawLights()
     this.drawWalls()
@@ -509,6 +519,7 @@ export class GmCanvas extends PixiHost {
   }
 
   private drawWallDraft() {
+    this.requestRender()
     const px = this.px
     const g = this.wallDraftLayer.clear()
     if (!this.buildingWalls) return
@@ -537,6 +548,7 @@ export class GmCanvas extends PixiHost {
   }
 
   private drawSelectionBox() {
+    this.requestRender()
     const g = this.selectionBox.clear()
     if (this.drag?.mode !== 'box') return
     const r = rectBetween(this.drag.start, this.drag.end)
@@ -724,6 +736,7 @@ export class GmCanvas extends PixiHost {
     }
     if (drag.mode === 'pan') {
       const c = this.toCanvas(e)
+      this.requestRender()
       this.camera.position.x += c.x - drag.last.x
       this.camera.position.y += c.y - drag.last.y
       drag.last = c

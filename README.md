@@ -12,7 +12,7 @@ npm run dev
 ```
 
 1. Open the dev URL. This is the **GM window**.
-2. Click **Open table window**, drag it to the TV and double-click it to go fullscreen.
+2. Click **Open table window**, drag it to the TV, click it and press **F11** for fullscreen (F11 stays fullscreen when the GM opens a file dialog; double-clicking also works, but Chrome exits that kind of fullscreen whenever a dialog opens).
 3. Tick **Show calibration square on table**, measure the square with a ruler, enter the measurement and click **Apply**.
 
 ## Scripts

@@ -21,6 +21,8 @@ export interface Viewer {
   range: number
   /** Whether a scene point is in its line of sight (walls); everything if absent. */
   sees?: (p: { x: number; y: number }) => boolean
+  /** Scene area its line of sight can reach (inside walls); only this part is scanned. */
+  reach?: Rect
 }
 
 export function createFogMemory(bounds: Size): FogMemory {
@@ -60,17 +62,25 @@ export function stampVision(memory: FogMemory, bounds: Rect, viewers: Viewer[]):
     const rx = v.range * sx
     const ry = v.range * sy
     if (rx <= 0 || ry <= 0) continue
-    const x0 = Math.max(0, Math.floor(cx - rx))
-    const x1 = Math.min(cols - 1, Math.ceil(cx + rx))
-    const y0 = Math.max(0, Math.floor(cy - ry))
-    const y1 = Math.min(rows - 1, Math.ceil(cy + ry))
+    let x0 = Math.max(0, Math.floor(cx - rx))
+    let x1 = Math.min(cols - 1, Math.ceil(cx + rx))
+    let y0 = Math.max(0, Math.floor(cy - ry))
+    let y1 = Math.min(rows - 1, Math.ceil(cy + ry))
+    if (v.reach) {
+      // Walls limit sight to a smaller area (a room): don't scan beyond it.
+      x0 = Math.max(x0, Math.floor((v.reach.x - bounds.x) * sx))
+      x1 = Math.min(x1, Math.ceil((v.reach.x + v.reach.width - bounds.x) * sx))
+      y0 = Math.max(y0, Math.floor((v.reach.y - bounds.y) * sy))
+      y1 = Math.min(y1, Math.ceil((v.reach.y + v.reach.height - bounds.y) * sy))
+    }
     const cell = { x: 0, y: 0 }
     for (let y = y0; y <= y1; y++) {
       const dy = (y + 0.5 - cy) / ry
       for (let x = x0; x <= x1; x++) {
+        const i = y * cols + x
+        if (data[i] === 255) continue // already fully remembered: nothing to add
         const dx = (x + 0.5 - cx) / rx
         const value = Math.round(255 * visionFalloff(Math.hypot(dx, dy)))
-        const i = y * cols + x
         if (value <= data[i]) continue
         cell.x = bounds.x + (x + 0.5) / sx
         cell.y = bounds.y + (y + 0.5) / sy

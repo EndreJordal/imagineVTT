@@ -33,6 +33,12 @@ export const MM_PER_INCH = 25.4
 
 const DEFAULT_GRID_STYLE = { color: '#ffffff', opacity: 0.35 }
 
+/** What each vision token last stamped into which memory grid (see stampFog). */
+const stamped = {
+  memory: null as FogMemory | null,
+  viewers: new Map<string, { key: string; walls: Wall[] }>(),
+}
+
 /** By default the GM sees half the darkness the players do. */
 const DEFAULT_GM_VISION = 0.5
 
@@ -164,8 +170,9 @@ const defaultScene: Scene = {
   walls: [],
 }
 
-// 96 CSS px per inch is the nominal value; real TVs differ, hence calibration.
-const defaultDisplay: Display = { pxPerMm: 96 / MM_PER_INCH, orientation: 0 }
+// Calibrated on the GM's own table TV: the nominal 96 CSS px per inch square measured 137 mm
+// instead of 100. Other screens differ; calibration corrects it.
+const defaultDisplay: Display = { pxPerMm: (96 / MM_PER_INCH) * (100 / 137), orientation: 0 }
 
 // Until a table window has ever connected, assume a 1080p TV.
 const defaultTableScreen: Size = { width: 1920, height: 1080 }
@@ -246,18 +253,31 @@ export const useGm = create<GmStore>()((set) => ({
       const bounds = sceneBounds(s.scene)
       // A memory made for another map (different shape) starts over.
       const memory = s.fogMemory && fitsBounds(s.fogMemory, bounds) ? s.fogMemory : createFogMemory(bounds)
+      if (memory !== stamped.memory) {
+        stamped.memory = memory
+        stamped.viewers.clear()
+      }
       const segments = wallSegments(s.scene.walls)
       const viewers = s.scene.lights
         .filter((l) => l.vision)
+        .filter((l) => {
+          // Skip viewers that haven't moved on the map (nor walls changed) since their last
+          // stamp: they can't reveal anything new.
+          const key = `${l.x - bounds.x},${l.y - bounds.y},${bounds.width},${l.visionRange * s.scene.grid.size}`
+          const last = stamped.viewers.get(l.id)
+          if (last && last.key === key && last.walls === s.scene.walls) return false
+          stamped.viewers.set(l.id, { key, walls: s.scene.walls })
+          return true
+        })
         .map((l) => {
           const range = l.visionRange * s.scene.grid.size
-          // Walls block sight: only what's in line of sight is remembered.
-          const sees = segments.length
-            ? createVisibilityTest(l, visibilityPolygon(l, range, segments))
-            : undefined
-          return { x: l.x, y: l.y, range, sees }
+          if (!segments.length) return { x: l.x, y: l.y, range }
+          // Walls block sight: only what's in line of sight is remembered, and nothing
+          // beyond the walls needs looking at.
+          const polygon = visibilityPolygon(l, range, segments)
+          return { x: l.x, y: l.y, range, sees: createVisibilityTest(l, polygon), reach: boundingRect(polygon) }
         })
-      const changed = stampVision(memory, bounds, viewers)
+      const changed = viewers.length > 0 && stampVision(memory, bounds, viewers)
       if (!changed && memory === s.fogMemory) return s
       return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
     }),

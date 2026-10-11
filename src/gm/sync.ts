@@ -6,6 +6,7 @@ const SAVE_DELAY_MS = 300
 const FOG_SEND_MS = 120
 const FOG_SAVE_MS = 1000
 const CAMERA_SAVE_MS = 500
+const FOG_STAMP_MS = 100
 
 /** Broadcast GM state to the table window and persist it. Returns a stop function. */
 export function startGmSync(): () => void {
@@ -41,6 +42,29 @@ export function startGmSync(): () => void {
   }
 
   let cameraSaveTimer: number | undefined
+  /**
+   * Stamping fog memory is CPU work (line of sight over many cells). While something is
+   * dragged, stamp at most every FOG_STAMP_MS: now, and once more when changes settle.
+   * What's in sight right now is drawn separately, so only memory waits.
+   */
+  let stampTimer: number | undefined
+  let stampPending = false
+  const scheduleStamp = () => {
+    if (stampTimer !== undefined) {
+      stampPending = true
+      return
+    }
+    useGm.getState().stampFog()
+    stampTimer = window.setTimeout(function settle() {
+      if (stampPending) {
+        stampPending = false
+        useGm.getState().stampFog()
+        stampTimer = window.setTimeout(settle, FOG_STAMP_MS)
+      } else {
+        stampTimer = undefined
+      }
+    }, FOG_STAMP_MS)
+  }
 
   const unsubscribe = useGm.subscribe((s, prev) => {
     // Anything that goes into a scene file counts as a change to save.
@@ -55,10 +79,11 @@ export function startGmSync(): () => void {
     }
     if (s.gmCamera !== prev.gmCamera) {
       clearTimeout(cameraSaveTimer)
+    clearTimeout(stampTimer)
       cameraSaveTimer = window.setTimeout(() => void save('gmCamera', useGm.getState().gmCamera), CAMERA_SAVE_MS)
     }
     // Vision tokens moving (or the map under them) reveal more of the fog.
-    if (s.scene.fog.enabled && s.scene !== prev.scene) useGm.getState().stampFog()
+    if (s.scene.fog.enabled && s.scene !== prev.scene) scheduleStamp()
     if (s.fogVersion !== prev.fogVersion) {
       sendFog()
       clearTimeout(fogSaveTimer)

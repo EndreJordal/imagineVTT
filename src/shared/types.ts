@@ -69,6 +69,8 @@ export interface Display {
   pxPerMm: number
   /** Which way the table view is rotated relative to the map. */
   orientation: Orientation
+  /** The last calibration measurement applied (mm), to show what the calibration is based on. */
+  lastMeasuredMm?: number
 }
 
 /** Everything the table window needs to render (except the map image blob). */

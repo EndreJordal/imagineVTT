@@ -4,10 +4,23 @@ import { TableCanvas } from './TableCanvas'
 
 const screenSize = () => ({ width: window.innerWidth, height: window.innerHeight })
 
+/**
+ * Fullscreen either way: the browser's own (F11), which stays put when the GM opens a file
+ * dialog, or the page's (double-click, the Fullscreen API), which Chrome drops whenever a
+ * dialog opens, for security.
+ */
+function isFullscreen() {
+  return (
+    !!document.fullscreenElement ||
+    window.matchMedia('(display-mode: fullscreen)').matches ||
+    (window.innerWidth >= screen.width && window.innerHeight >= screen.height)
+  )
+}
+
 export function TableApp() {
   const hostRef = useRef<HTMLDivElement>(null)
   const [connected, setConnected] = useState(false)
-  const [fullscreen, setFullscreen] = useState(!!document.fullscreenElement)
+  const [fullscreen, setFullscreen] = useState(isFullscreen)
 
   useEffect(() => {
     const canvas = new TableCanvas(hostRef.current!)
@@ -36,7 +49,7 @@ export function TableApp() {
     const onResize = () => channel.post({ type: 'screen', screen: screenSize() })
     const heartbeat = window.setInterval(onResize, HEARTBEAT_MS)
     const onUnload = () => channel.post({ type: 'bye', from: 'table' })
-    const onFullscreen = () => setFullscreen(!!document.fullscreenElement)
+    const onFullscreen = () => setFullscreen(isFullscreen())
     const onDoubleClick = () => {
       if (!document.fullscreenElement) void document.documentElement.requestFullscreen()
     }
@@ -44,6 +57,7 @@ export function TableApp() {
     window.addEventListener('pagehide', onUnload)
     window.addEventListener('dblclick', onDoubleClick)
     document.addEventListener('fullscreenchange', onFullscreen)
+    window.addEventListener('resize', onFullscreen) // F11 shows up as a resize
 
     return () => {
       clearInterval(heartbeat)
@@ -51,6 +65,7 @@ export function TableApp() {
       window.removeEventListener('pagehide', onUnload)
       window.removeEventListener('dblclick', onDoubleClick)
       document.removeEventListener('fullscreenchange', onFullscreen)
+      window.removeEventListener('resize', onFullscreen)
       onUnload()
       channel.close()
       canvas.destroy()
@@ -62,7 +77,9 @@ export function TableApp() {
       <div className="table-canvas" ref={hostRef} />
       {(!connected || !fullscreen) && (
         <div className="table-hint">
-          {connected ? 'Double-click for fullscreen' : 'Waiting for the GM window…'}
+          {connected
+            ? 'Press F11 for fullscreen (stays put when the GM opens files; double-click also works, but file dialogs exit it)'
+            : 'Waiting for the GM window…'}
         </div>
       )}
     </div>

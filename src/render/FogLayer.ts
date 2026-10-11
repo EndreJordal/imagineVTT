@@ -1,4 +1,4 @@
-import { Container, Graphics, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js'
+import { BufferImageSource, Container, Graphics, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import type { Light } from '../shared/lights'
 import type { Rect } from '../shared/types'
@@ -31,7 +31,6 @@ export class FogLayer {
   private factor = 1
   private dirty = true
 
-  private memoryCanvas = document.createElement('canvas')
   private memoryTexture: Texture | null = null
   private memory: FogMemory | null = null
 
@@ -79,25 +78,25 @@ export class FogLayer {
   setMemory(memory: FogMemory | null) {
     this.memory = memory
     if (!memory) return
-    const canvas = this.memoryCanvas
-    if (canvas.width !== memory.cols || canvas.height !== memory.rows) {
-      canvas.width = memory.cols
-      canvas.height = memory.rows
-      this.memoryTexture?.destroy(true)
-      this.memoryTexture = null
-    }
-    const ctx = canvas.getContext('2d')!
-    const img = ctx.createImageData(memory.cols, memory.rows)
-    for (let i = 0; i < memory.data.length; i++) {
-      const v = memory.data[i]
-      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v
-      img.data[i * 4 + 3] = 255
-    }
-    ctx.putImageData(img, 0, 0)
-    if (this.memoryTexture) {
-      this.memoryTexture.source.update()
+    // Uploaded as-is, one byte per cell (a single-channel texture: masks read the red
+    // channel). The same grid object is updated in place, so re-upload its new contents.
+    const source = this.memoryTexture?.source as BufferImageSource | undefined
+    if (source && source.width === memory.cols && source.height === memory.rows) {
+      // Same size: the GM's own grid updated in place, or the table's fresh copy of it.
+      const pixels = source.resource as Uint8Array
+      if (pixels !== memory.data) pixels.set(memory.data)
+      source.update()
     } else {
-      this.memoryTexture = Texture.from(canvas)
+      this.memoryTexture?.destroy(true)
+      this.memoryTexture = new Texture({
+        source: new BufferImageSource({
+          resource: memory.data,
+          width: memory.cols,
+          height: memory.rows,
+          format: 'r8unorm',
+          scaleMode: 'linear',
+        }),
+      })
       this.memoryMask.texture = this.memoryTexture
       this.memoryMaskGm.texture = this.memoryTexture
     }

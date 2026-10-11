@@ -79,7 +79,12 @@ export class SceneLayer extends Container {
     this.setFogMode('off')
   }
 
-  /** Call every frame: animates light flicker, redraws sight when vision tokens move. */
+  /** Whether frames are needed with nothing changed (flickering lights). */
+  isAnimating() {
+    return this.lighting.animated
+  }
+
+  /** Call before each frame: animates light flicker, redraws sight when vision tokens move. */
   animate(renderer: Renderer, seconds: number) {
     this.lighting.animate(renderer, seconds)
     if (this.fogMode !== 'off') this.fog.render(renderer)
