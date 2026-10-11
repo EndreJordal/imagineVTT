@@ -1,6 +1,6 @@
-/** How far night goes at darkness 1: the map keeps a little colour and light to stay readable. */
+/** How far night goes at darkness 1: almost black (5% brightness), so only light sources show. */
 export const NIGHT_DESATURATION = 0.85
-export const NIGHT_DIMMING = 0.75
+export const NIGHT_DIMMING = 0.95
 
 /**
  * 4x5 colour matrix (row-major, as Pixi's ColorMatrixFilter takes it) for a day–night

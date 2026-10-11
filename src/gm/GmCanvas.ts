@@ -1,4 +1,4 @@
-import { Container, Graphics, Text } from 'pixi.js'
+import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
 import {
@@ -8,7 +8,7 @@ import {
   tableViewCorners,
   upMarker,
 } from '../shared/geometry'
-import { LIGHT_PRESETS, type Light } from '../shared/lights'
+import { LIGHT_PRESETS, type Light, type LightKind } from '../shared/lights'
 import type { Point, Size, TableState } from '../shared/types'
 
 const MIN_ZOOM = 0.05
@@ -39,11 +39,27 @@ interface Handlers {
   onMapResize(scale: number): void
   /** The GM dragged the map; position is its new top-left corner. */
   onMapMove(position: Point): void
+  /** The GM dragged a light token; position is where that light should go. */
   onLightMove(id: string, position: Point): void
   /** The GM dragged a directional light's aim handle; angle in radians. */
   onLightAim(id: string, angle: number): void
-  /** A light token was clicked, or empty space (null). */
+  /** Select just this light, or none (null). */
   onLightSelect(id: string | null): void
+  /** Ctrl/Cmd-click: add the light to the selection, or take it out. */
+  onLightToggle(id: string): void
+  /** In placement mode, the GM clicked the map here. Shift keeps placing more. */
+  onPlaceLight(at: Point, keepPlacing: boolean): void
+  onPlaceCancel(): void
+}
+
+/** GM-only state the canvas shows but doesn't own. */
+export interface GmUi {
+  /** Last known table size; stays set (drawn dimmed) when the table window is closed. */
+  tableScreen: Size | null
+  tableConnected: boolean
+  selectedLightIds: string[]
+  /** Light kind waiting to be placed with a click, if any. */
+  placingLight: LightKind | null
 }
 
 type Drag =
@@ -52,7 +68,9 @@ type Drag =
   | { mode: 'view'; grab: Point }
   | { mode: 'map'; grab: Point }
   | { mode: 'resize'; grab: Point }
-  | { mode: 'light'; id: string; grab: Point }
+  // wasSelected: the light was already selected when pressed, so a click (no drag) narrows
+  // a multi-selection down to it, while a drag moves the whole selection.
+  | { mode: 'light'; id: string; grab: Point; wasSelected: boolean }
   | { mode: 'aim'; id: string }
 
 /**
@@ -80,7 +98,50 @@ const isDirectional = (light: Light) => LIGHT_PRESETS[light.kind].shape !== 'rad
 interface Token {
   root: Container
   ring: Graphics
-  icon: Text
+  icon: Sprite
+}
+
+/** CSS cursor showing a light's icon, with the hotspot in its centre. */
+const iconCursors = new Map<string, string>()
+
+function iconCursor(icon: string): string {
+  let cursor = iconCursors.get(icon)
+  if (!cursor) {
+    const size = 32
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = size
+    const ctx = canvas.getContext('2d')!
+    ctx.font = '24px "Segoe UI Emoji", "Apple Color Emoji", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)'
+    ctx.shadowBlur = 3
+    ctx.fillText(icon, size / 2, size / 2 + 1)
+    cursor = `url(${canvas.toDataURL()}) ${size / 2} ${size / 2}, crosshair`
+    iconCursors.set(icon, cursor)
+  }
+  return cursor
+}
+
+/** Emoji drawn once per icon and shared by every token showing it. */
+const iconTextures = new Map<string, Texture>()
+const ICON_PX = 18
+
+function iconTexture(icon: string): Texture {
+  let texture = iconTextures.get(icon)
+  if (!texture) {
+    const scale = 3 // stays crisp when the browser zooms or on HiDPI screens
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = ICON_PX * scale + 4
+    const ctx = canvas.getContext('2d')!
+    ctx.font = `${ICON_PX * scale * 0.8}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(icon, canvas.width / 2, canvas.height / 2 + scale)
+    texture = Texture.from(canvas)
+    iconTextures.set(icon, texture)
+  }
+  return texture
 }
 
 /**
@@ -99,7 +160,8 @@ export class GmCanvas extends PixiHost {
   private lightTokens = new Container()
   private tokens = new Map<string, Token>()
   private aimHandle = new Graphics()
-  private selectedLightId: string | null = null
+  private selectedLightIds = new Set<string>()
+  private placingLight: LightKind | null = null
   /** Where the current press started (canvas px), to tell clicks from drags. */
   private pressedAt: Point | null = null
   private state: TableState | null = null
@@ -139,17 +201,15 @@ export class GmCanvas extends PixiHost {
     this.render()
   }
 
-  /** tableScreen is the last known table size; it stays set (drawn dimmed) when disconnected. */
-  update(
-    state: TableState,
-    tableScreen: Size | null,
-    tableConnected: boolean,
-    selectedLightId: string | null,
-  ) {
+  update(state: TableState, ui: GmUi) {
     this.state = state
-    this.tableScreen = tableScreen
-    this.tableConnected = tableConnected
-    this.selectedLightId = selectedLightId
+    this.tableScreen = ui.tableScreen
+    this.tableConnected = ui.tableConnected
+    this.selectedLightIds = new Set(ui.selectedLightIds)
+    if (ui.placingLight !== this.placingLight) {
+      this.placingLight = ui.placingLight
+      if (this.ready) this.app.canvas.style.cursor = this.cursorFor(null)
+    }
     this.render()
   }
 
@@ -272,17 +332,18 @@ export class GmCanvas extends PixiHost {
       let t = this.tokens.get(light.id)
       if (!t) {
         const ring = new Graphics()
-        const icon = new Text({ text: '', style: { fontSize: 15 }, anchor: 0.5 })
+        const icon = new Sprite({ anchor: 0.5 })
         t = { root: new Container(), ring, icon }
         t.root.addChild(ring, icon)
         this.lightTokens.addChild(t.root)
         this.tokens.set(light.id, t)
       }
-      const selected = light.id === this.selectedLightId
+      const selected = this.selectedLightIds.has(light.id)
       t.root.position.set(light.x, light.y)
       t.root.scale.set(this.px)
       t.root.alpha = light.on ? 1 : 0.55
-      t.icon.text = LIGHT_PRESETS[light.kind].icon
+      t.icon.texture = iconTexture(LIGHT_PRESETS[light.kind].icon)
+      t.icon.setSize(ICON_PX)
       t.ring
         .clear()
         .circle(0, 0, TOKEN_PX)
@@ -291,9 +352,9 @@ export class GmCanvas extends PixiHost {
       if (selected) t.ring.circle(0, 0, TOKEN_PX + 3.5).stroke({ width: 2, color: 0xffffff })
     }
 
-    // Aim handle for the selected directional light.
+    // Aim handle for the selected directional light (when it's the only one selected).
     const g = this.aimHandle.clear()
-    const selected = lights.find((l) => l.id === this.selectedLightId)
+    const selected = this.soleSelected()
     if (selected && isDirectional(selected)) {
       const px = this.px
       const a = this.aimPoint(selected)
@@ -303,6 +364,13 @@ export class GmCanvas extends PixiHost {
         .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.8 })
       g.circle(a.x, a.y, AIM_HANDLE_PX * px).fill(0xffffff).stroke({ width: 1.5 * px, color: 0x000000 })
     }
+  }
+
+  /** The selected light, if exactly one is selected. */
+  private soleSelected(): Light | undefined {
+    if (this.selectedLightIds.size !== 1) return undefined
+    const [id] = this.selectedLightIds
+    return this.state?.scene.lights.find((l) => l.id === id)
   }
 
   private aimPoint(light: Light): Point {
@@ -318,7 +386,7 @@ export class GmCanvas extends PixiHost {
     const map = state.scene.map
     const lights = state.scene.lights
 
-    const selected = lights.find((l) => l.id === this.selectedLightId)
+    const selected = this.soleSelected()
     if (selected && isDirectional(selected)) {
       const a = this.aimPoint(selected)
       if (Math.hypot(p.x - a.x, p.y - a.y) <= (AIM_HANDLE_PX + SLACK_PX) * px) {
@@ -353,6 +421,7 @@ export class GmCanvas extends PixiHost {
   }
 
   private cursorFor(target: Target) {
+    if (this.placingLight) return iconCursor(LIGHT_PRESETS[this.placingLight].icon)
     return CURSORS[target?.kind ?? 'pan']
   }
 
@@ -370,6 +439,12 @@ export class GmCanvas extends PixiHost {
   private onPointerDown = (e: PointerEvent) => {
     if (e.button > 2) return
     const p = this.toScene(e)
+    // Placement mode: left-click places, right-click cancels; middle still pans.
+    if (this.placingLight && e.button !== 1) {
+      if (e.button === 0) this.handlers.onPlaceLight(p, e.shiftKey)
+      else this.handlers.onPlaceCancel()
+      return
+    }
     const target = e.button === 0 ? this.targetAt(p) : null
     const scene = this.state?.scene
     if (target?.kind === 'locked') return // the resize handle is disabled while locked to the grid
@@ -380,8 +455,14 @@ export class GmCanvas extends PixiHost {
     } else if (target?.kind === 'light') {
       const light = scene?.lights.find((l) => l.id === target.id)
       if (!light) return
-      this.handlers.onLightSelect(light.id)
-      this.drag = { mode: 'light', id: light.id, grab: { x: light.x - p.x, y: light.y - p.y } }
+      if (e.ctrlKey || e.metaKey) {
+        this.handlers.onLightToggle(light.id)
+        this.pressedAt = null
+        return
+      }
+      const wasSelected = this.selectedLightIds.has(light.id)
+      if (!wasSelected) this.handlers.onLightSelect(light.id)
+      this.drag = { mode: 'light', id: light.id, grab: { x: light.x - p.x, y: light.y - p.y }, wasSelected }
     } else if (target?.kind === 'resize' && scene?.map) {
       const { map } = scene
       this.drag = { mode: 'resize', grab: { x: map.x + map.width - p.x, y: map.y + map.height - p.y } }
@@ -430,11 +511,15 @@ export class GmCanvas extends PixiHost {
   }
 
   private onPointerUp = (e: PointerEvent) => {
-    // A click (not a drag) on anything but a light deselects the light.
+    // A click (not a drag): on an already-selected light, select just it; on anything but
+    // a light, deselect (Ctrl/Cmd keeps the selection, for adding to it).
     const c = this.toCanvas(e)
     const start = this.pressedAt
     const clicked = start && Math.hypot(c.x - start.x, c.y - start.y) < CLICK_PX
-    if (clicked && this.drag && this.drag.mode !== 'light' && this.drag.mode !== 'aim') {
+    const drag = this.drag
+    if (clicked && drag?.mode === 'light' && drag.wasSelected) {
+      this.handlers.onLightSelect(drag.id)
+    } else if (clicked && drag && drag.mode !== 'light' && drag.mode !== 'aim' && !e.ctrlKey && !e.metaKey) {
       this.handlers.onLightSelect(null)
     }
     this.pressedAt = null

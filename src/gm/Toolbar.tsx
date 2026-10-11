@@ -24,12 +24,53 @@ export function Toolbar() {
         />
         <span aria-hidden>🌙</span>
       </label>
+      <GmVision />
       <LightMenu />
     </header>
   )
 }
 
-/** Toolbar button with a dropdown of light sources; picking one places it in the table view. */
+/**
+ * How dark the GM's own view is, relative to the table: from exactly what the players see
+ * to full day. Holding the eye button (or V) shows exactly what the players see.
+ */
+function GmVision() {
+  const vision = useGm((s) => s.gmVision)
+  const peeking = useGm((s) => s.peeking)
+  const { setGmVision, setPeeking } = useGm.getState()
+  const label = vision === 0 ? "players' view" : vision === 1 ? 'day' : `${Math.round(vision * 100)}% lighter`
+  return (
+    <div className="toolbar-item" title="Your view only: how much of the night you see. The table is not affected.">
+      <button
+        className={`icon-button peek${peeking ? ' active' : ''}`}
+        title="Hold (or hold V) to see exactly what the players see"
+        aria-pressed={peeking}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          setPeeking(true)
+        }}
+        onPointerUp={() => setPeeking(false)}
+        onPointerCancel={() => setPeeking(false)}
+      >
+        👁
+      </button>
+      <span className="toolbar-label">GM vision</span>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={vision}
+        aria-label="GM vision"
+        aria-valuetext={label}
+        onChange={(e) => setGmVision(e.target.valueAsNumber)}
+      />
+      <span className="toolbar-value">{label}</span>
+    </div>
+  )
+}
+
+/** Toolbar button with a dropdown of light sources; picking one lets the GM click to place it. */
 function LightMenu() {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -48,9 +89,9 @@ function LightMenu() {
     }
   }, [open])
 
-  const add = (kind: LightKind) => {
-    const { addLight, scene } = useGm.getState()
-    addLight(kind, scene.view) // centre of what the table shows
+  // Picking a light arms placement mode; the GM then clicks the map where it goes.
+  const pick = (kind: LightKind) => {
+    useGm.getState().setPlacingLight(kind)
     setOpen(false)
   }
 
@@ -71,7 +112,7 @@ function LightMenu() {
             const p = LIGHT_PRESETS[kind]
             return (
               <li key={kind} role="none">
-                <button role="menuitem" onClick={() => add(kind)}>
+                <button role="menuitem" onClick={() => pick(kind)}>
                   <span className="menu-icon" aria-hidden>
                     {p.icon}
                   </span>

@@ -68,6 +68,25 @@ body,
   width: 160px;
 }
 
+.toolbar-label {
+  color: var(--muted);
+}
+
+.toolbar-value {
+  min-width: 90px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.peek {
+  font-size: 16px;
+  border-radius: 4px;
+}
+
+.peek.active {
+  background: var(--accent);
+}
+
 .gm-stage {
   flex: 1;
   min-width: 0;
@@ -129,6 +148,29 @@ body,
 
 .menu-badge {
   opacity: 0.8;
+}
+
+/* Light placement banner */
+
+.placement-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgb(29 29 34 / 94%);
+  border: 1px solid var(--accent);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.placement-hint kbd {
+  font: inherit;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
 }
 
 /* Selected light */

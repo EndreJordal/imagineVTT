@@ -25,6 +25,8 @@ export class SceneLayer extends Container {
 
   private gridKey = ''
   private imageToken = 0
+  /** Decoded map pixels; closed explicitly when replaced (Pixi doesn't, and they're big). */
+  private bitmap: ImageBitmap | null = null
   private mapSize: Size = { width: 0, height: 0 }
   // 'inherit' renders the filter at the screen's pixel density (the default, 1, blurs HiDPI).
   private night = new ColorMatrixFilter({ resolution: 'inherit' })
@@ -35,13 +37,7 @@ export class SceneLayer extends Container {
     this.base.addChild(this.background, this.mapSprite, this.grid)
     this.lit.addChild(this.litMap, this.litGrid)
     this.lit.mask = this.lighting.maskSprite
-    this.addChild(
-      this.base,
-      this.lit,
-      this.lighting.maskSprite,
-      this.lighting.glowClip,
-      this.lighting.glow,
-    )
+    this.addChild(this.base, this.lit, this.lighting.maskSprite, this.lighting.glowSprite)
     this.updateLitVisibility()
   }
 
@@ -65,7 +61,7 @@ export class SceneLayer extends Container {
   private updateLitVisibility() {
     const on = this.lighting.active
     this.lit.visible = on
-    this.lighting.glow.visible = on
+    this.lighting.glowSprite.visible = on
   }
 
   async setMapImage(image: Blob | null) {
@@ -81,7 +77,21 @@ export class SceneLayer extends Container {
       sprite.texture = texture
       sprite.setSize(this.mapSize) // sprite size is relative to the texture
     }
-    if (old !== Texture.EMPTY) old.destroy(true)
+    this.releaseMap(old)
+    this.bitmap = bitmap
+  }
+
+  private releaseMap(texture: Texture) {
+    if (texture !== Texture.EMPTY) texture.destroy(true)
+    this.bitmap?.close()
+    this.bitmap = null
+  }
+
+  override destroy(options?: Parameters<Container['destroy']>[0]) {
+    this.imageToken++ // drop any decode still in flight
+    this.releaseMap(this.mapSprite.texture)
+    this.lighting.destroy()
+    super.destroy(options)
   }
 
   update(scene: Scene) {

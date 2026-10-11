@@ -29,6 +29,8 @@ export interface Light {
   /** Full cone width in degrees (flashlight only). */
   cone: number
   on: boolean
+  /** Moves along when the GM moves the table view (hand-held lights carried by the party). */
+  followView?: boolean
 }
 
 /** How a light's brightness behaves over time. */
@@ -90,7 +92,8 @@ export function createLight(kind: LightKind, x: number, y: number, id: string): 
     intensity: p.intensity,
     angle: 0,
     cone: p.cone ?? 50,
-    on: true,
+    // Hand-held lights start unlit so the GM decides when the party lights them.
+    on: !p.handheld,
   }
 }
 

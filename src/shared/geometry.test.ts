@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   alignMapToGrid,
+  carryPoint,
   followGrid,
   boundingRect,
   fitMapToRect,
@@ -111,6 +112,15 @@ describe('followGrid', () => {
     expect([m.width, m.height]).toEqual([250, 200])
     // The map started 0.2 cells right of a grid line; it still does.
     expect((m.x - 10) / 50).toBeCloseTo((map.x - 10) / 100)
+  })
+})
+
+describe('carryPoint', () => {
+  it('keeps a point on the same spot of a moved and scaled map', () => {
+    const from = { x: 0, y: 0, width: 1000, height: 500 }
+    const to = { x: 100, y: -50, width: 2000, height: 1000 }
+    // A quarter across, a fifth down stays a quarter across, a fifth down.
+    expect(carryPoint({ x: 250, y: 100 }, from, to)).toEqual({ x: 600, y: 150 })
   })
 })
 

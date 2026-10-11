@@ -123,6 +123,15 @@ export function followGrid(map: MapInfo, from: GridSettings, to: GridSettings): 
   }
 }
 
+/**
+ * Where a point on the map ends up when the map is moved or scaled from one placement to
+ * another: it keeps its place on the map image.
+ */
+export function carryPoint(p: Point, from: Rect, to: Rect): Point {
+  const k = to.width / from.width
+  return { x: to.x + (p.x - from.x) * k, y: to.y + (p.y - from.y) * k }
+}
+
 /** Corners of the "up" marker on the table view's top edge (corners from tableViewCorners). */
 export function upMarker(corners: Point[], centre: Point, size: number): Point[] {
   const [a, b] = corners

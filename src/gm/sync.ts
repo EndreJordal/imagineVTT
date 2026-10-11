@@ -38,6 +38,7 @@ export function startGmSync(): () => void {
       }, SAVE_DELAY_MS)
     }
     if (s.tableScreen !== prev.tableScreen) void save('tableScreen', s.tableScreen)
+    if (s.gmVision !== prev.gmVision) void save('gmVision', s.gmVision)
     if (s.mapImage !== prev.mapImage) {
       channel.post({ type: 'map', image: s.mapImage })
       void save('mapImage', s.mapImage)
