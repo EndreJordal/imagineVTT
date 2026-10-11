@@ -1,4 +1,5 @@
 import { selectedSegment } from '../shared/walls'
+import { AutoWalls } from './AutoWalls'
 import { useGm } from './store'
 
 /** Selection box for wall points: how many, and delete them. */
@@ -94,6 +95,7 @@ export function WallToolbox() {
           Cancel
         </button>
       </div>
+      <AutoWalls />
       {total > 0 && (
         <button
           onClick={() => {

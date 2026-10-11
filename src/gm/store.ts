@@ -135,6 +135,11 @@ interface GmStore extends TableState {
   /** Turn the drawn points into a wall (needs at least two). */
   confirmWallDraft(): void
   clearWalls(): void
+  /**
+   * Walls found on the map image (in its own pixels), placed where the map is. `replace`
+   * removes the existing walls and doors first.
+   */
+  addDetectedWalls(walls: { points: Point[]; door?: boolean }[], replace: boolean): void
   setBuildingDoors(on: boolean): void
   /** In door mode: the first click starts a door, the second (on the same wall) makes it. */
   placeDoorPoint(p: Point): void
@@ -404,6 +409,20 @@ export const useGm = create<GmStore>()((set) => ({
       return { scene: { ...s.scene, walls: [...s.scene.walls, wall] }, wallDraft: [] }
     }),
   clearWalls: () => set((s) => ({ scene: { ...s.scene, walls: [] }, wallDraft: [], selectedWallPoints: [] })),
+  addDetectedWalls: (detected, replace) =>
+    set((s) => {
+      const map = s.scene.map
+      if (!map) return s
+      const kx = map.width / map.naturalWidth
+      const ky = map.height / map.naturalHeight
+      const added: Wall[] = detected.map((w) => ({
+        id: crypto.randomUUID(),
+        points: w.points.map((p) => ({ x: map.x + p.x * kx, y: map.y + p.y * ky })),
+        ...(w.door && { door: { open: false } }),
+      }))
+      const walls = replace ? added : [...s.scene.walls, ...added]
+      return { scene: { ...s.scene, walls }, selectedWallPoints: [], wallDraft: [] }
+    }),
   setBuildingDoors: (buildingDoors) =>
     set((s) => ({
       buildingDoors,

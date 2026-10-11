@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
 import { detectGrid, toGray, type GridDetection } from '../shared/gridDetect'
+import { refineGridByWalls } from '../shared/wallDetect'
+import { bitmapMapImage } from './bitmapImage'
 
 /**
  * Decodes the map image and runs grid detection off the main thread. Very large images
@@ -35,7 +37,9 @@ self.onmessage = async (e: MessageEvent<DetectRequest>) => {
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!
     ctx.drawImage(bitmap, 0, 0)
     const { data } = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
-    const detection = detectGrid(toGray(data, bitmap.width, bitmap.height))
+    let detection = detectGrid(toGray(data, bitmap.width, bitmap.height))
+    // Without a drawn grid, the pattern found may be floor tiles: the walls tell the squares.
+    if (detection) detection = { ...detection, ...refineGridByWalls(bitmapMapImage(bitmap), detection) }
     bitmap.close()
 
     // Report in natural image pixels.
