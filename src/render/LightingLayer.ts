@@ -35,10 +35,11 @@ interface LightSprites {
  * The maps are only redrawn when something changed or a light is animated.
  */
 export class LightingLayer {
-  /** Scene-space sprite of the mask map; the scene layer masks its lit copy with it. */
-  readonly maskSprite = new Sprite()
-  /** Scene-space sprite of the colour map, add-blended above the map. */
-  readonly glowSprite = new Sprite({ blendMode: 'add' })
+  /**
+   * Map uv -> light map uv: the light maps are rounded up to whole pixels, so they cover a
+   * little more than the map.
+   */
+  readonly uvScale = { x: 1, y: 1 }
 
   private maskRoot = new Container()
   private glowRoot = new Container()
@@ -167,16 +168,22 @@ export class LightingLayer {
     if (!this.maskMap || !this.glowMap) {
       this.maskMap = RenderTexture.create({ width, height, resolution: 1 })
       this.glowMap = RenderTexture.create({ width, height, resolution: 1 })
-      this.maskSprite.texture = this.maskMap
-      this.glowSprite.texture = this.glowMap
     } else {
       this.maskMap.source.resize(width, height)
       this.glowMap.source.resize(width, height)
     }
-    for (const sprite of [this.maskSprite, this.glowSprite]) {
-      sprite.position.set(bounds.x, bounds.y)
-      sprite.scale.set(this.factor)
-    }
+    this.uvScale.x = bounds.width / this.factor / width
+    this.uvScale.y = bounds.height / this.factor / height
+  }
+
+  /** How much of the day-lit map shows through (red channel), over the map's bounds. */
+  get maskTexture() {
+    return this.maskMap?.source ?? null
+  }
+
+  /** Light colour to add, over the map's bounds. */
+  get glowTexture() {
+    return this.glowMap?.source ?? null
   }
 
   destroy() {

@@ -16,12 +16,8 @@ const VISION_MAP_SIZE = 1024
  * one sprite per use.
  */
 export class FogLayer {
-  /** In sight now: masks the normal scene for the players. */
-  readonly visionMask = new Sprite()
-  /** Explored: masks the greyscale memory for the players. */
-  readonly memoryMask = new Sprite()
-  /** Explored: inverse-masks the GM's "unexplored" shading. */
-  readonly memoryMaskGm = new Sprite()
+  /** Map uv -> sight map uv (the sight map is rounded up to whole pixels). */
+  readonly uvScale = { x: 1, y: 1 }
 
   private visionRoot = new Container()
   private visionMap: RenderTexture | null = null
@@ -32,7 +28,6 @@ export class FogLayer {
   private dirty = true
 
   private memoryTexture: Texture | null = null
-  private memory: FogMemory | null = null
 
   /** Place the vision tokens' sight (lights with vision on), blocked by walls. */
   sync(lights: Light[], bounds: Rect, gridSize: number, walls: Wall[]) {
@@ -76,7 +71,6 @@ export class FogLayer {
 
   /** Show this memory grid (the same grid object is redrawn when its version changes). */
   setMemory(memory: FogMemory | null) {
-    this.memory = memory
     if (!memory) return
     // Uploaded as-is, one byte per cell (a single-channel texture: masks read the red
     // channel). The same grid object is updated in place, so re-upload its new contents.
@@ -97,10 +91,17 @@ export class FogLayer {
           scaleMode: 'linear',
         }),
       })
-      this.memoryMask.texture = this.memoryTexture
-      this.memoryMaskGm.texture = this.memoryTexture
     }
-    this.placeMemory()
+  }
+
+  /** What's in sight now (red channel), over the map's bounds. */
+  get visionTexture() {
+    return this.visionMap?.source ?? null
+  }
+
+  /** What has been explored (red channel), over the map's bounds. */
+  get memorySource() {
+    return this.memoryTexture?.source ?? null
   }
 
   /** Redraw the vision map if any viewer moved. */
@@ -122,23 +123,11 @@ export class FogLayer {
     const height = Math.max(1, Math.ceil(bounds.height / this.factor))
     if (!this.visionMap) {
       this.visionMap = RenderTexture.create({ width, height, resolution: 1 })
-      this.visionMask.texture = this.visionMap
     } else {
       this.visionMap.source.resize(width, height)
     }
-    this.visionMask.position.set(bounds.x, bounds.y)
-    this.visionMask.scale.set(this.factor)
-    this.placeMemory()
-  }
-
-  /** The memory grid spans the map's bounds. */
-  private placeMemory() {
-    const m = this.memory
-    if (!m) return
-    for (const sprite of [this.memoryMask, this.memoryMaskGm]) {
-      sprite.position.set(this.bounds.x, this.bounds.y)
-      sprite.scale.set(this.bounds.width / m.cols, this.bounds.height / m.rows)
-    }
+    this.uvScale.x = bounds.width / this.factor / width
+    this.uvScale.y = bounds.height / this.factor / height
   }
 
   destroy() {
