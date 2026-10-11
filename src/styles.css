@@ -1,0 +1,303 @@
+:root {
+  --bg: #141417;
+  --panel: #1d1d22;
+  --border: #2e2e36;
+  --text: #e6e6ea;
+  --muted: #8b8b96;
+  --accent: #ffb020;
+  color-scheme: dark;
+  font: 14px/1.4 system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Inline canvases leave a baseline gap that makes the page scroll. */
+canvas {
+  display: block;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* GM window */
+
+.gm {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.gm-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-title {
+  font-weight: 600;
+  width: 256px;
+}
+
+.toolbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-item input[type='range'] {
+  width: 160px;
+}
+
+.gm-stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.gm-map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Toolbar dropdown */
+
+.menu {
+  position: relative;
+}
+
+.menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 280px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.menu-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 6px 8px;
+}
+
+.menu-list button:hover,
+.menu-list button:focus-visible {
+  background: #2a2a32;
+  outline: none;
+}
+
+.menu-icon {
+  width: 20px;
+  text-align: center;
+}
+
+.menu-label {
+  flex: 1;
+}
+
+.menu-badge {
+  opacity: 0.8;
+}
+
+/* Selected light */
+
+.light-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgb(29 29 34 / 94%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 50%);
+}
+
+.light-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.light-panel-title {
+  font-weight: 600;
+}
+
+.light-panel .field input[type='range'] {
+  width: 120px;
+}
+
+.icon-button {
+  border: none;
+  background: none;
+  padding: 2px 6px;
+}
+
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+}
+
+.sidebar section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.sidebar h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 2px;
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.row > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field input {
+  width: 110px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+  background: #26262d;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input[type='checkbox'] {
+  padding: 0;
+}
+
+input[type='range'] {
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--accent);
+}
+
+input[type='color'].swatch {
+  height: 26px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+/* Table window */
+
+.table {
+  position: fixed;
+  inset: 0;
+  background: #000;
+}
+
+.table-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.table-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 70%);
+  color: var(--muted);
+  pointer-events: none;
+}
