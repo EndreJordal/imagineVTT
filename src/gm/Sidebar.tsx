@@ -1,14 +1,12 @@
-import { useState, type ReactNode, type RefObject } from 'react'
-import { CALIBRATION_MM, tableScale } from '../shared/geometry'
+import type { RefObject } from 'react'
+import { tableScale } from '../shared/geometry'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
-import { WallsSection } from './Walls'
+import { finite, positive, round } from './numbers'
 import { MM_PER_INCH, useGm } from './store'
-
-function openTableWindow() {
-  window.open(`${location.pathname}?view=table`, 'imaginevtt-table', 'popup,width=1280,height=720')
-}
+import { openTableWindow } from './tableWindow'
+import { Field, Section, Slider } from './ui'
 
 async function readImage(file: File) {
   const bitmap = await createImageBitmap(file)
@@ -23,7 +21,6 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
 
   return (
     <aside className="sidebar">
-
       <Section title="Player View Box (PVB)">
         <button onClick={openTableWindow}>Open table window</button>
         <p className="hint">
@@ -46,94 +43,9 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           Move PVB here
         </button>
         <p className="hint">Drag the yellow triangle to move the PVB.</p>
-      </Section>
-
-      <Section title="Calibration">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={s.calibrating}
-            onChange={(e) => s.setCalibrating(e.target.checked)}
-          />
-          Show calibration square on table
-        </label>
-        <Calibrate />
-        <Field label="Pixels per mm">
-          <input
-            type="number"
-            step={0.01}
-            min={0.5}
-            value={round(s.display.pxPerMm, 3)}
-            onChange={(e) => positive(e.target.valueAsNumber, (pxPerMm) => s.setDisplay({ pxPerMm }))}
-          />
-        </Field>
-      </Section>
-
-      <Section title="Grid square / base size">
-        <div className="row">
-          <button
-            className={s.scene.squareMm === MM_PER_INCH ? 'active' : ''}
-            onClick={() => s.setSquareMm(MM_PER_INCH)}
-          >
-            1 inch
-          </button>
-          <button
-            className={s.scene.squareMm === 25 ? 'active' : ''}
-            onClick={() => s.setSquareMm(25)}
-          >
-            25 mm
-          </button>
-        </div>
-        <Field label="Size (mm)">
-          <input
-            type="number"
-            step={0.1}
-            min={5}
-            value={s.scene.squareMm}
-            onChange={(e) => positive(e.target.valueAsNumber, s.setSquareMm)}
-          />
-        </Field>
-      </Section>
-
-      <Section title="Map">
-        <input
-          type="file"
-          accept="image/*"
-          onChange={async (e) => {
-            const file = e.target.files?.[0]
-            if (file) s.setMap(file, await readImage(file))
-            e.target.value = ''
-          }}
-        />
         {map && (
           <>
-            <Field label="Scale (%)">
-              <input
-                type="number"
-                step={1}
-                min={5}
-                disabled={!!map.lockToGrid}
-                title={map.lockToGrid ? 'Unlock from grid to change the scale' : undefined}
-                value={round((map.width / map.naturalWidth) * 100, 1)}
-                onChange={(e) => positive(e.target.valueAsNumber, (pct) => s.setMapScale(pct / 100))}
-              />
-            </Field>
-            <p className="hint">
-              {(map.width / grid.size).toFixed(1)} × {(map.height / grid.size).toFixed(1)} squares ·
-              image {map.naturalWidth}×{map.naturalHeight} px.{' '}
-              {map.lockToGrid
-                ? 'Locked to the grid: dragging the map moves the grid with it.'
-                : 'Drag the map to move it, or its blue corner to resize.'}
-            </p>
-            <DetectGrid />
-            <button
-              className={map.lockToGrid ? 'active' : ''}
-              aria-pressed={!!map.lockToGrid}
-              title="Keep the map matched to the grid: they move and scale together"
-              onClick={() => s.setMapLockToGrid(!map.lockToGrid)}
-            >
-              {map.lockToGrid ? '🔒' : '🔓'} Lock to grid
-            </button>
+            <h3>Map in the PVB</h3>
             <div className="row">
               <button
                 disabled={!!map.lockToGrid}
@@ -168,13 +80,45 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 {map.lockY ? '🔒' : '🔓'} Lock Y
               </button>
             </div>
+          </>
+        )}
+      </Section>
+
+      <Section title="Map">
+        <input
+          type="file"
+          accept="image/*"
+          onChange={async (e) => {
+            const file = e.target.files?.[0]
+            if (file) s.setMap(file, await readImage(file))
+            e.target.value = ''
+          }}
+        />
+        {map && (
+          <>
+            <Field label="Scale (%)">
+              <input
+                type="number"
+                step={1}
+                min={5}
+                disabled={!!map.lockToGrid}
+                title={map.lockToGrid ? 'Unlock from grid to change the scale' : undefined}
+                value={round((map.width / map.naturalWidth) * 100, 1)}
+                onChange={(e) => positive(e.target.valueAsNumber, (pct) => s.setMapScale(pct / 100))}
+              />
+            </Field>
+            <p className="hint">
+              {(map.width / grid.size).toFixed(1)} × {(map.height / grid.size).toFixed(1)} squares ·
+              image {map.naturalWidth}×{map.naturalHeight} px.{' '}
+              {map.lockToGrid
+                ? 'Locked to the grid: dragging the map moves the grid with it.'
+                : 'Drag the map to move it, or its blue corner to resize.'}
+            </p>
             <button onClick={() => s.setMap(null, null)}>Remove map</button>
           </>
         )}
         <button onClick={() => canvas.current?.fit()}>Zoom to map</button>
       </Section>
-
-      <WallsSection />
 
       <Section title="Grid">
         <label className="check">
@@ -193,104 +137,86 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
             onChange={(e) => s.setGrid({ color: e.target.value })}
           />
         </Field>
-        <Field label={`Opacity ${Math.round(grid.opacity * 100)}%`}>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={grid.opacity}
-            onChange={(e) => s.setGrid({ opacity: e.target.valueAsNumber })}
-          />
-        </Field>
-        <Field label="Square size">
+        <Slider
+          label="Opacity"
+          value={grid.opacity}
+          fallback={grid.opacity}
+          min={0}
+          max={1}
+          step={0.05}
+          scale={100}
+          unit="%"
+          onChange={(opacity) => s.setGrid({ opacity })}
+        />
+        {map && (
+          <>
+            <h3>Match the map</h3>
+            <DetectGrid />
+            <button
+              className={map.lockToGrid ? 'active' : ''}
+              aria-pressed={!!map.lockToGrid}
+              title="Keep the map matched to the grid: they move and scale together"
+              onClick={() => s.setMapLockToGrid(!map.lockToGrid)}
+            >
+              {map.lockToGrid ? '🔒' : '🔓'} Lock to grid
+            </button>
+          </>
+        )}
+        <h3>Physical grid size</h3>
+        <div className="row">
+          <button
+            className={s.scene.squareMm === MM_PER_INCH ? 'active' : ''}
+            onClick={() => s.setSquareMm(MM_PER_INCH)}
+          >
+            1 inch
+          </button>
+          <button
+            className={s.scene.squareMm === 25 ? 'active' : ''}
+            onClick={() => s.setSquareMm(25)}
+          >
+            25 mm
+          </button>
+        </div>
+        <Field label="Square (mm)">
           <input
             type="number"
-            step={0.5}
-            min={4}
-            value={grid.size}
-            onChange={(e) => positive(e.target.valueAsNumber, (size) => s.setGrid({ size }))}
+            step={0.1}
+            min={5}
+            value={s.scene.squareMm}
+            onChange={(e) => positive(e.target.valueAsNumber, s.setSquareMm)}
           />
         </Field>
-        <Field label="Offset X">
-          <input
-            type="number"
-            value={round(grid.offsetX, 2)}
-            onChange={(e) => finite(e.target.valueAsNumber, (offsetX) => s.setGrid({ offsetX }))}
-          />
-        </Field>
-        <Field label="Offset Y">
-          <input
-            type="number"
-            value={round(grid.offsetY, 2)}
-            onChange={(e) => finite(e.target.valueAsNumber, (offsetY) => s.setGrid({ offsetY }))}
-          />
-        </Field>
+        <details className="manual-adjust">
+          <summary>Manual adjust</summary>
+          <p className="hint">
+            Hand-tuning, for when Detect grid is slightly off. Square size is grid spacing in map units;
+            offsets slide the grid lines.
+          </p>
+          <Field label="Square size">
+            <input
+              type="number"
+              step={0.5}
+              min={4}
+              value={grid.size}
+              onChange={(e) => positive(e.target.valueAsNumber, (size) => s.setGrid({ size }))}
+            />
+          </Field>
+          <Field label="Offset X">
+            <input
+              type="number"
+              value={round(grid.offsetX, 2)}
+              onChange={(e) => finite(e.target.valueAsNumber, (offsetX) => s.setGrid({ offsetX }))}
+            />
+          </Field>
+          <Field label="Offset Y">
+            <input
+              type="number"
+              value={round(grid.offsetY, 2)}
+              onChange={(e) => finite(e.target.valueAsNumber, (offsetY) => s.setGrid({ offsetY }))}
+            />
+          </Field>
+        </details>
       </Section>
     </aside>
   )
-}
-
-/** Measure the on-table square with a ruler and enter the result to correct the scale. */
-function Calibrate() {
-  const { display, setDisplay } = useGm()
-  const applied = display.lastMeasuredMm
-  // Shows the last applied measurement; a new one can be typed over it.
-  const [measured, setMeasured] = useState(applied === undefined ? '' : String(applied))
-  const mm = parseFloat(measured)
-  // Applying the same measurement twice would correct twice: wait for a new one.
-  const isNew = mm > 0 && mm !== applied
-  return (
-    <>
-      <div className="row">
-        <input
-          type="number"
-          placeholder={`Measured (${CALIBRATION_MM} mm)`}
-          value={measured}
-          onChange={(e) => setMeasured(e.target.value)}
-        />
-        <button
-          disabled={!isNew}
-          onClick={() => setDisplay({ pxPerMm: (display.pxPerMm * CALIBRATION_MM) / mm, lastMeasuredMm: mm })}
-        >
-          Apply
-        </button>
-      </div>
-      {applied !== undefined && !isNew && (
-        <p className="hint">
-          Applied {applied} mm: the square should now measure {CALIBRATION_MM} mm. Measure again to check.
-        </p>
-      )}
-    </>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section>
-      <h2>{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function round(n: number, digits: number) {
-  return Math.round(n * 10 ** digits) / 10 ** digits
-}
-
-function positive(n: number, set: (n: number) => void) {
-  if (Number.isFinite(n) && n > 0) set(n)
-}
-
-function finite(n: number, set: (n: number) => void) {
-  if (Number.isFinite(n)) set(n)
 }

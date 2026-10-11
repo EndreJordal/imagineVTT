@@ -21,7 +21,7 @@ const scene: Scene = {
   view: { x: 500, y: 500 },
   darkness: 0,
   lights: [],
-  fog: { enabled: false },
+  fog: { enabled: false, safety: true },
   walls: [],
 }
 const display: Display = { pxPerMm: 4, orientation: 0 }

@@ -84,6 +84,92 @@ export function deleteWallPoints(walls: Wall[], refs: WallPointRef[], newId: () 
   return out
 }
 
+/** Distance from p to segment a–b, and how far along it (0..1) the nearest point is. */
+export function nearestOnSegment(p: Point, a: Point, b: Point): { point: Point; distance: number; t: number } {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  const t = len2 ? Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0
+  const point = { x: a.x + t * dx, y: a.y + t * dy }
+  return { point, distance: Math.hypot(p.x - point.x, p.y - point.y), t }
+}
+
+/** How close (scene units) a point must be to a wall line to count as on it. */
+const ON_LINE = 1e-3
+
+/** The wall segment (non-door wall, index i: points i → i+1) that both points lie on. */
+export function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; index: number } | null {
+  for (const w of walls) {
+    if (w.door) continue
+    for (let i = 0; i + 1 < w.points.length; i++) {
+      const p = w.points[i]
+      const q = w.points[i + 1]
+      if (nearestOnSegment(a, p, q).distance < ON_LINE && nearestOnSegment(b, p, q).distance < ON_LINE) {
+        return { wallId: w.id, index: i }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Put a door between a and b, two points on the same stretch of wall: the wall is cut
+ * there (the pieces on either side stay walls) and a closed door spans the gap. A door
+ * ending on a wall point shares it. Returns null if a and b aren't on one wall segment.
+ */
+export function makeDoor(walls: Wall[], a: Point, b: Point, newId: () => string): Wall[] | null {
+  if (sameSpot(a, b)) return null
+  const at = commonSegment(walls, a, b)
+  if (!at) return null
+  const out: Wall[] = []
+  for (const w of walls) {
+    if (w.id !== at.wallId) {
+      out.push(w)
+      continue
+    }
+    const p = w.points[at.index]
+    const q = w.points[at.index + 1]
+    // Order the door's ends along the segment: `near` is the one closer to p.
+    const [near, far] =
+      nearestOnSegment(a, p, q).t <= nearestOnSegment(b, p, q).t ? [a, b] : [b, a]
+    const before = [...w.points.slice(0, at.index + 1), { ...near }]
+    const after = [{ ...far }, ...w.points.slice(at.index + 1)]
+    // Drop the zero-length bit where the door ends exactly on a wall point.
+    const trim = (pts: Point[]) => pts.filter((pt, i) => i === 0 || !sameSpot(pt, pts[i - 1]))
+    let first = true
+    for (const piece of [trim(before), trim(after)]) {
+      if (piece.length < 2) continue
+      out.push({ id: first ? w.id : newId(), points: piece })
+      first = false
+    }
+    out.push({ id: newId(), points: [{ ...near }, { ...far }], door: { open: false } })
+  }
+  return out
+}
+
+/**
+ * If the selection is exactly two neighbouring points of one wall (linked copies aside),
+ * which wall and segment they span: a candidate for "convert to door".
+ */
+export function selectedSegment(walls: Wall[], refs: WallPointRef[]): { a: Point; b: Point } | null {
+  const positions = uniquePositions(
+    refs
+      .map((r) => walls.find((w) => w.id === r.wallId)?.points[r.index])
+      .filter((p): p is Point => !!p),
+  )
+  if (positions.length !== 2) return null
+  const [a, b] = positions
+  for (const w of walls) {
+    if (w.door) continue
+    for (let i = 0; i + 1 < w.points.length; i++) {
+      const p = w.points[i]
+      const q = w.points[i + 1]
+      if ((sameSpot(p, a) && sameSpot(q, b)) || (sameSpot(p, b) && sameSpot(q, a))) return { a, b }
+    }
+  }
+  return null
+}
+
 /** All wall points inside a rectangle. */
 export function wallPointsIn(walls: Wall[], r: Rect): WallPointRef[] {
   const out: WallPointRef[] = []

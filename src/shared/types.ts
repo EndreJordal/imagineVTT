@@ -56,7 +56,11 @@ export interface Scene {
   /** Light sources and vision tokens. Lights light up the map at night. */
   lights: Light[]
   /** Fog of war: players see only what vision tokens see now (and greyscale memory). */
-  fog: { enabled: boolean }
+  /**
+   * enabled: fog of war on. safety: vision safety, where vision tokens can't be dragged
+   * through walls or closed doors (so a careless drag doesn't reveal the next room).
+   */
+  fog: { enabled: boolean; safety: boolean }
   /** Walls block sight. Scene coordinates; they move and scale with the map. */
   walls: Wall[]
 }

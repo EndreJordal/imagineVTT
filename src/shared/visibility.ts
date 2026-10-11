@@ -10,14 +10,46 @@ export interface Segment {
 export interface Wall {
   id: string
   points: Point[]
+  /**
+   * A door: a two-point wall that can be opened. Closed doors block sight like walls; open
+   * ones don't. Being walls, doors get linked points, selection, dragging etc. for free.
+   */
+  door?: { open: boolean }
 }
 
+/** Segments that block sight: walls, and doors that are closed. */
 export function wallSegments(walls: Wall[]): Segment[] {
   const out: Segment[] = []
   for (const w of walls) {
+    if (w.door?.open) continue
     for (let i = 1; i < w.points.length; i++) out.push({ a: w.points[i - 1], b: w.points[i] })
   }
   return out
+}
+
+/**
+ * Whether moving in a straight line from `from` to `to` crosses a blocking segment. Touching
+ * one counts (ending on a wall, or slipping through where two walls meet), but starting on
+ * one doesn't, so a token that was placed on a wall can still step off it.
+ */
+export function moveCrossesWall(from: Point, to: Point, segments: Segment[]): boolean {
+  if (from.x === to.x && from.y === to.y) return false
+  for (const s of segments) {
+    const eps = 1e-9 * Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y)
+    const start = side(s.a, s.b, from)
+    if (Math.abs(start) <= eps) continue
+    const end = side(s.a, s.b, to)
+    if (Math.abs(end) > eps && Math.sign(end) === Math.sign(start)) continue // stays on its side
+    // It crosses the wall's line; does it cross between the wall's ends?
+    if (side(from, to, s.a) * side(from, to, s.b) > 0) continue
+    return true
+  }
+  return false
+}
+
+/** Which side of line a→b point p is on (sign), times the line's length. */
+function side(a: Point, b: Point, p: Point) {
+  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
 }
 
 /**

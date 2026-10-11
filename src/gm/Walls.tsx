@@ -1,68 +1,12 @@
+import { selectedSegment } from '../shared/walls'
 import { useGm } from './store'
-
-const SNAPS = [
-  { fraction: 1, label: '1', title: 'Snap to grid corners' },
-  { fraction: 0.5, label: '½', title: 'Snap to half squares' },
-  { fraction: 0.25, label: '¼', title: 'Snap to quarter squares' },
-  { fraction: 0, label: 'Off', title: 'No snapping' },
-]
-
-/** Sidebar section: build walls, snapping, and clearing them. */
-export function WallsSection() {
-  const building = useGm((s) => s.buildingWalls)
-  const snap = useGm((s) => s.wallSnap)
-  const count = useGm((s) => s.scene.walls.length)
-  const { setBuildingWalls, setWallSnap, clearWalls } = useGm.getState()
-
-  return (
-    <section>
-      <h2>Walls</h2>
-      <button
-        className={building ? 'active' : ''}
-        aria-pressed={building}
-        title="Draw walls that block the party's sight"
-        onClick={() => setBuildingWalls(!building)}
-      >
-        🧱 {building ? 'Building walls…' : 'Build walls'}
-      </button>
-      <div className="field">
-        <span>Snap</span>
-        <div className="row snap-options" role="radiogroup" aria-label="Wall snapping">
-          {SNAPS.map((o) => (
-            <button
-              key={o.fraction}
-              role="radio"
-              aria-checked={snap === o.fraction}
-              className={snap === o.fraction ? 'active' : ''}
-              title={o.title}
-              onClick={() => setWallSnap(o.fraction)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="hint">
-        {count === 0 ? 'No walls yet.' : `${count} wall${count === 1 ? '' : 's'}. They block sight under fog of war.`}
-      </p>
-      {count > 0 && (
-        <button
-          onClick={() => {
-            if (confirm(`Remove all ${count} walls?`)) clearWalls()
-          }}
-        >
-          Remove all walls
-        </button>
-      )}
-    </section>
-  )
-}
 
 /** Selection box for wall points: how many, and delete them. */
 export function WallPointsPanel() {
   const count = useGm((s) => s.selectedWallPoints.length)
+  const canConvert = useGm((s) => !!selectedSegment(s.scene.walls, s.selectedWallPoints))
   if (!count) return null
-  const { deleteWallPoints, selectedWallPoints } = useGm.getState()
+  const { deleteWallPoints, convertToDoor, selectedWallPoints } = useGm.getState()
   return (
     <aside className="light-panel" aria-label="Selected wall points">
       <header>
@@ -74,6 +18,42 @@ export function WallPointsPanel() {
       <button onClick={() => deleteWallPoints(selectedWallPoints)}>
         Delete {count === 1 ? 'wall point' : `${count} wall points`}
       </button>
+      {canConvert && (
+        <button title="Turn the wall between these two points into a door" onClick={() => convertToDoor(selectedWallPoints)}>
+          🚪 Convert wall points to door
+        </button>
+      )}
+    </aside>
+  )
+}
+
+/** Floating help while building doors. */
+export function DoorToolbox() {
+  const building = useGm((s) => s.buildingDoors)
+  const started = useGm((s) => !!s.doorDraft)
+  if (!building) return null
+  const { cancelDoorDraft, setBuildingDoors } = useGm.getState()
+
+  return (
+    <aside className="light-panel wall-toolbox" aria-label="Door building">
+      <header>
+        <span className="light-panel-title">🚪 Building doors</span>
+        <button className="icon-button" title="Stop building doors" onClick={() => setBuildingDoors(false)}>
+          ✕
+        </button>
+      </header>
+      <p className="hint">
+        {started
+          ? 'Now click the other end, on the same stretch of wall.'
+          : 'Click a wall line where the door starts; the green dot shows valid points.'}
+      </p>
+      <ul className="key-list">
+        <li>
+          <kbd>Esc</kbd> {started ? 'cancel this door' : 'stop building doors'}
+        </li>
+        <li>Click a door’s middle button to open or close it.</li>
+      </ul>
+      {started && <button onClick={cancelDoorDraft}>Cancel</button>}
     </aside>
   )
 }
@@ -82,8 +62,9 @@ export function WallPointsPanel() {
 export function WallToolbox() {
   const building = useGm((s) => s.buildingWalls)
   const points = useGm((s) => s.wallDraft.length)
+  const total = useGm((s) => s.scene.walls.length)
   if (!building) return null
-  const { confirmWallDraft, cancelWallDraft, setBuildingWalls } = useGm.getState()
+  const { confirmWallDraft, cancelWallDraft, setBuildingWalls, clearWalls } = useGm.getState()
 
   return (
     <aside className="light-panel wall-toolbox" aria-label="Wall building">
@@ -113,6 +94,15 @@ export function WallToolbox() {
           Cancel
         </button>
       </div>
+      {total > 0 && (
+        <button
+          onClick={() => {
+            if (confirm('Remove all walls and doors?')) clearWalls()
+          }}
+        >
+          Remove all walls &amp; doors
+        </button>
+      )}
     </aside>
   )
 }

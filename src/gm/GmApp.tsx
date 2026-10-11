@@ -3,11 +3,14 @@ import { GmCanvas } from './GmCanvas'
 import { LightPanel } from './LightPanel'
 import { PlacementHint } from './PlacementHint'
 import { openDroppedScene, openScene, saveScene } from './sceneFiles'
-import { WallPointsPanel, WallToolbox } from './Walls'
+import { GmNotice } from './GmNotice'
+import { DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
 import { gmDarkness, hydrate, tableState, useGm } from './store'
 import { startGmSync } from './sync'
+import { redo, startHistory, undo } from './history'
+import { ToolPalette } from './ToolPalette'
 
 export function GmApp() {
   const [hydrated, setHydrated] = useState(false)
@@ -17,30 +20,33 @@ export function GmApp() {
   useEffect(() => {
     let cancelled = false
     let stop: (() => void) | undefined
+    let stopHistory: (() => void) | undefined
     void hydrate().then(() => {
       if (cancelled) return
       stop = startGmSync()
+      stopHistory = startHistory()
       setHydrated(true)
     })
     return () => {
       cancelled = true
       stop?.()
+      stopHistory?.()
     }
   }, [])
 
   useEffect(() => {
     if (!hydrated || !hostRef.current) return
     const canvas = new GmCanvas(hostRef.current, {
-      onViewMove: (view) => useGm.getState().setView(view),
+      onViewMove: (view, force) => useGm.getState().setView(view, !force),
       onMapResize: (scale) => useGm.getState().setMapScale(scale),
       onMapMove: (position) => useGm.getState().setMapPosition(position),
-      onLightMove: (id, to) => {
+      onLightMove: (id, to, force) => {
         // Dragging one selected light moves the whole selection with it.
         const { scene, selectedLightIds, moveLights } = useGm.getState()
         const light = scene.lights.find((l) => l.id === id)
-        if (!light) return
+        if (!light) return false
         const ids = selectedLightIds.includes(id) ? selectedLightIds : [id]
-        moveLights(ids, to.x - light.x, to.y - light.y)
+        return moveLights(ids, to.x - light.x, to.y - light.y, !force)
       },
       onLightAim: (id, angle) => useGm.getState().updateLight(id, { angle }),
       onLightSelect: (id) => useGm.getState().selectLight(id),
@@ -61,6 +67,13 @@ export function GmApp() {
         if (!from || (from.x === to.x && from.y === to.y)) return
         moveWallPoints(refs, to.x - from.x, to.y - from.y)
       },
+      onDoorPoint: (p) => useGm.getState().placeDoorPoint(p),
+      onDoorCancel: () => {
+        const gm = useGm.getState()
+        if (gm.doorDraft) gm.cancelDoorDraft()
+        else gm.setBuildingDoors(false)
+      },
+      onDoorToggle: (id) => useGm.getState().toggleDoor(id),
       onBoxSelect: (lightIds, points, add) => useGm.getState().selectMany(lightIds, points, add),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),
     })
@@ -85,9 +98,11 @@ export function GmApp() {
         placingLight: s.placingLight,
         peeking: s.peeking,
         buildingWalls: s.buildingWalls,
-        wallSnap: s.wallSnap,
+        snap: s.snap,
         wallDraft: s.wallDraft,
         selectedWallPoints: s.selectedWallPoints,
+        buildingDoors: s.buildingDoors,
+        doorDraft: s.doorDraft,
       })
       canvas.setFogMemory(s.fogMemory, s.fogVersion)
     }
@@ -123,6 +138,16 @@ export function GmApp() {
       }
       const el = e.target
       const typing = el instanceof Element && el.closest('input, textarea, select, [contenteditable]')
+      // Undo/redo: Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z (a field being typed in keeps its own).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing) {
+        const key = e.key.toLowerCase()
+        if (key === 'z' || key === 'y') {
+          e.preventDefault()
+          if (key === 'y' || e.shiftKey) redo()
+          else undo()
+          return
+        }
+      }
       // Hold V to peek at exactly what the players see.
       if (e.key.toLowerCase() === 'v' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (!e.repeat) useGm.getState().setPeeking(true)
@@ -144,6 +169,11 @@ export function GmApp() {
           gm.undoWallPoint()
           return
         }
+      }
+      if (gm.buildingDoors && !typing && e.key === 'Escape') {
+        if (gm.doorDraft) gm.cancelDoorDraft()
+        else gm.setBuildingDoors(false)
+        return
       }
       if (e.key === 'Escape' && useGm.getState().placingLight) {
         useGm.getState().setPlacingLight(null)
@@ -189,12 +219,15 @@ export function GmApp() {
         <Sidebar canvas={canvasRef} />
         <div className="gm-stage">
           <div className="gm-map" ref={hostRef} />
+          <ToolPalette />
           <div className="side-panels">
             <WallToolbox />
+            <DoorToolbox />
             <WallPointsPanel />
             <LightPanel />
           </div>
           <PlacementHint />
+          <GmNotice />
         </div>
       </div>
     </div>

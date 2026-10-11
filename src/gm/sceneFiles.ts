@@ -95,6 +95,13 @@ export async function openScene() {
   input.click()
 }
 
+/** Start a new, empty scene (asking first if there are unsaved changes). */
+export function newScene() {
+  if (!confirmDiscard()) return
+  useGm.getState().newScene()
+  handle = null
+}
+
 /** Open a scene file dropped on the window. */
 export async function openDroppedScene(item: DataTransferItem) {
   const file = item.getAsFile()

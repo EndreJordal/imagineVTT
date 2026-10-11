@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { animateLight, createLight, isDirectional, LIGHT_MENU, LIGHT_PRESETS, seedOf, type Animation } from './lights'
+import {
+  animateLight,
+  createLight,
+  isDirectional,
+  LIGHT_MENU,
+  LIGHT_PRESETS,
+  seedOf,
+  type Animation,
+  type Flicker,
+} from './lights'
 
 const sample = (animation: Animation, seed = 0.3, seconds = 20, fps = 60) =>
   Array.from({ length: seconds * fps }, (_, i) => animateLight(animation, i / fps, seed))
@@ -25,11 +34,40 @@ describe('animateLight', () => {
     expect(a).not.toEqual(b)
   })
 
-  it('has faulty fixtures mostly on, with occasional dropouts', () => {
-    const b = sample('faultyFixture', 0.1, 60).map((f) => f.brightness)
-    const dark = b.filter((v) => v < 0.5).length / b.length
-    expect(dark).toBeGreaterThan(0)
-    expect(dark).toBeLessThan(0.1)
+})
+
+describe('configurable flicker', () => {
+  const run = (flicker: Flicker, intensity = 0.5, seconds = 120, fps = 60) =>
+    Array.from({ length: seconds * fps }, (_, i) =>
+      animateLight('flicker', i / fps, 0.37, { flicker, intensity, buzz: false }).brightness * intensity,
+    )
+  const off = { on: false, level: 0 }
+  const noSurge = { on: false, boost: 0.3 }
+
+  it('dips to the low level now and then, and is otherwise at its brightness', () => {
+    const levels = new Set(run({ rate: 20, low: { on: true, level: 0.1 }, high: noSurge }).map((v) => v.toFixed(3)))
+    expect(levels).toEqual(new Set(['0.500', '0.100']))
+  })
+
+  it('surges by the boost when flickering up', () => {
+    const b = run({ rate: 20, low: off, high: { on: true, boost: 0.3 } })
+    expect(Math.max(...b)).toBeCloseTo(0.8) // 50% + 30
+    expect(Math.min(...b)).toBeCloseTo(0.5)
+  })
+
+  it('flickers more often at a higher rate, and not at all with both kinds off', () => {
+    const share = (rate: number) => {
+      const b = run({ rate, low: { on: true, level: 0 }, high: noSurge })
+      return b.filter((v) => v < 0.25).length / b.length
+    }
+    expect(share(60)).toBeGreaterThan(share(10) * 2)
+    expect(new Set(run({ rate: 60, low: off, high: noSurge }))).toEqual(new Set([0.5]))
+  })
+
+  it('does both kinds when both are on', () => {
+    const b = run({ rate: 60, low: { on: true, level: 0 }, high: { on: true, boost: 0.4 } })
+    expect(Math.min(...b)).toBeCloseTo(0)
+    expect(Math.max(...b)).toBeCloseTo(0.9)
   })
 })
 

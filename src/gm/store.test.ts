@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createLight } from '../shared/lights'
 import { gmDarkness, useGm } from './store'
 
 const lights = () => useGm.getState().scene.lights
@@ -118,7 +119,7 @@ describe('fog of war', () => {
         lights: [],
         grid: { ...s.scene.grid, size: 100 },
         map: { x: 0, y: 0, width: 5000, height: 5000, naturalWidth: 5000, naturalHeight: 5000 },
-        fog: { enabled: false },
+        fog: { enabled: false, safety: true },
         walls: [],
       },
       fogMemory: null,
@@ -263,6 +264,115 @@ describe('walls', () => {
     expect(gm().scene.walls.map((w) => w.points)).toEqual([
       [{ x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }],
     ])
+  })
+})
+
+describe('doors', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      scene: {
+        ...s.scene,
+        walls: [{ id: 'r', points: [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 400, y: 300 }] }],
+        map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
+      },
+      buildingDoors: false,
+      doorDraft: null,
+      selectedWallPoints: [],
+    }))
+  })
+  const gm = () => useGm.getState()
+  const doors = () => gm().scene.walls.filter((w) => w.door)
+
+  it('makes a door from two clicks on the same wall, and toggles it', () => {
+    gm().setBuildingDoors(true)
+    gm().placeDoorPoint({ x: 100, y: 0 })
+    expect(gm().doorDraft).toEqual({ x: 100, y: 0 })
+    gm().placeDoorPoint({ x: 200, y: 0 })
+    expect(doors().map((d) => [d.points, d.door])).toEqual([[[{ x: 100, y: 0 }, { x: 200, y: 0 }], { open: false }]])
+    expect(gm().doorDraft).toBeNull()
+    gm().toggleDoor(doors()[0].id)
+    expect(doors()[0].door).toEqual({ open: true })
+  })
+
+  it('starts over when the second click is on another stretch of wall', () => {
+    gm().setBuildingDoors(true)
+    gm().placeDoorPoint({ x: 100, y: 0 })
+    gm().placeDoorPoint({ x: 400, y: 100 })
+    expect(doors()).toEqual([])
+    expect(gm().doorDraft).toEqual({ x: 400, y: 100 })
+  })
+
+  it('converts two selected neighbouring wall points into a door', () => {
+    gm().convertToDoor([{ wallId: 'r', index: 1 }, { wallId: 'r', index: 2 }])
+    expect(doors().map((d) => d.points)).toEqual([[{ x: 400, y: 0 }, { x: 400, y: 300 }]])
+  })
+})
+
+describe('vision safety', () => {
+  const gm = () => useGm.getState()
+  // A wall along x = 300; the view is 400 wide, centred on (200, 200) (see tableScreen).
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      scene: {
+        ...s.scene,
+        walls: [{ id: 'w', points: [{ x: 300, y: -1000 }, { x: 300, y: 1000 }] }],
+        lights: [
+          { ...createLight('torch', 290, 200, 'eye'), id: 'eye', vision: true, followView: true },
+          { ...createLight('fixture', 100, 100, 'lamp'), id: 'lamp' },
+        ],
+        view: { x: 200, y: 200 },
+        fog: { enabled: true, safety: true },
+      },
+      tableScreen: { width: 400, height: 400 },
+      display: { ...s.display, pxPerMm: 1, orientation: 0 },
+      notice: null,
+    }))
+    useGm.setState((s) => ({ scene: { ...s.scene, squareMm: s.scene.grid.size } })) // 1 table px = 1 unit
+  })
+  const eye = () => gm().scene.lights.find((l) => l.id === 'eye')!
+
+  it('drops a vision token dragged through a wall, with a notice', () => {
+    expect(gm().moveLights(['eye', 'lamp'], 100, 0, true)).toBe(false)
+    expect(eye().x).toBe(290)
+    expect(gm().notice?.text).toMatch(/VISION SAFETY/)
+    expect(gm().moveLights(['eye'], 5, 0, true)).toBe(true) // short of the wall
+    expect(gm().moveLights(['lamp'], 500, 0, true)).toBe(true) // not a vision token
+  })
+
+  it('lets it through with safety off, or with Alt (not safe)', () => {
+    expect(gm().moveLights(['eye'], 100, 0, false)).toBe(true)
+    gm().moveLights(['eye'], -100, 0)
+    gm().setVisionSafety(false)
+    expect(gm().moveLights(['eye'], 100, 0, true)).toBe(true)
+  })
+
+  it('holds a travelling vision token at the wall until it would leave the view', () => {
+    // The view moves 40 right: the token would cross x = 300, so it stays (inside the view).
+    expect(gm().setView({ x: 240, y: 200 }, true)).toBe(true)
+    expect(gm().scene.view.x).toBe(240)
+    expect(eye().x).toBe(290)
+    // Moving diagonally, it slides along the wall.
+    expect(gm().setView({ x: 280, y: 230 }, true)).toBe(true)
+    expect([eye().x, eye().y]).toEqual([290, 230])
+    // Far enough that the token would be left outside the view: refused.
+    expect(gm().setView({ x: 500, y: 230 }, true)).toBe(false)
+    expect(gm().scene.view.x).toBe(280)
+    expect(gm().notice?.text).toMatch(/PVB was dropped/)
+  })
+})
+
+describe('new scene', () => {
+  it('empties the scene and forgets its name, keeping calibration', () => {
+    const gm = () => useGm.getState()
+    useGm.setState((s) => ({ sceneName: 'Crypt', unsaved: true, display: { ...s.display, pxPerMm: 5 } }))
+    gm().addLight('torch', { x: 1, y: 2 })
+    const epoch = gm().historyEpoch
+    gm().newScene()
+    expect(gm().scene.lights).toEqual([])
+    expect(gm().mapImage).toBeNull()
+    expect([gm().sceneName, gm().unsaved]).toEqual([null, false])
+    expect(gm().display.pxPerMm).toBe(5)
+    expect(gm().historyEpoch).toBe(epoch + 1)
   })
 })
 

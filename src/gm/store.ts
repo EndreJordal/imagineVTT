@@ -6,6 +6,7 @@ import {
   fitMapToRect,
   sceneBounds,
   followGrid,
+  pointInPolygon,
   tableViewCorners,
 } from '../shared/geometry'
 import { createFogMemory, fitsBounds, stampVision, type FogMemory } from '../shared/fog'
@@ -18,10 +19,12 @@ import {
 } from '../shared/lights'
 import { load } from '../shared/persist'
 import type { GmCamera, SceneFile } from '../shared/sceneFile'
-import { createVisibilityTest, visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
+import { createVisibilityTest, moveCrossesWall, visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
 import {
   deleteWallPoints,
+  makeDoor,
   moveWallPoints,
+  selectedSegment,
   sameRef,
   sameSpot,
   withLinked,
@@ -73,10 +76,14 @@ interface GmStore extends TableState {
   fogVersion: number
   /** Wall building mode (GM-only): clicks add points to the wall being drawn. */
   buildingWalls: boolean
-  /** Snap wall points to every 1, 1/2 or 1/4 square; 0 = no snapping. */
-  wallSnap: number
+  /** Snapping for walls, doors and placing lights: every 1, 1/2 or 1/4 square; 0 = none. */
+  snap: number
   /** Points of the wall being drawn, not yet confirmed. */
   wallDraft: Point[]
+  /** Door building mode (GM-only): two clicks on a wall line make a door. */
+  buildingDoors: boolean
+  /** The first point of the door being placed. */
+  doorDraft: Point | null
   /** The GM's pan and zoom (saved with the session and in scene files). */
   gmCamera: GmCamera | null
   /** Bumped when the GM's camera should jump to gmCamera (session restore, scene open). */
@@ -89,23 +96,38 @@ interface GmStore extends TableState {
   setGrid(patch: Partial<GridSettings>): void
   setDisplay(patch: Partial<Display>): void
   setSquareMm(mm: number): void
-  setView(view: Point): void
+  /**
+   * Move the table view (and the lights travelling with it). With `safe`, vision safety
+   * applies: travelling vision tokens stop at walls, and if one would end up outside the
+   * view, the view doesn't move and false is returned.
+   */
+  setView(view: Point, safe?: boolean): boolean
   setDarkness(darkness: number): void
   setGmVision(vision: number): void
   /** The GM panned or zoomed (doesn't move the camera; the canvas already did). */
   setGmCamera(camera: GmCamera): void
   /** Replace the scene with one from a file. */
   loadScene(file: SceneFile, name: string): void
+  /** Start over with an empty scene (calibration and the table stay as they are). */
+  newScene(): void
+  /** Whether there's anything to undo or redo (kept up to date by history.ts). */
+  history: { canUndo: boolean; canRedo: boolean }
+  /** Bumped when a different scene replaces this one, so its undo history is dropped. */
+  historyEpoch: number
   /** The scene was just saved under this name. */
   markSaved(name: string): void
   markUnsaved(): void
   setFogEnabled(enabled: boolean): void
+  setVisionSafety(on: boolean): void
+  /** A brief message over the GM's map (id changes with each one, to show it afresh). */
+  notice: { text: string; id: number } | null
+  notify(text: string): void
   /** Record what vision tokens see now into fog memory (when fog is on). */
   stampFog(): void
   /** Forget everything the party has seen. */
   resetFog(): void
   setBuildingWalls(on: boolean): void
-  setWallSnap(fraction: number): void
+  setSnap(fraction: number): void
   addWallPoint(p: Point): void
   /** Take back the last point of the wall being drawn. */
   undoWallPoint(): void
@@ -113,6 +135,13 @@ interface GmStore extends TableState {
   /** Turn the drawn points into a wall (needs at least two). */
   confirmWallDraft(): void
   clearWalls(): void
+  setBuildingDoors(on: boolean): void
+  /** In door mode: the first click starts a door, the second (on the same wall) makes it. */
+  placeDoorPoint(p: Point): void
+  cancelDoorDraft(): void
+  toggleDoor(id: string): void
+  /** Turn the wall segment between two selected neighbouring wall points into a door. */
+  convertToDoor(refs: WallPointRef[]): void
   setPeeking(peeking: boolean): void
   /** Add a light at a scene position and select it. */
   addLight(kind: LightKind, at: Point): void
@@ -121,7 +150,11 @@ interface GmStore extends TableState {
   updateLight(id: string, patch: Partial<Light>): void
   /** Change several lights; a function patch can tailor the change to each light. */
   updateLights(ids: string[], patch: Partial<Light> | ((light: Light) => Partial<Light>)): void
-  moveLights(ids: string[], dx: number, dy: number): void
+  /**
+   * Move lights. With `safe`, vision safety applies: if a vision token would cross a wall,
+   * nothing moves and false is returned.
+   */
+  moveLights(ids: string[], dx: number, dy: number, safe?: boolean): boolean
   removeLights(ids: string[]): void
   /** Select just this light (or nothing at all). */
   selectLight(id: string | null): void
@@ -166,7 +199,7 @@ const defaultScene: Scene = {
   view: { x: 2000, y: 1250 },
   darkness: 0,
   lights: [],
-  fog: { enabled: false },
+  fog: { enabled: false, safety: true },
   walls: [],
 }
 
@@ -192,8 +225,10 @@ export const useGm = create<GmStore>()((set) => ({
   fogMemory: null,
   fogVersion: 0,
   buildingWalls: false,
-  wallSnap: 1,
+  snap: 1,
   wallDraft: [],
+  buildingDoors: false,
+  doorDraft: null,
   gmCamera: null,
   cameraVersion: 0,
   sceneName: null,
@@ -209,21 +244,70 @@ export const useGm = create<GmStore>()((set) => ({
     }),
   setDisplay: (patch) => set((s) => ({ display: { ...s.display, ...patch } })),
   setSquareMm: (squareMm) => set((s) => ({ scene: { ...s.scene, squareMm } })),
-  setView: (view) =>
-    set((s) => {
-      // Lights carried by the party travel with the table view.
-      const dx = view.x - s.scene.view.x
-      const dy = view.y - s.scene.view.y
-      const lights = s.scene.lights.some((l) => l.followView)
-        ? s.scene.lights.map((l) => (l.followView ? { ...l, x: l.x + dx, y: l.y + dy } : l))
-        : s.scene.lights
-      return { scene: { ...s.scene, view, lights } }
-    }),
+  setView: (view, safe = false) => {
+    const s = useGm.getState()
+    // Lights carried by the party travel with the table view.
+    const dx = view.x - s.scene.view.x
+    const dy = view.y - s.scene.view.y
+    const guarded = safe && s.scene.fog.safety
+    const segments = guarded ? wallSegments(s.scene.walls) : []
+    let stuck = false
+    const lights = s.scene.lights.map((l) => {
+      if (!l.followView) return l
+      if (!guarded || !l.vision) return { ...l, x: l.x + dx, y: l.y + dy }
+      // A vision token stops at walls: it slides along them where it can, else stays put.
+      const to = [
+        { x: l.x + dx, y: l.y + dy },
+        { x: l.x + dx, y: l.y },
+        { x: l.x, y: l.y + dy },
+      ].find((p) => !moveCrossesWall(l, p, segments))
+      if (!to || to.x !== l.x + dx || to.y !== l.y + dy) stuck = true
+      return to ? { ...l, ...to } : l
+    })
+    if (stuck) {
+      // Held back, it must still be within the view; if not, the view stays where it is.
+      const scene = { ...s.scene, view }
+      const corners = s.tableScreen && tableViewCorners(scene, s.display, s.tableScreen)
+      const outside = lights.some((l) => l.followView && l.vision && (!corners || !pointInPolygon(l, corners)))
+      if (outside) {
+        s.notify(
+          'VISION SAFETY — a vision token travelling with the PVB hit a wall and would have left the PVB, ' +
+            'so the PVB was dropped. Hold Alt to move through walls.',
+        )
+        return false
+      }
+    }
+    set({ scene: { ...s.scene, view, lights } })
+    return true
+  },
   setDarkness: (darkness) => set((s) => ({ scene: { ...s.scene, darkness } })),
   setGmVision: (gmVision) => set({ gmVision }),
   setGmCamera: (gmCamera) => set({ gmCamera }),
+  history: { canUndo: false, canRedo: false },
+  historyEpoch: 0,
+  newScene: () => {
+    set((s) => ({
+      scene: defaultScene,
+      mapImage: null,
+      fogMemory: null,
+      fogVersion: s.fogVersion + 1,
+      gmCamera: null,
+      cameraVersion: s.cameraVersion + 1,
+      historyEpoch: s.historyEpoch + 1,
+      selectedLightIds: [],
+      selectedWallPoints: [],
+      placingLight: null,
+      buildingWalls: false,
+      wallDraft: [],
+      buildingDoors: false,
+      doorDraft: null,
+    }))
+    // After the scene change, which marks unsaved (see sync).
+    set({ sceneName: null, unsaved: false })
+  },
   loadScene: (file, name) => {
     set((s) => ({
+      historyEpoch: s.historyEpoch + 1,
       scene: migrateScene(file.scene),
       display: { ...s.display, orientation: file.orientation },
       mapImage: file.mapImage,
@@ -237,14 +321,19 @@ export const useGm = create<GmStore>()((set) => ({
       placingLight: null,
       buildingWalls: false,
       wallDraft: [],
+      buildingDoors: false,
+      doorDraft: null,
     }))
     // After the scene change, which marks unsaved (see sync).
     set({ sceneName: name, unsaved: false })
   },
   markSaved: (sceneName) => set({ sceneName, unsaved: false }),
   markUnsaved: () => set({ unsaved: true }),
+  setVisionSafety: (safety) => set((s) => ({ scene: { ...s.scene, fog: { ...s.scene.fog, safety } } })),
+  notice: null,
+  notify: (text) => set((s) => ({ notice: { text, id: (s.notice?.id ?? 0) + 1 } })),
   setFogEnabled: (enabled) => {
-    set((s) => ({ scene: { ...s.scene, fog: { enabled } } }))
+    set((s) => ({ scene: { ...s.scene, fog: { ...s.scene.fog, enabled } } }))
     useGm.getState().stampFog()
   },
   stampFog: () =>
@@ -282,16 +371,18 @@ export const useGm = create<GmStore>()((set) => ({
       return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
     }),
   setBuildingWalls: (buildingWalls) =>
-    // One tool at a time: building walls cancels placing a light.
+    // One tool at a time: building walls cancels placing a light or building doors.
     set((s) => ({
       buildingWalls,
       wallDraft: [],
+      buildingDoors: buildingWalls ? false : s.buildingDoors,
+      doorDraft: null,
       placingLight: buildingWalls ? null : s.placingLight,
       // The wall toolbox takes the selection panels' place.
       selectedLightIds: buildingWalls ? [] : s.selectedLightIds,
       selectedWallPoints: buildingWalls ? [] : s.selectedWallPoints,
     })),
-  setWallSnap: (wallSnap) => set({ wallSnap }),
+  setSnap: (snap) => set({ snap }),
   addWallPoint: (p) =>
     set((s) => {
       const draft = s.wallDraft
@@ -313,6 +404,40 @@ export const useGm = create<GmStore>()((set) => ({
       return { scene: { ...s.scene, walls: [...s.scene.walls, wall] }, wallDraft: [] }
     }),
   clearWalls: () => set((s) => ({ scene: { ...s.scene, walls: [] }, wallDraft: [], selectedWallPoints: [] })),
+  setBuildingDoors: (buildingDoors) =>
+    set((s) => ({
+      buildingDoors,
+      doorDraft: null,
+      buildingWalls: buildingDoors ? false : s.buildingWalls,
+      wallDraft: buildingDoors ? [] : s.wallDraft,
+      placingLight: buildingDoors ? null : s.placingLight,
+      selectedLightIds: buildingDoors ? [] : s.selectedLightIds,
+      selectedWallPoints: buildingDoors ? [] : s.selectedWallPoints,
+    })),
+  placeDoorPoint: (p) =>
+    set((s) => {
+      const first = s.doorDraft
+      if (!first) return { doorDraft: p }
+      const walls = makeDoor(s.scene.walls, first, p, () => crypto.randomUUID())
+      // Not on the same stretch of wall as the first point: start over from here.
+      if (!walls) return { doorDraft: p }
+      return { scene: { ...s.scene, walls }, doorDraft: null }
+    }),
+  cancelDoorDraft: () => set({ doorDraft: null }),
+  toggleDoor: (id) =>
+    set((s) => ({
+      scene: {
+        ...s.scene,
+        walls: s.scene.walls.map((w) => (w.id === id && w.door ? { ...w, door: { open: !w.door.open } } : w)),
+      },
+    })),
+  convertToDoor: (refs) =>
+    set((s) => {
+      const span = selectedSegment(s.scene.walls, refs)
+      const walls = span && makeDoor(s.scene.walls, span.a, span.b, () => crypto.randomUUID())
+      if (!walls) return s
+      return { scene: { ...s.scene, walls }, selectedWallPoints: [] }
+    }),
   resetFog: () => {
     set((s) => ({ fogMemory: createFogMemory(sceneBounds(s.scene)), fogVersion: s.fogVersion + 1 }))
     useGm.getState().stampFog()
@@ -339,12 +464,23 @@ export const useGm = create<GmStore>()((set) => ({
       )
       return { scene: { ...s.scene, lights } }
     }),
-  moveLights: (ids, dx, dy) =>
-    set((s) => {
-      const chosen = new Set(ids)
-      const lights = s.scene.lights.map((l) => (chosen.has(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l))
-      return { scene: { ...s.scene, lights } }
-    }),
+  moveLights: (ids, dx, dy, safe = false) => {
+    const s = useGm.getState()
+    const chosen = new Set(ids)
+    if (safe && s.scene.fog.safety) {
+      const segments = wallSegments(s.scene.walls)
+      const crossing = s.scene.lights.some(
+        (l) => chosen.has(l.id) && l.vision && moveCrossesWall(l, { x: l.x + dx, y: l.y + dy }, segments),
+      )
+      if (crossing) {
+        s.notify('VISION SAFETY — a vision token tried to cross a wall and was dropped. Hold Alt to move through walls.')
+        return false
+      }
+    }
+    const lights = s.scene.lights.map((l) => (chosen.has(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l))
+    set({ scene: { ...s.scene, lights } })
+    return true
+  },
   removeLights: (ids) =>
     set((s) => {
       const gone = new Set(ids)
@@ -401,6 +537,8 @@ export const useGm = create<GmStore>()((set) => ({
       placingLight,
       buildingWalls: placingLight ? false : s.buildingWalls,
       wallDraft: placingLight ? [] : s.wallDraft,
+      buildingDoors: placingLight ? false : s.buildingDoors,
+      doorDraft: placingLight ? null : s.doorDraft,
     })),
   setMap: (mapImage, size) =>
     set((s) => ({
@@ -515,7 +653,8 @@ export function migrateScene(scene: Scene): Scene {
   scene.grid = { ...DEFAULT_GRID_STYLE, ...scene.grid }
   scene.darkness ??= 0
   scene.lights ??= []
-  scene.fog ??= { enabled: false }
+  const fog: Partial<Scene['fog']> = scene.fog ?? {}
+  scene.fog = { enabled: fog.enabled ?? false, safety: fog.safety ?? true }
   scene.walls ??= []
   for (const l of scene.lights) {
     l.vision ??= LIGHT_PRESETS[l.kind].handheld

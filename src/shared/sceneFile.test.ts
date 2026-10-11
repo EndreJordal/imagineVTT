@@ -10,7 +10,7 @@ const scene: Scene = {
   view: { x: 700, y: 400 },
   darkness: 0.8,
   lights: [],
-  fog: { enabled: true },
+  fog: { enabled: true, safety: true },
   walls: [{ id: 'w', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] }],
 }
 

@@ -1,5 +1,13 @@
 import { Container, RenderTexture, Sprite, type Renderer } from 'pixi.js'
-import { animateLight, emitsLight, LIGHT_PRESETS, seedOf, type Light, type LightFrame } from '../shared/lights'
+import {
+  animateLight,
+  emitsLight,
+  flickerOf,
+  LIGHT_PRESETS,
+  seedOf,
+  type Light,
+  type LightFrame,
+} from '../shared/lights'
 import type { Rect } from '../shared/types'
 import { coneTexture, radialTexture } from './lightTextures'
 
@@ -109,7 +117,10 @@ export class LightingLayer {
     this.dirty = false
 
     for (const light of this.lights) {
-      this.place(light, animateLight(LIGHT_PRESETS[light.kind].animation, t, seedOf(light.id)))
+      const preset = LIGHT_PRESETS[light.kind]
+      const flicker = flickerOf(light)
+      const input = flicker && { flicker, intensity: light.intensity, buzz: !!preset.buzz }
+      this.place(light, animateLight(preset.animation, t, seedOf(light.id), input))
     }
     for (const [root, target] of [
       [this.maskRoot, this.maskMap],

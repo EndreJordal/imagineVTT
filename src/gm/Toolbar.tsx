@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import { LIGHT_MENU, LIGHT_PRESETS, type LightKind } from '../shared/lights'
-import { openScene, saveScene } from './sceneFiles'
+import { useEffect } from 'react'
+import { redo, undo } from './history'
+import { newScene, openScene, saveScene } from './sceneFiles'
+import { SettingsMenu } from './Settings'
 import { useGm } from './store'
+import { openTableWindow } from './tableWindow'
+import { useDropdown } from './useDropdown'
 
 export function Toolbar() {
   const darkness = useGm((s) => s.scene.darkness)
@@ -11,6 +14,8 @@ export function Toolbar() {
     <header className="toolbar">
       <span className="toolbar-title">imagineVTT</span>
       <SceneFile />
+      <UndoRedo />
+      <TableStatus />
       <label className="toolbar-item" title="Time of day: dims and desaturates the map, on the table too">
         <span aria-hidden>☀</span>
         <input
@@ -27,8 +32,9 @@ export function Toolbar() {
         <span aria-hidden>🌙</span>
       </label>
       <GmVision />
-      <FogToggle />
-      <LightMenu />
+      <FogMenu />
+      <span className="toolbar-spacer" />
+      <SettingsMenu />
     </header>
   )
 }
@@ -46,6 +52,9 @@ function SceneFile() {
         {name}
         {unsaved && <span className="unsaved-dot"> •</span>}
       </span>
+      <button className="icon-button" title="New scene" onClick={newScene}>
+        📄
+      </button>
       <button className="icon-button" title="Open a scene (Ctrl+O)" onClick={() => void openScene()}>
         📂
       </button>
@@ -60,31 +69,80 @@ function SceneFile() {
   )
 }
 
-/** Fog of war on/off, and forgetting what the party has explored. */
-function FogToggle() {
+/** Fog dropdown: fog of war on/off, forgetting what was explored, and vision safety. */
+function FogMenu() {
   const enabled = useGm((s) => s.scene.fog.enabled)
-  const { setFogEnabled, resetFog } = useGm.getState()
+  const safety = useGm((s) => s.scene.fog.safety)
+  const { setFogEnabled, resetFog, setVisionSafety } = useGm.getState()
+  const { open, setOpen, root } = useDropdown()
   return (
-    <div className="toolbar-item">
+    <div className="menu" ref={root}>
       <button
         className={enabled ? 'active' : ''}
-        aria-pressed={enabled}
-        title="Fog of war: players see only what vision tokens see, and greyscale memory of where they've been"
-        onClick={() => setFogEnabled(!enabled)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Fog of war and vision safety"
+        onClick={() => setOpen(!open)}
       >
-        🌫 Fog{enabled ? ' on' : ''}
+        🌫 Fog {enabled ? 'on' : 'off'}
+        {safety && <span title="Vision safety on"> 🛡</span>} ▾
       </button>
-      {enabled && (
-        <button
-          className="icon-button"
-          title="Reset fog: forget everything the party has explored"
-          onClick={() => {
-            if (confirm('Forget everything the party has explored?')) resetFog()
-          }}
-        >
-          ↺
-        </button>
+      {open && (
+        <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Fog of war">
+          <label className="check">
+            <input type="checkbox" checked={enabled} onChange={(e) => setFogEnabled(e.target.checked)} />
+            Fog of war
+          </label>
+          <p className="hint">
+            Players see only what vision tokens see, and a greyscale memory of where they’ve been.
+          </p>
+          <button
+            disabled={!enabled}
+            onClick={() => {
+              if (confirm('Forget everything the party has explored?')) resetFog()
+            }}
+          >
+            ↺ Reset explored areas
+          </button>
+          <label className="check">
+            <input type="checkbox" checked={safety} onChange={(e) => setVisionSafety(e.target.checked)} />
+            🛡 Vision safety
+          </label>
+          <p className="hint">
+            Vision tokens can’t be dragged through walls or closed doors, so a careless drag doesn’t reveal the
+            next room. Hold <kbd>Alt</kbd> while dragging to go through anyway.
+          </p>
+        </div>
       )}
+    </div>
+  )
+}
+
+/** Whether the table window is connected; opens it when it isn't. */
+function TableStatus() {
+  const connected = useGm((s) => s.tableConnected)
+  return (
+    <button
+      className={`table-status${connected ? ' connected' : ''}`}
+      title={connected ? 'Table window connected' : 'Table window not connected: click to open it'}
+      onClick={openTableWindow}
+    >
+      <span className="status-dot" aria-hidden /> Table
+    </button>
+  )
+}
+
+/** Undo and redo buttons (Ctrl+Z, Ctrl+Y). */
+function UndoRedo() {
+  const { canUndo, canRedo } = useGm((s) => s.history)
+  return (
+    <div className="toolbar-item toolbar-group">
+      <button className="icon-button" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
+        ↶
+      </button>
+      <button className="icon-button" title="Redo (Ctrl+Y)" disabled={!canRedo} onClick={redo}>
+        ↷
+      </button>
     </div>
   )
 }
@@ -125,68 +183,6 @@ function GmVision() {
         onChange={(e) => setGmVision(e.target.valueAsNumber)}
       />
       <span className="toolbar-value">{label}</span>
-    </div>
-  )
-}
-
-/** Toolbar button with a dropdown of light sources; picking one lets the GM click to place it. */
-function LightMenu() {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
-    window.addEventListener('pointerdown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  // Picking a light arms placement mode; the GM then clicks the map where it goes.
-  const pick = (kind: LightKind) => {
-    useGm.getState().setPlacingLight(kind)
-    setOpen(false)
-  }
-
-  return (
-    <div className="menu" ref={root}>
-      <button
-        className={open ? 'active' : ''}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Add a light source"
-        onClick={() => setOpen(!open)}
-      >
-        💡 Lights ▾
-      </button>
-      {open && (
-        <ul className="menu-list" role="menu">
-          {LIGHT_MENU.map(({ kind, label }) => {
-            const p = LIGHT_PRESETS[kind]
-            return (
-              <li key={kind} role="none">
-                <button role="menuitem" onClick={() => pick(kind)}>
-                  <span className="menu-icon" aria-hidden>
-                    {p.icon}
-                  </span>
-                  <span className="menu-label">{label}</span>
-                  {p.handheld && (
-                    <span className="menu-badge" title="Hand-held: meant to be moved">
-                      ✋
-                    </span>
-                  )}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
     </div>
   )
 }

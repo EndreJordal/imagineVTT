@@ -1,7 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { emitsLight, isDirectional, LIGHT_PRESETS, type Light } from '../shared/lights'
+import { emitsLight, flickerOf, isDirectional, LIGHT_PRESETS, type Flicker, type Light } from '../shared/lights'
 import { useGm } from './store'
+import { Slider } from './ui'
 
 /**
  * Floating panel for configuring the selected light(s). With several selected, a change
@@ -28,6 +29,14 @@ export function LightPanel() {
   const fogOn = useGm.getState().scene.fog.enabled
   const directional = lights.filter(isDirectional)
   const cones = lights.filter((l) => LIGHT_PRESETS[l.kind].shape === 'cone')
+  const flickering = lights.filter((l) => !!flickerOf(l))
+  const fl = (l: Light) => flickerOf(l)!
+  // Change one part of each flickering light's settings, keeping the rest of its own.
+  const setFlicker = (change: (f: Flicker) => Flicker) =>
+    set((l) => (flickering.includes(l) ? { flicker: change(fl(l)) } : {}))
+  const rate = common(flickering, (l) => fl(l).rate)
+  const lowLevel = common(flickering, (l) => fl(l).low.level)
+  const highBoost = common(flickering, (l) => fl(l).high.boost)
   // Settings only some lights have apply to just those.
   const only = (subset: Light[], patch: Partial<Light>) => (l: Light) =>
     subset.includes(l) ? patch : {}
@@ -81,40 +90,41 @@ export function LightPanel() {
         />
       )}
       {canSee.length > 0 && (
-        <Row label={range === undefined ? 'Vision mixed' : `Vision ${range} sq`}>
-          <input
-            type="range"
-            min={1}
-            max={100}
-            step={1}
-            value={range ?? canSee[0].visionRange}
-            onChange={(e) => set(only(canSee, { visionRange: e.target.valueAsNumber }))}
-          />
-        </Row>
+        <Slider
+          label="Vision range"
+          unit="sq"
+          value={range}
+          fallback={canSee[0].visionRange}
+          min={1}
+          max={100}
+          step={1}
+          onChange={(visionRange) => set(only(canSee, { visionRange }))}
+        />
       )}
       {seeing.length > 0 && !fogOn && <p className="hint">Vision shows once fog of war is on.</p>}
       {emitters.length > 0 && (
         <>
-          <Row label={radius === undefined ? 'Radius mixed' : `Radius ${radius} sq`}>
-            <input
-              type="range"
-              min={1}
-              max={30}
-              step={0.5}
-              value={radius ?? first.radius}
-              onChange={(e) => set(only(emitters, { radius: e.target.valueAsNumber }))}
-            />
-          </Row>
-          <Row label={intensity === undefined ? 'Brightness mixed' : `Brightness ${Math.round(intensity * 100)}%`}>
-            <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.05}
-              value={intensity ?? first.intensity}
-              onChange={(e) => set(only(emitters, { intensity: e.target.valueAsNumber }))}
-            />
-          </Row>
+          <Slider
+            label="Radius"
+            unit="sq"
+            value={radius}
+            fallback={first.radius}
+            min={1}
+            max={30}
+            step={0.5}
+            onChange={(radius) => set(only(emitters, { radius }))}
+          />
+          <Slider
+            label="Brightness"
+            unit="%"
+            scale={100}
+            value={intensity}
+            fallback={first.intensity}
+            min={0.1}
+            max={1}
+            step={0.05}
+            onChange={(intensity) => set(only(emitters, { intensity }))}
+          />
           <Row label={color === undefined ? 'Colour mixed' : 'Colour'}>
             <input
               type="color"
@@ -126,28 +136,79 @@ export function LightPanel() {
         </>
       )}
       {directional.length > 0 && (
-        <Row label={degrees === undefined ? 'Direction mixed' : `Direction ${degrees}°`}>
-          <input
-            type="range"
-            min={0}
-            max={359}
+        <Slider
+          label="Direction"
+          unit="°"
+          value={degrees}
+          fallback={0}
+          min={0}
+          max={359}
+          step={1}
+          onChange={(deg) => set(only(directional, { angle: (deg * Math.PI) / 180 }))}
+        />
+      )}
+      {flickering.length > 0 && (
+        <div className="panel-group">
+          <h3>Flicker</h3>
+          <Slider
+            label="Rate"
+            unit="/min"
+            value={rate}
+            fallback={fl(flickering[0]).rate}
+            min={1}
+            max={120}
             step={1}
-            value={degrees ?? 0}
-            onChange={(e) => set(only(directional, { angle: (e.target.valueAsNumber * Math.PI) / 180 }))}
+            onChange={(rate) => setFlicker((f) => ({ ...f, rate }))}
           />
-        </Row>
+          <TriCheck
+            label="Flicker down"
+            title="Dips: the light drops to this brightness"
+            values={flickering.map((l) => fl(l).low.on)}
+            onChange={(on) => setFlicker((f) => ({ ...f, low: { ...f.low, on } }))}
+          />
+          <Slider
+            label="Down to"
+            unit="%"
+            scale={100}
+            value={lowLevel}
+            fallback={fl(flickering[0]).low.level}
+            min={0}
+            max={1}
+            step={0.05}
+            disabled={!flickering.some((l) => fl(l).low.on)}
+            onChange={(level) => setFlicker((f) => ({ ...f, low: { ...f.low, level } }))}
+          />
+          <TriCheck
+            label="Flicker up"
+            title="Surges: this much is added to the brightness"
+            values={flickering.map((l) => fl(l).high.on)}
+            onChange={(on) => setFlicker((f) => ({ ...f, high: { ...f.high, on } }))}
+          />
+          <Slider
+            label="Up by +"
+            unit="%"
+            scale={100}
+            value={highBoost}
+            fallback={fl(flickering[0]).high.boost}
+            min={0}
+            max={1}
+            step={0.05}
+            disabled={!flickering.some((l) => fl(l).high.on)}
+            onChange={(boost) => setFlicker((f) => ({ ...f, high: { ...f.high, boost } }))}
+          />
+        </div>
       )}
       {cones.length > 0 && (
-        <Row label={cone === undefined ? 'Beam width mixed' : `Beam width ${cone}°`}>
-          <input
-            type="range"
-            min={15}
-            max={120}
-            step={5}
-            value={cone ?? cones[0].cone}
-            onChange={(e) => set(only(cones, { cone: e.target.valueAsNumber }))}
-          />
-        </Row>
+        <Slider
+          label="Beam width"
+          unit="°"
+          value={cone}
+          fallback={cones[0].cone}
+          min={15}
+          max={120}
+          step={5}
+          onChange={(cone) => set(only(cones, { cone }))}
+        />
       )}
       {darkness === 0 && emitters.length > 0 && (
         <p className="hint">It's day: lights show once you slide towards night.</p>

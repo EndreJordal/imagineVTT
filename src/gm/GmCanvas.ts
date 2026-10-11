@@ -14,7 +14,9 @@ import type { FogMemory } from '../shared/fog'
 import type { GmCamera } from '../shared/sceneFile'
 import {
   inRect,
+  nearestOnSegment,
   rectBetween,
+  sameSpot,
   sameRef,
   uniquePositions,
   wallPointsIn,
@@ -45,14 +47,17 @@ const AIM_HANDLE_PX = 6
 const CLICK_PX = 4
 
 interface Handlers {
-  /** The GM dragged the table view's marker; view is its new centre. */
-  onViewMove(view: Point): void
+  /**
+   * The GM dragged the table view's marker; view is its new centre. `force` (Alt held)
+   * skips vision safety. Returning false refuses the move and drops the drag.
+   */
+  onViewMove(view: Point, force: boolean): boolean
   /** The GM dragged the map's corner handle; scale is relative to the image's natural size. */
   onMapResize(scale: number): void
   /** The GM dragged the map; position is its new top-left corner. */
   onMapMove(position: Point): void
-  /** The GM dragged a light token; position is where that light should go. */
-  onLightMove(id: string, position: Point): void
+  /** The GM dragged a light token to position (like onViewMove for `force` and refusing). */
+  onLightMove(id: string, position: Point, force: boolean): boolean
   /** The GM dragged a directional light's aim handle; angle in radians. */
   onLightAim(id: string, angle: number): void
   /** Select just this light, or none (null). */
@@ -73,6 +78,12 @@ interface Handlers {
    * the one under the pointer, ends up at `to` (already snapped).
    */
   onWallPointDrag(refs: WallPointRef[], anchor: WallPointRef, to: Point): void
+  /** In door building mode, the GM clicked a valid door point (on a wall line). */
+  onDoorPoint(p: Point): void
+  /** Right-click in door mode: drop the half-placed door, or leave door mode. */
+  onDoorCancel(): void
+  /** The GM clicked a door's open/close button. */
+  onDoorToggle(id: string): void
   /** Shift-drag box selection; `add` keeps what was already selected (Ctrl/Cmd). */
   onBoxSelect(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
   /** The GM panned or zoomed (or the view was fitted). */
@@ -91,11 +102,15 @@ export interface GmUi {
   peeking: boolean
   /** Wall building mode: clicks add snapped wall points. */
   buildingWalls: boolean
-  /** Snap fraction of a square for wall points (0 = none). */
-  wallSnap: number
+  /** Snap fraction of a square for walls, doors and placing lights (0 = none). */
+  snap: number
   /** Points of the wall being drawn. */
   wallDraft: Point[]
   selectedWallPoints: WallPointRef[]
+  /** Door building mode: two clicks on a wall line make a door. */
+  buildingDoors: boolean
+  /** First point of the door being placed. */
+  doorDraft: Point | null
 }
 
 type Drag =
@@ -119,12 +134,12 @@ type Drag =
  * a map locked to the grid.
  */
 type Target =
-  | { kind: 'aim' | 'light'; id: string }
+  | { kind: 'door' | 'aim' | 'light'; id: string }
   | { kind: 'wallPoint'; ref: WallPointRef }
   | { kind: 'view' | 'map' | 'resize' | 'locked' }
   | null
 
-const CURSORS: Record<Drag['mode'] | 'locked', string> = {
+const CURSORS: Record<Drag['mode'] | 'locked' | 'door', string> = {
   pan: 'grab',
   view: 'move',
   map: 'move',
@@ -134,6 +149,7 @@ const CURSORS: Record<Drag['mode'] | 'locked', string> = {
   aim: 'crosshair',
   wallPoint: 'move',
   box: 'crosshair',
+  door: 'pointer',
 }
 
 
@@ -149,6 +165,11 @@ const WALL_PX = 3
 const WALL_DOT_PX = 3.5
 /** The snap marker under the cursor while building walls, in GM screen px. */
 const SNAP_MARKER_PX = 6
+const DOOR_COLOR = 0x33ff66
+/** A door's open/close button (in its middle), radius in GM screen px. */
+const DOOR_BUTTON_PX = 10
+/** How far from a wall line (GM screen px) the door tool still finds a door point. */
+const DOOR_REACH_PX = 22
 
 /** CSS cursor showing a light's icon, with the hotspot in its centre. */
 const iconCursors = new Map<string, string>()
@@ -216,13 +237,19 @@ export class GmCanvas extends PixiHost {
   /** The wall being drawn, its preview segment and the snap marker. */
   private wallDraftLayer = new Graphics()
   private buildingWalls = false
-  private wallSnap = 1
+  private snap = 1
   private wallDraft: Point[] = []
   private selectedWallPoints: WallPointRef[] = []
   /** The Shift-drag selection box. */
   private selectionBox = new Graphics()
   /** Snapped point under the cursor while building walls. */
   private wallCursor: Point | null = null
+  private buildingDoors = false
+  private doorDraft: Point | null = null
+  /** Valid door point under the cursor while building doors (null: none in reach). */
+  private doorCursor: Point | null = null
+  /** Where a light being placed would go (snapped), while placing. */
+  private lightCursor: Point | null = null
   private selectedLightIds = new Set<string>()
   private placingLight: LightKind | null = null
   private peeking = false
@@ -279,13 +306,21 @@ export class GmCanvas extends PixiHost {
     this.tableConnected = ui.tableConnected
     this.selectedLightIds = new Set(ui.selectedLightIds)
     this.peeking = ui.peeking
-    this.wallSnap = ui.wallSnap
+    this.snap = ui.snap
     this.wallDraft = ui.wallDraft
     this.selectedWallPoints = ui.selectedWallPoints
-    if (ui.placingLight !== this.placingLight || ui.buildingWalls !== this.buildingWalls) {
+    this.doorDraft = ui.doorDraft
+    if (
+      ui.placingLight !== this.placingLight ||
+      ui.buildingWalls !== this.buildingWalls ||
+      ui.buildingDoors !== this.buildingDoors
+    ) {
       this.placingLight = ui.placingLight
       this.buildingWalls = ui.buildingWalls
+      this.buildingDoors = ui.buildingDoors
       if (!this.buildingWalls) this.wallCursor = null
+      if (!this.buildingDoors) this.doorCursor = null
+      if (!this.placingLight) this.lightCursor = null
       if (this.ready) this.app.canvas.style.cursor = this.cursorFor(null)
     }
     this.render()
@@ -501,16 +536,35 @@ export class GmCanvas extends PixiHost {
     }
   }
 
-  /** Walls as red lines with dots at their points; the wall being drawn, while building. */
+  /**
+   * Walls as red lines with dots at their points, doors in green (faded when open) with an
+   * open/close button in the middle; the wall or door being drawn, while building.
+   */
   private drawWalls() {
     const px = this.px
     const g = this.wallsLayer.clear()
-    for (const wall of this.state?.scene.walls ?? []) {
-      g.poly(wall.points, false).stroke({ width: WALL_PX * px, color: WALL_COLOR, join: 'round', cap: 'round' })
+    const walls = this.state?.scene.walls ?? []
+    for (const wall of walls) {
+      const color = wall.door ? DOOR_COLOR : WALL_COLOR
+      const alpha = wall.door?.open ? 0.4 : 1
+      g.poly(wall.points, false).stroke({ width: WALL_PX * px, color, alpha, join: 'round', cap: 'round' })
     }
-    // Linked points (same spot) are one point: one dot, one ring.
-    const all = (this.state?.scene.walls ?? []).flatMap((w) => w.points)
-    for (const p of uniquePositions(all)) g.circle(p.x, p.y, WALL_DOT_PX * px).fill(WALL_COLOR)
+    // Linked points (same spot) are one point: one dot, one ring. Green where a door ends.
+    const doorEnds = walls.filter((w) => w.door).flatMap((w) => w.points)
+    for (const p of uniquePositions(walls.flatMap((w) => w.points))) {
+      const isDoor = doorEnds.some((q) => sameSpot(p, q))
+      g.circle(p.x, p.y, WALL_DOT_PX * px).fill(isDoor ? DOOR_COLOR : WALL_COLOR)
+    }
+    for (const wall of walls) {
+      if (!wall.door) continue
+      const c = doorButton(wall.points)
+      const r = DOOR_BUTTON_PX * px
+      g.circle(c.x, c.y, r).fill({ color: 0x1d1d22, alpha: 0.9 }).stroke({ width: 2 * px, color: DOOR_COLOR })
+      // A door leaf: solid when closed, an outline when open.
+      const leaf = g.roundRect(c.x - 3.5 * px, c.y - 5.5 * px, 7 * px, 11 * px, 1 * px)
+      if (wall.door.open) leaf.stroke({ width: 1.5 * px, color: DOOR_COLOR })
+      else leaf.fill(DOOR_COLOR)
+    }
     const selected = this.selectedWallPoints.map((r) => this.wallPoint(r)).filter((p) => !!p)
     for (const p of uniquePositions(selected)) {
       g.circle(p.x, p.y, (WALL_DOT_PX + 3) * px).stroke({ width: 2 * px, color: 0xffffff })
@@ -522,6 +576,27 @@ export class GmCanvas extends PixiHost {
     this.requestRender()
     const px = this.px
     const g = this.wallDraftLayer.clear()
+    if (this.placingLight && this.lightCursor && this.snap > 0) {
+      const c = this.lightCursor
+      g.circle(c.x, c.y, (TOKEN_PX + 2) * px).stroke({ width: 2 * px, color: 0xffffff, alpha: 0.8 })
+      return
+    }
+    if (this.buildingDoors) {
+      const first = this.doorDraft
+      const cursor = this.doorCursor
+      if (first && cursor) {
+        g.moveTo(first.x, first.y)
+          .lineTo(cursor.x, cursor.y)
+          .stroke({ width: WALL_PX * px, color: DOOR_COLOR, alpha: 0.6, cap: 'round' })
+      }
+      if (first) g.circle(first.x, first.y, WALL_DOT_PX * 1.5 * px).fill(DOOR_COLOR)
+      if (cursor) {
+        g.circle(cursor.x, cursor.y, SNAP_MARKER_PX * px)
+          .fill({ color: DOOR_COLOR, alpha: 0.85 })
+          .stroke({ width: 1.5 * px, color: 0xffffff })
+      }
+      return
+    }
     if (!this.buildingWalls) return
     const draft = this.wallDraft
     const cursor = this.wallCursor
@@ -580,7 +655,69 @@ export class GmCanvas extends PixiHost {
     for (const q of this.wallDraft) consider(q)
     if (best) return { x: best.x, y: best.y }
     const grid = this.state?.scene.grid
-    return grid ? snapToGrid(p, grid, this.wallSnap) : p
+    return grid ? snapToGrid(p, grid, this.snap) : p
+  }
+
+  /**
+   * The door point the door tool would use for pointer position p, or null: an existing wall
+   * point under the pointer, else the nearest snap point lying on a wall line (with snapping
+   * off, the nearest spot on the line). Doors themselves aren't wall lines to put doors in.
+   */
+  private doorPointAt(p: Point): Point | null {
+    const state = this.state
+    if (!state) return null
+    const px = this.px
+    for (const w of state.scene.walls) {
+      for (const q of w.points) {
+        if (Math.hypot(p.x - q.x, p.y - q.y) <= (WALL_DOT_PX + SLACK_PX) * px) return { x: q.x, y: q.y }
+      }
+    }
+    const { grid } = state.scene
+    const step = grid.size * this.snap
+    let best: Point | null = null
+    let bestDist = DOOR_REACH_PX * px
+    const consider = (q: Point) => {
+      const d = Math.hypot(p.x - q.x, p.y - q.y)
+      if (d <= bestDist) {
+        best = q
+        bestDist = d
+      }
+    }
+    for (const w of state.scene.walls) {
+      if (w.door) continue
+      for (let i = 1; i < w.points.length; i++) {
+        const a = w.points[i - 1]
+        const b = w.points[i]
+        const near = nearestOnSegment(p, a, b)
+        if (near.distance > DOOR_REACH_PX * px) continue
+        if (step <= 0) {
+          consider(near.point)
+          continue
+        }
+        // Snap points around where the pointer meets the line; keep those on the line.
+        const centre = snapToGrid(near.point, grid, this.snap)
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const q = { x: centre.x + dx * step, y: centre.y + dy * step }
+            if (nearestOnSegment(q, a, b).distance < 1e-3) consider(q)
+          }
+        }
+      }
+    }
+    return best
+  }
+
+  /**
+   * Where a light placed at pointer position p goes: with whole-square snapping, the middle
+   * of a square (where a mini stands); with finer snapping, the nearest snap point.
+   */
+  private lightPointAt(p: Point): Point {
+    const grid = this.state?.scene.grid
+    if (!grid || this.snap <= 0) return p
+    if (this.snap < 1) return snapToGrid(p, grid, this.snap)
+    const half = grid.size / 2
+    const q = snapToGrid({ x: p.x - half, y: p.y - half }, grid, 1)
+    return { x: q.x + half, y: q.y + half }
   }
 
   /** The selected light, if exactly one is selected. */
@@ -603,6 +740,12 @@ export class GmCanvas extends PixiHost {
     const map = state.scene.map
     const lights = state.scene.lights
 
+    // Door buttons sit on top of everything.
+    for (const w of state.scene.walls) {
+      if (!w.door) continue
+      const c = doorButton(w.points)
+      if (Math.hypot(p.x - c.x, p.y - c.y) <= (DOOR_BUTTON_PX + 2) * px) return { kind: 'door', id: w.id }
+    }
     const selected = this.soleSelected()
     if (selected && isDirectional(selected)) {
       const a = this.aimPoint(selected)
@@ -648,6 +791,7 @@ export class GmCanvas extends PixiHost {
   private cursorFor(target: Target) {
     if (this.placingLight) return iconCursor(LIGHT_PRESETS[this.placingLight].icon)
     if (this.buildingWalls) return iconCursor('🧱')
+    if (this.buildingDoors) return target?.kind === 'door' ? CURSORS.door : iconCursor('🚪')
     return CURSORS[target?.kind ?? 'pan']
   }
 
@@ -670,15 +814,35 @@ export class GmCanvas extends PixiHost {
       this.handlers.onWallPoint(this.wallPointAt(p))
       return
     }
+    // Door building: left-click toggles a door's button or places a door point; right-click
+    // cancels; middle still pans.
+    if (this.buildingDoors && e.button !== 1) {
+      if (e.button === 2) {
+        this.handlers.onDoorCancel()
+        return
+      }
+      const target = this.targetAt(p)
+      if (target?.kind === 'door') {
+        this.handlers.onDoorToggle(target.id)
+        return
+      }
+      const at = this.doorPointAt(p)
+      if (at) this.handlers.onDoorPoint(at)
+      return
+    }
     // Placement mode: left-click places, right-click cancels; middle still pans.
     if (this.placingLight && e.button !== 1) {
-      if (e.button === 0) this.handlers.onPlaceLight(p, e.shiftKey)
+      if (e.button === 0) this.handlers.onPlaceLight(this.lightPointAt(p), e.shiftKey)
       else this.handlers.onPlaceCancel()
       return
     }
     const target = e.button === 0 ? this.targetAt(p) : null
     const scene = this.state?.scene
     if (target?.kind === 'locked') return // the resize handle is disabled while locked to the grid
+    if (target?.kind === 'door') {
+      this.handlers.onDoorToggle(target.id)
+      return
+    }
     this.pressedAt = this.toCanvas(e)
 
     if (e.button === 0 && e.shiftKey) {
@@ -730,6 +894,14 @@ export class GmCanvas extends PixiHost {
       this.wallCursor = this.wallPointAt(this.toScene(e))
       this.drawWallDraft()
     }
+    if (this.buildingDoors) {
+      this.doorCursor = this.doorPointAt(this.toScene(e))
+      this.drawWallDraft()
+    }
+    if (this.placingLight) {
+      this.lightCursor = this.lightPointAt(this.toScene(e))
+      this.drawWallDraft()
+    }
     if (!drag) {
       this.app.canvas.style.cursor = this.cursorFor(this.targetAt(this.toScene(e)))
       return
@@ -760,9 +932,9 @@ export class GmCanvas extends PixiHost {
     }
     const to = { x: p.x + drag.grab.x, y: p.y + drag.grab.y }
     if (drag.mode === 'light') {
-      this.handlers.onLightMove(drag.id, to)
+      if (!this.handlers.onLightMove(drag.id, to, e.altKey)) this.dropDrag(e)
     } else if (drag.mode === 'view') {
-      this.handlers.onViewMove(to)
+      if (!this.handlers.onViewMove(to, e.altKey)) this.dropDrag(e)
     } else if (drag.mode === 'map') {
       this.handlers.onMapMove(to)
     } else {
@@ -802,6 +974,14 @@ export class GmCanvas extends PixiHost {
     }
   }
 
+  /** Let go of whatever is being dragged (vision safety refused a move). */
+  private dropDrag(e: PointerEvent) {
+    this.drag = null
+    this.pressedAt = null
+    this.app.canvas.style.cursor = this.cursorFor(this.targetAt(this.toScene(e)))
+    if (this.app.canvas.hasPointerCapture(e.pointerId)) this.app.canvas.releasePointerCapture(e.pointerId)
+  }
+
   private onWheel = (e: WheelEvent) => {
     e.preventDefault()
     const c = this.toCanvas(e)
@@ -815,6 +995,13 @@ export class GmCanvas extends PixiHost {
     this.drawOverlay()
     this.reportCamera()
   }
+}
+
+/** Where a door's open/close button sits: the middle of the door. */
+function doorButton(points: Point[]): Point {
+  const a = points[0]
+  const b = points.at(-1)!
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
 
 function centroid(points: Point[]): Point {
