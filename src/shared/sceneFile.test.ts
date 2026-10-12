@@ -30,6 +30,7 @@ const sample = (): SceneFile => ({
   fogMemories: { g: { cols: 4, rows: 2, data: new Uint8Array([0, 255, 128, 0, 0, 0, 255, 255]) }, r: null },
   orientation: 90,
   camera: { x: 500, y: 300, zoom: 0.4 },
+  soundClips: {},
   objectImages: {
     'Fantasy/Objects/Fire/Brazier': { image: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' }), width: 512, height: 512, frames },
     // Not shown by any object: not saved.

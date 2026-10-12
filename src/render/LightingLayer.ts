@@ -1,4 +1,4 @@
-import { Container, RenderTexture, Sprite, type Renderer } from 'pixi.js'
+import { Container, Graphics, RenderTexture, Sprite, type Renderer } from 'pixi.js'
 import {
   animateLight,
   emitsLight,
@@ -9,6 +9,7 @@ import {
   type LightFrame,
 } from '../shared/lights'
 import type { Rect } from '../shared/types'
+import { visibilityPolygon, wallSegments, type Wall } from '../shared/visibility'
 import { coneTexture, radialTexture } from './lightTextures'
 
 /**
@@ -24,7 +25,17 @@ const SPILL_BRIGHTNESS = 0.35
 /** Neon tubes glow in an elongated shape this many times longer than wide. */
 const TUBE_STRETCH = 2.6
 
+/** How far past its radius a light's flicker can reach (its wall clip covers that much). */
+const REACH_SLACK = 1.3
+
 interface LightSprites {
+  /** The light in each map, clipped to what it reaches past walls. */
+  maskGroup: Container
+  glowGroup: Container
+  /** Its line of sight (walls block light), and what it was worked out for. */
+  maskClip: Graphics
+  glowClip: Graphics
+  clipKey: string
   /** White shape in the mask map: how much of the day-lit map shows through. */
   mask: Sprite
   /** Tinted shape in the colour map: the light's colour on what it falls on. */
@@ -59,6 +70,7 @@ export class LightingLayer {
   private sprites = new Map<string, LightSprites>()
   private gridSize = 100
   private darkness = 0
+  private walls: Wall[] = []
   /** Something changed since the maps were last drawn. */
   private dirty = true
 
@@ -72,11 +84,19 @@ export class LightingLayer {
     return this.darkness > 0 && this.lights.some((l) => l.on && emitsLight(l))
   }
 
-  sync(all: Light[], bounds: Rect, gridSize: number, darkness: number) {
+  /** `walls` block light (closed doors too), whatever's obscured. */
+  sync(all: Light[], bounds: Rect, gridSize: number, darkness: number, walls: Wall[]) {
     const lights = all.filter(emitsLight) // vision tokens give no light
-    if (!sameLights(lights, this.lights) || gridSize !== this.gridSize || darkness !== this.darkness) {
+    if (
+      !sameLights(lights, this.lights) ||
+      gridSize !== this.gridSize ||
+      darkness !== this.darkness ||
+      walls !== this.walls
+    ) {
       this.dirty = true
     }
+    if (walls !== this.walls) for (const sp of this.sprites.values()) sp.clipKey = ''
+    this.walls = walls
     this.lights = lights
     this.gridSize = gridSize
     this.darkness = darkness
@@ -85,7 +105,8 @@ export class LightingLayer {
     const ids = new Set(lights.map((l) => l.id))
     for (const [id, s] of this.sprites) {
       if (ids.has(id)) continue
-      for (const sprite of Object.values(s)) sprite?.destroy()
+      s.maskGroup.destroy({ children: true })
+      s.glowGroup.destroy({ children: true })
       this.sprites.delete(id)
     }
     for (const light of lights) {
@@ -94,18 +115,56 @@ export class LightingLayer {
       const texture = shape === 'cone' ? coneTexture() : radialTexture()
       const anchor = shape === 'cone' ? { x: 0, y: 0.5 } : { x: 0.5, y: 0.5 }
       const s: LightSprites = {
+        maskGroup: new Container(),
+        glowGroup: new Container(),
+        maskClip: new Graphics(),
+        glowClip: new Graphics(),
+        clipKey: '',
         mask: new Sprite({ texture, anchor, blendMode: 'add' }),
         glow: new Sprite({ texture, anchor, blendMode: 'add' }),
       }
-      this.maskRoot.addChild(s.mask)
-      this.glowRoot.addChild(s.glow)
+      s.maskGroup.addChild(s.mask, s.maskClip)
+      s.glowGroup.addChild(s.glow, s.glowClip)
       if (shape === 'cone') {
         s.spillMask = new Sprite({ texture: radialTexture(), anchor: 0.5, blendMode: 'add' })
         s.spillGlow = new Sprite({ texture: radialTexture(), anchor: 0.5, blendMode: 'add' })
-        this.maskRoot.addChild(s.spillMask)
-        this.glowRoot.addChild(s.spillGlow)
+        s.maskGroup.addChild(s.spillMask)
+        s.glowGroup.addChild(s.spillGlow)
       }
+      this.maskRoot.addChild(s.maskGroup)
+      this.glowRoot.addChild(s.glowGroup)
       this.sprites.set(light.id, s)
+    }
+    this.clipToWalls()
+  }
+
+  /**
+   * Walls block light: each light clipped to its line of sight (worked out again only when
+   * it moved, grew or the walls changed). Without walls, nothing to clip.
+   */
+  private clipToWalls() {
+    const segments = this.walls.length ? wallSegments(this.walls) : []
+    for (const light of this.lights) {
+      const s = this.sprites.get(light.id)!
+      if (!segments.length) {
+        if (s.clipKey) {
+          s.maskGroup.mask = null
+          s.glowGroup.mask = null
+          s.maskClip.clear()
+          s.glowClip.clear()
+          s.clipKey = ''
+        }
+        continue
+      }
+      const reach = light.radius * this.gridSize * REACH_SLACK * (LIGHT_PRESETS[light.kind].shape === 'tube' ? TUBE_STRETCH : 1)
+      const key = `${light.x},${light.y},${reach}`
+      if (key === s.clipKey && s.maskGroup.mask) continue
+      s.clipKey = key
+      const polygon = visibilityPolygon(light, reach, segments)
+      s.maskClip.clear().poly(polygon).fill(0xffffff)
+      s.glowClip.clear().poly(polygon).fill(0xffffff)
+      s.maskGroup.mask = s.maskClip
+      s.glowGroup.mask = s.glowClip
     }
   }
 

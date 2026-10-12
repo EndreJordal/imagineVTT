@@ -1,4 +1,6 @@
 import type { Point } from './types'
+import type { DoorReveal } from './doors'
+import type { DoorSounds } from './sound'
 
 /** A wall segment between two points (scene units). */
 export interface Segment {
@@ -14,7 +16,13 @@ export interface Wall {
    * A door: a two-point wall that can be opened. Closed doors block sight like walls; open
    * ones don't. Being walls, doors get linked points, selection, dragging etc. for free.
    */
-  door?: { open: boolean }
+  door?: {
+    open: boolean
+    /** How what it hid comes into view when it's opened; absent: the scene's (all doors). */
+    reveal?: DoorReveal
+    /** Its own open and close sounds; absent: the scene's (all doors). */
+    sounds?: DoorSounds
+  }
 }
 
 /** Segments that block sight: walls, and doors that are closed. */

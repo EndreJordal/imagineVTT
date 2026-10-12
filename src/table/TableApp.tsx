@@ -24,6 +24,7 @@ export function TableApp() {
 
   useEffect(() => {
     const canvas = new TableCanvas(hostRef.current!)
+    if (import.meta.env.DEV) Object.assign(window, { tableCanvas: canvas })
     const channel = openChannel((msg) => {
       switch (msg.type) {
         case 'gm-hello':

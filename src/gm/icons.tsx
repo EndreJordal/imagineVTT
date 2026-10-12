@@ -25,6 +25,7 @@ import {
   Moon,
   MoveHorizontal,
   MoveVertical,
+  Play,
   Plus,
   Redo2,
   RotateCcw,
@@ -33,11 +34,13 @@ import {
   Save,
   ScanEye,
   Settings,
+  Square,
   ShieldCheck,
   Sun,
   Theater,
   Tv,
   Undo2,
+  Volume2,
   WandSparkles,
   X,
   type LucideIcon,
@@ -87,6 +90,9 @@ const ICONS = {
   'turn-right': RotateCwSquare,
   curtain: Theater,
   slideshow: Images,
+  sound: Volume2,
+  play: Play,
+  stop: Square,
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONS

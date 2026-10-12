@@ -1,3 +1,5 @@
+import type { DoorReveal } from './doors'
+import type { DoorSounds, GlobalSound, MapSound } from './sound'
 import type { HiddenArea } from './hidden'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
@@ -84,6 +86,24 @@ export interface Scene {
   hiddenAreas?: HiddenArea[]
   /** Hidden areas switched off as a whole (kept, not drawn); absent means on. */
   hiddenEnabled?: boolean
+  /** How doors reveal what they hid when opened, unless a door says otherwise (all floors). */
+  doorReveal?: DoorReveal
+  /**
+   * Named groups of lights, objects and hidden areas, selected (and moved) together. Each
+   * member says which it's in.
+   */
+  groups?: SceneGroup[]
+  /** Sounds placed on the map (this floor). */
+  sounds?: MapSound[]
+  /** Sounds in the mixer, heard everywhere (all floors). */
+  globalSounds?: GlobalSound[]
+  /** The sounds doors make, unless a door has its own (all floors). */
+  doorSounds?: DoorSounds
+}
+
+export interface SceneGroup {
+  id: string
+  name: string
 }
 
 /**

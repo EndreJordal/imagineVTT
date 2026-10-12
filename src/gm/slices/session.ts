@@ -28,7 +28,7 @@ export interface SessionSlice {
   notice: { text: string; id: number } | null
   notify(text: string): void
   /** Box selection: these lights and wall points (added to the selection if `add`). */
-  selectMany(lightIds: string[], wallPoints: WallPointRef[], add: boolean): void
+  selectMany(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean): void
   /** Delete everything selected: lights, wall points and objects. */
   deleteSelection(): void
 }
@@ -58,6 +58,7 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
         gmCamera: file.camera,
         cameraVersion: s.cameraVersion + 1,
         objectImages: file.objectImages,
+        soundClips: file.soundClips,
         // A fresh start for the GM's tools.
         ...TOOLS_OFF,
       }
@@ -80,6 +81,7 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
       cameraVersion: s.cameraVersion + 1,
       historyEpoch: s.historyEpoch + 1,
       objectImages: {},
+      soundClips: {},
       ...TOOLS_OFF,
     }))
     // After the scene change, which marks unsaved (see sync).
@@ -91,9 +93,9 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
   markUnsaved: () => set({ unsaved: true }),
   notice: null,
   notify: (text) => set((s) => ({ notice: { text, id: (s.notice?.id ?? 0) + 1 } })),
-  selectMany: (lightIds, wallPoints, add) =>
+  selectMany: (lightIds, wallPoints, objectIds, add) =>
     set((s) => ({
-      selectedObjectIds: add ? s.selectedObjectIds : [],
+      selectedObjectIds: add ? [...new Set([...s.selectedObjectIds, ...objectIds])] : objectIds,
       selectedHiddenId: add ? s.selectedHiddenId : null,
       selectedLightIds: add ? [...new Set([...s.selectedLightIds, ...lightIds])] : lightIds,
       selectedWallPoints: add

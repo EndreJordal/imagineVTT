@@ -15,16 +15,18 @@ export interface MapObject {
   rotation: number
   /** How the players see it when something is obscured (see ObjectVisibility); absent: 'map'. */
   visibility?: ObjectVisibility
-  /** For 'seen' objects: a vision token has seen it. */
+  /** The group it's in (see Scene.groups). */
+  group?: string
+  /** 'seen' objects: a vision token has seen it. 'hidden' ones: the GM has shown it. */
   seen?: boolean
 }
 
 /**
- * How the players see an object while something is obscured: like the map (greyscale out of
- * sight, hidden where unexplored), only while a vision token sees it ('sight'), or not until
- * one has, then like the map ('seen').
+ * How the players see an object: like the map (greyscale out of sight, hidden where
+ * unexplored), only while a vision token sees it ('sight'), not until one has, then like the
+ * map ('seen'), or not until the GM shows it, obscured or not ('hidden').
  */
-export type ObjectVisibility = 'map' | 'sight' | 'seen'
+export type ObjectVisibility = 'map' | 'sight' | 'seen' | 'hidden'
 
 /**
  * An asset's image, kept with the scene (so placed objects don't need the library): a still

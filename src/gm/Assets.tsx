@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { ASSET_KINDS, defaultSquares, type AssetKind } from '../shared/arkenAsset'
+import { AUDIO_KINDS, VISUAL_KINDS, defaultSquares, isAudio, type AssetKind } from '../shared/arkenAsset'
 import type { AssetImage } from '../shared/mapObjects'
 import {
   ASSET_DRAG_TYPE,
   assetImage,
   chooseAssetFolder,
+  loadSound,
   reconnectAssetFolder,
   scanFolder,
   useAssets,
   type LibraryAsset,
 } from './assetLibrary'
 import { Section } from './ui'
+import { player } from './audio'
+import { useGm } from './store'
 import { Icon } from './icons'
 
 /** How many results to show at first (more on request): the grid stays quick. */
@@ -42,20 +45,31 @@ export function AssetsSection() {
   const previewing = useAssets((s) => s.previewing)
   const [query, setQuery] = useState('')
   const [genre, setGenre] = useState<string | null>(null)
-  const [kind, setKind] = useState<AssetKind | 'All'>('Objects')
+  const [audio, setAudio] = useState(false)
+  // The kind picked for each half (visual, audio).
+  const [kinds, setKinds] = useState<{
+    visual: AssetKind | 'All'
+    audio: AssetKind | 'All'
+  }>({ visual: 'Objects', audio: 'All' })
+  const kind = audio ? kinds.audio : kinds.visual
+  const setKind = (k: AssetKind | 'All') => setKinds((old) => ({ ...old, [audio ? 'audio' : 'visual']: k }))
+  const [playing, setPlaying] = useState<string | null>(null)
   const [chosenCategory, setCategory] = useState<string>('')
   // How many results are shown, for the current search (a new search starts from the top).
   const [more, setMore] = useState({ search: '', count: PAGE })
 
   const genres = useMemo(() => [...new Set(assets.map((a) => a.genre))].sort(), [assets])
   const inKind = useMemo(
-    () => assets.filter((a) => (!genre || a.genre === genre) && (kind === 'All' || a.kind === kind)),
-    [assets, genre, kind],
+    () =>
+      assets.filter(
+        (a) => isAudio(a.kind) === audio && (!genre || a.genre === genre) && (kind === 'All' || a.kind === kind),
+      ),
+    [assets, genre, kind, audio],
   )
   const categories = useMemo(() => [...new Set(inKind.map(topCategory))].sort(), [inKind])
   // A category from another genre or kind no longer applies.
   const category = categories.includes(chosenCategory) ? chosenCategory : ''
-  const search = [query, genre, kind, category].join('|')
+  const search = [query, genre, kind, category, audio].join('|')
   const shown = more.search === search ? more.count : PAGE
   const results = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
@@ -86,16 +100,30 @@ export function AssetsSection() {
       )}
       {status.kind === 'scanning' && (
         <p className="hint">
-          Indexing assets{status.total ? ` ${status.done} / ${status.total}` : '…'}
+          Indexing assets
+          {status.total ? ` ${status.done} / ${status.total}` : '…'}
         </p>
       )}
       {status.kind === 'error' && <p className="hint">Couldn’t read the folder: {status.message}</p>}
       {assets.length > 0 && (
         <>
+          <div className="segmented" role="radiogroup" aria-label="Assets">
+            {[false, true].map((a) => (
+              <button
+                key={String(a)}
+                role="radio"
+                aria-checked={audio === a}
+                className={audio === a ? 'active' : ''}
+                onClick={() => setAudio(a)}
+              >
+                {a ? 'Audio' : 'Visual'}
+              </button>
+            ))}
+          </div>
           <input
             type="search"
             className="asset-search"
-            placeholder={`Search ${assets.length} assets…`}
+            placeholder={audio ? 'Search sounds…' : 'Search images…'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -112,7 +140,7 @@ export function AssetsSection() {
           <div className="row">
             <select value={kind} onChange={(e) => setKind(e.target.value as AssetKind | 'All')} aria-label="Kind">
               <option value="All">All kinds</option>
-              {ASSET_KINDS.map((k) => (
+              {(audio ? AUDIO_KINDS : VISUAL_KINDS).map((k) => (
                 <option key={k} value={k}>
                   {k}
                 </option>
@@ -127,32 +155,72 @@ export function AssetsSection() {
               ))}
             </select>
           </div>
-          <div className="asset-grid">
-            {results.slice(0, shown).map((a) => (
-              <button
-                key={a.path}
-                className={`asset-tile${previewing === a.path ? ' active' : ''}`}
-                title={`${a.name} · ${a.category}`}
-                draggable
-                onDragStart={startDrag(a)}
-                onClick={() => useAssets.getState().setPreviewing(previewing === a.path ? null : a.path)}
-              >
-                {thumbUrl(a) ? <img src={thumbUrl(a)} alt="" draggable={false} /> : <span className="asset-none">?</span>}
-                {a.animated && (
-                  <span className="asset-badge" title="Animated">
-                    <Icon name="animated" size={11} />
-                  </span>
-                )}
-                <span className="asset-name">{a.name}</span>
-              </button>
-            ))}
-          </div>
+          {audio ? (
+            <div className="sound-list">
+              {results.slice(0, shown).map((a) => (
+                <div key={a.path} className="sound-row" draggable onDragStart={startDrag(a)} title="Drag onto the map">
+                  <button
+                    className={`icon-button${playing === a.path ? ' active' : ''}`}
+                    title={playing === a.path ? 'Stop' : 'Listen (on this computer)'}
+                    onClick={() => {
+                      if (playing === a.path) {
+                        player.stopPreview()
+                        setPlaying(null)
+                        return
+                      }
+                      setPlaying(a.path)
+                      void loadSound(a.path).then((ok) => {
+                        if (ok)
+                          void player.previewSound(useGm.getState().soundClips, a.path, () =>
+                            setPlaying((p) => (p === a.path ? null : p)),
+                          )
+                        else setPlaying(null)
+                      })
+                    }}
+                  >
+                    <Icon name={playing === a.path ? 'stop' : 'play'} />
+                  </button>
+                  <span className="sound-row-name">{a.name}</span>
+                  <span className="hint">{a.kind === 'Ambience' ? 'ambience' : duration(a.duration)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="asset-grid">
+              {results.slice(0, shown).map((a) => (
+                <button
+                  key={a.path}
+                  className={`asset-tile${previewing === a.path ? ' active' : ''}`}
+                  title={`${a.name} · ${a.category}`}
+                  draggable
+                  onDragStart={startDrag(a)}
+                  onClick={() => useAssets.getState().setPreviewing(previewing === a.path ? null : a.path)}
+                >
+                  {thumbUrl(a) ? (
+                    <img src={thumbUrl(a)} alt="" draggable={false} />
+                  ) : (
+                    <span className="asset-none">?</span>
+                  )}
+                  {a.animated && (
+                    <span className="asset-badge" title="Animated">
+                      <Icon name="animated" size={11} />
+                    </span>
+                  )}
+                  <span className="asset-name">{a.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {results.length === 0 && <p className="hint">Nothing matches.</p>}
           {results.length > shown && (
-            <button onClick={() => setMore({ search, count: shown + PAGE })}>Show more ({results.length - shown} left)</button>
+            <button onClick={() => setMore({ search, count: shown + PAGE })}>
+              Show more ({results.length - shown} left)
+            </button>
           )}
           <p className="hint">
-            Click an asset to preview it; drag it onto the map to place it.{' '}
+            {audio
+              ? 'Press ▶ to listen; drag a sound onto the map to place it.'
+              : 'Click an asset to preview it; drag it onto the map to place it.'}{' '}
             {status.kind === 'ready' && (
               <button className="link-button" onClick={() => void scanFolder()} title="Pick up added or changed assets">
                 Rescan folder
@@ -165,6 +233,13 @@ export function AssetsSection() {
   )
 }
 
+function duration(seconds: number | undefined) {
+  if (!seconds) return ''
+  return seconds < 60
+    ? `${Math.round(seconds * 10) / 10} s`
+    : `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
+}
+
 function topCategory(a: LibraryAsset) {
   return a.category.split(' › ')[0]
 }
@@ -174,7 +249,11 @@ export function AssetPreview() {
   const path = useAssets((s) => s.previewing)
   const asset = useAssets((s) => s.assets.find((a) => a.path === s.previewing))
   const ready = useAssets((s) => s.status.kind === 'ready')
-  const [image, setImage] = useState<{ path: string; image: AssetImage; url: string } | null>(null)
+  const [image, setImage] = useState<{
+    path: string
+    image: AssetImage
+    url: string
+  } | null>(null)
   const [failed, setError] = useState<{ path: string; message: string } | null>(null)
   const error = failed?.path === path ? failed.message : null
 
@@ -186,7 +265,11 @@ export function AssetPreview() {
         if (cancelled) return
         setImage((old) => {
           if (old) URL.revokeObjectURL(old.url)
-          return { path: asset.path, image: img, url: URL.createObjectURL(img.image) }
+          return {
+            path: asset.path,
+            image: img,
+            url: URL.createObjectURL(img.image),
+          }
         })
       },
       (err: Error) => !cancelled && setError({ path: asset.path, message: err.message }),
@@ -258,7 +341,10 @@ function SpriteSheet({ image, url }: { image: AssetImage; url: string }) {
     <div
       ref={ref}
       className="sprite"
-      style={{ backgroundImage: `url(${url})`, aspectRatio: `${f.frameWidth} / ${f.frameHeight}` }}
+      style={{
+        backgroundImage: `url(${url})`,
+        aspectRatio: `${f.frameWidth} / ${f.frameHeight}`,
+      }}
     />
   )
 }

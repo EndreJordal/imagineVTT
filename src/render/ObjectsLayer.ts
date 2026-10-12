@@ -20,8 +20,8 @@ export class ObjectsLayer extends Container {
   private meshes = new Map<string, { mesh: ObjectMesh; asset: string; placed: MapObject | null }>()
   private loaded = new Map<string, LoadedImage>()
   private images: AssetImages = {}
-  /** Drawn for the players while something is obscured (see sync). */
-  private sight = false
+  /** Who it's drawn for, and whether something is obscured (see sync). */
+  private view = { players: false, obscured: false }
   private shared: Partial<Record<SharedTextureSlot, TextureSource | null>> = {}
   private objects: MapObject[] = []
   private mapGroup: UniformGroup
@@ -44,7 +44,7 @@ export class ObjectsLayer extends Container {
     for (const [key, l] of this.loaded) {
       if (images[key] !== l.image) this.unload(key)
     }
-    this.sync(this.objects, this.sight)
+    this.sync(this.objects, this.view)
   }
 
   /** The light, sight and memory maps the shading reads. */
@@ -55,12 +55,14 @@ export class ObjectsLayer extends Container {
   }
 
   /**
-   * `sight`: drawn for the players while something is obscured, so objects shown only in
-   * sight, or once seen, are hidden as they say.
+   * `view.players`: drawn for the players, so objects the GM hasn't shown are left out (the
+   * GM sees them faintly); with `view.obscured` too, objects shown only in sight, or once
+   * seen, are hidden as they say.
    */
-  sync(objects: MapObject[], sight: boolean) {
+  sync(objects: MapObject[], view: { players: boolean; obscured: boolean }) {
     this.objects = objects
-    this.sight = sight
+    this.view = view
+    const sight = view.players && view.obscured
     const ids = new Set(objects.map((o) => o.id))
     for (const [id, m] of this.meshes) {
       if (ids.has(id)) continue
@@ -90,7 +92,9 @@ export class ObjectsLayer extends Container {
         m.placed = o
       }
       const unseen = sight && o.visibility === 'seen' && !o.seen
-      m.mesh.mesh.visible = !!this.loaded.get(o.asset)?.source && !unseen
+      const notShown = o.visibility === 'hidden' && !o.seen
+      m.mesh.mesh.visible = !!this.loaded.get(o.asset)?.source && !unseen && !(notShown && view.players)
+      m.mesh.mesh.alpha = notShown ? 0.4 : 1
       m.mesh.setSightOnly(sight && o.visibility === 'sight')
       // Draw order follows the scene's order.
       if (this.getChildIndex(m.mesh.mesh) !== index) this.setChildIndex(m.mesh.mesh, Math.min(index, this.children.length - 1))
@@ -138,7 +142,7 @@ export class ObjectsLayer extends Container {
             if (m.asset !== key) continue
             m.mesh.setTexture('uObject', entry.source)
           }
-          this.sync(this.objects, this.sight) // shown now, where it should be
+          this.sync(this.objects, this.view) // shown now, where it should be
           this.onChange()
         },
         () => {},

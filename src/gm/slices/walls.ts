@@ -4,9 +4,17 @@ import { mapNatural } from '../../shared/geometry'
 import type { Point } from '../../shared/types'
 import type { Wall } from '../../shared/visibility'
 import { deleteWallPoints, makeDoor, moveWallPoints, sameRef, sameSpot, selectedSegment, type WallPointRef, withLinked } from '../../shared/walls'
+import type { DoorReveal } from '../../shared/doors'
 import type { GmStore } from '../store'
 
 export interface WallsSlice {
+  /** The door whose settings are open (right-click on its button; GM-only). */
+  selectedDoorId: string | null
+  selectDoor(id: string | null): void
+  /** A door's own reveal effect, or (undefined) the one for all doors. */
+  setDoorOwnReveal(id: string, reveal: DoorReveal | undefined): void
+  /** The reveal effect for all doors without their own. */
+  setDoorReveal(reveal: DoorReveal): void
   /** Selected wall points (GM-only). */
   selectedWallPoints: WallPointRef[]
   /** Points of the wall being drawn, not yet confirmed. */
@@ -40,6 +48,17 @@ export interface WallsSlice {
 }
 
 export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
+  selectedDoorId: null,
+  selectDoor: (selectedDoorId) =>
+    set({ selectedDoorId, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null }),
+  setDoorOwnReveal: (id, reveal) =>
+    set((s) => ({
+      scene: {
+        ...s.scene,
+        walls: s.scene.walls.map((w) => (w.id === id && w.door ? { ...w, door: { open: w.door.open, ...(reveal && { reveal }) } } : w)),
+      },
+    })),
+  setDoorReveal: (doorReveal) => set((s) => ({ scene: { ...s.scene, doorReveal } })),
   selectedWallPoints: [],
   wallDraft: [],
   doorDraft: null,

@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import { ASSET_KINDS, defaultSquares, parseAssetMeta, type AssetKind } from '../shared/arkenAsset'
+import {
+  ASSET_KINDS,
+  defaultSquares,
+  isAudio,
+  parseAmbience,
+  parseAssetMeta,
+  parseSoundTakes,
+  type AssetKind,
+} from '../shared/arkenAsset'
+import type { SoundClip, SoundClips } from '../shared/sound'
 import type { AssetImage } from '../shared/mapObjects'
 import { load, save } from '../shared/persist'
 import type { Point } from '../shared/types'
@@ -30,6 +39,8 @@ export interface LibraryAsset {
   scale: { x: number; y: number }
   fps: number
   animated: boolean
+  /** Sounds: seconds. */
+  duration?: number
   /** The .rwmeta file's date and size, to tell when it changed. */
   modified: number
   size: number
@@ -147,6 +158,7 @@ export async function scanFolder() {
             fps: meta.fps,
             // Some animations don't say so in their entry; their folder does.
             animated: meta.frames > 0 || /animated/i.test(f.path),
+            ...(isAudio(f.kind) && { duration: meta.duration }),
             modified: file.lastModified,
             size: file.size,
           })
@@ -175,12 +187,96 @@ async function walk(dir: DirHandle, dirs: string[], onMeta: (dirs: string[], fil
 }
 
 /** An asset's file in the folder. */
-async function assetFile(path: string): Promise<File> {
+async function assetFile(path: string, ext = 'rwfile'): Promise<File> {
   if (!folder) throw new Error('No asset folder')
   const parts = path.split('/')
   let dir = folder
   for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part)
-  return (await dir.getFileHandle(`${parts.at(-1)}.rwfile`)).getFile()
+  return (await dir.getFileHandle(`${parts.at(-1)}.${ext}`)).getFile()
+}
+
+/** Arkenforge paths of moved sounds -> their paths in the folder (_index/moved.json), if any. */
+let moved: Promise<Record<string, string>> | null = null
+function movedPaths(): Promise<Record<string, string>> {
+  moved ??= (async () => {
+    try {
+      const index = await folder!.getDirectoryHandle('_index')
+      const file = await (await index.getFileHandle('moved.json')).getFile()
+      return JSON.parse(await file.text()) as Record<string, string>
+    } catch {
+      return {}
+    }
+  })()
+  return moved
+}
+
+/** The library sound an ambience's layer means (by Arkenforge path, else by name). */
+async function layerSound(arkenPath: string): Promise<LibraryAsset | undefined> {
+  const assets = useAssets.getState().assets
+  const to = (await movedPaths())[arkenPath]
+  const path = to?.replace(/\.rwmeta$/i, '')
+  const name = arkenPath.split('/').at(-1)!.replace(/\.rwmeta$/i, '')
+  return (
+    (path && assets.find((a) => a.path === path)) ||
+    assets.find((a) => a.kind === 'Sounds' && a.name.toLowerCase() === name.toLowerCase())
+  )
+}
+
+const clips = new Map<string, Promise<SoundClips>>()
+
+/** A sound's audio (an ambience's with its layers'), read from the folder; by clip key. */
+export function soundClips(asset: LibraryAsset): Promise<SoundClips> {
+  let p = clips.get(asset.path)
+  if (!p) {
+    p = (async (): Promise<SoundClips> => {
+      if (asset.kind === 'Ambience') {
+        const layers = parseAmbience(new Uint8Array(await (await assetFile(asset.path, 'rwamb')).arrayBuffer()))
+        const out: SoundClips = {}
+        const ambience: SoundClip = { name: asset.name, duration: 0, takes: [], layers: [] }
+        for (const l of layers) {
+          const sound = await layerSound(l.path)
+          if (!sound) continue // Arkenforge's own presets miss a few sounds
+          Object.assign(out, await soundClips(sound))
+          ambience.layers!.push({ clip: sound.path, volume: l.volume, every: l.every })
+        }
+        out[asset.path] = ambience
+        return out
+      }
+      const takes = parseSoundTakes(new Uint8Array(await (await assetFile(asset.path)).arrayBuffer()))
+      if (!takes.length) throw new Error('no audio in it')
+      const blobs = takes.map((t) => new Blob([t as Uint8Array<ArrayBuffer>], { type: 'audio/ogg' }))
+      return { [asset.path]: { name: asset.name, duration: asset.duration ?? 0, takes: blobs } }
+    })()
+    clips.set(asset.path, p)
+    p.catch(() => clips.delete(asset.path))
+  }
+  return p
+}
+
+/** Load a library sound into the scene (for doors, the mixer); false if it can't be read. */
+export async function loadSound(path: string): Promise<boolean> {
+  const gm = useGm.getState()
+  if (gm.soundClips[path]) return true
+  const asset = useAssets.getState().assets.find((a) => a.path === path)
+  if (!asset) return false
+  try {
+    gm.addSoundClips(await soundClips(asset))
+    return true
+  } catch (err) {
+    gm.notify(`Couldn’t load “${asset.name}”: ${(err as Error).message}`)
+    return false
+  }
+}
+
+/** Drop a library sound on the map. */
+export async function placeSound(path: string, at: Point) {
+  const asset = useAssets.getState().assets.find((a) => a.path === path)
+  if (!asset) return
+  if (useAssets.getState().status.kind !== 'ready' && !useGm.getState().soundClips[path]) {
+    useGm.getState().notify('Reconnect the asset folder (Assets, in the sidebar) to place new sounds.')
+    return
+  }
+  if (await loadSound(path)) useGm.getState().addSound(path, asset.name, at)
 }
 
 /**
@@ -224,6 +320,7 @@ async function makeImage(asset: LibraryAsset): Promise<AssetImage> {
 export async function placeAsset(path: string, at: Point) {
   const asset = useAssets.getState().assets.find((a) => a.path === path)
   if (!asset) return
+  if (isAudio(asset.kind)) return placeSound(path, at)
   const gm = useGm.getState()
   if (useAssets.getState().status.kind !== 'ready' && !gm.objectImages[path]) {
     gm.notify('Reconnect the asset folder (Assets, in the sidebar) to place new assets.')

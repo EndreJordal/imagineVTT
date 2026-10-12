@@ -1034,3 +1034,276 @@ button.curtain-down:hover:not(:disabled) {
   min-width: 18.5em;
   justify-content: space-between;
 }
+
+/* Slide switch between two named states (ui.tsx Switch). */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.switch-row .switch-current {
+  color: var(--text);
+}
+
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 10px;
+  background: #3a3a44;
+  flex-shrink: 0;
+}
+
+.switch.on {
+  background: #d94dff;
+  border-color: #d94dff;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch.on .switch-knob {
+  transform: translateX(16px);
+}
+
+/* Scene list (right) */
+.scene-panel {
+  width: 230px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  min-height: 0;
+}
+
+.scene-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scene-panel.collapsed {
+  width: 32px;
+  align-items: center;
+  padding-top: 6px;
+  gap: 8px;
+}
+
+.scene-panel-strip {
+  writing-mode: vertical-rl;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.scene-list {
+  overflow-y: auto;
+  padding: 6px 6px 12px;
+}
+
+.scene-section h3 {
+  margin: 10px 4px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.scene-count {
+  opacity: 0.7;
+}
+
+.scene-section ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scene-members {
+  padding-left: 16px !important;
+}
+
+.scene-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.scene-row:hover {
+  background: #2a2a32;
+}
+
+.scene-row.selected {
+  background: #33331f;
+  color: var(--accent);
+}
+
+.scene-row.dim {
+  opacity: 0.55;
+}
+
+.scene-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-note {
+  font-size: 11px;
+  color: var(--muted);
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+}
+
+.scene-caret {
+  padding: 0;
+  border: none;
+  background: none;
+  display: inline-flex;
+}
+
+.scene-action {
+  padding: 1px 6px;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.scene-row:hover .scene-action,
+.scene-row.selected .scene-action {
+  opacity: 1;
+}
+
+.group-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 260px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.group-bar > button:only-child {
+  flex: 1;
+}
+
+/* Sound: library rows, pickers, the mixer. */
+.sound-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 22em;
+  overflow-y: auto;
+}
+
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: grab;
+  text-align: left;
+}
+
+.sound-row:hover {
+  background: #26262d;
+}
+
+.sound-row-name,
+.sound-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sound-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sound-picker .sound-row {
+  cursor: pointer;
+}
+
+.mixer-panel {
+  width: auto;
+  max-width: 90vw;
+}
+
+.mixer {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  overflow-x: auto;
+}
+
+.mixer-channel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 5.5em;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.mixer-master {
+  margin-left: auto;
+  border-color: var(--accent);
+}
+
+.mixer-name {
+  width: 100%;
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixer-empty {
+  align-self: center;
+  max-width: 16em;
+}
+
+.fader {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  height: 8em;
+  width: 1.5em;
+}

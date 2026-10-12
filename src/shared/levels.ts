@@ -1,7 +1,8 @@
 import type { HiddenArea } from './hidden'
+import type { MapSound } from './sound'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
-import type { FogMode, GridSettings, MapInfo, Scene } from './types'
+import type { FogMode, GridSettings, MapInfo, Scene, SceneGroup } from './types'
 import type { Wall } from './visibility'
 
 /**
@@ -26,6 +27,8 @@ export interface Level {
   hiddenAreas?: HiddenArea[]
   /** Hidden areas switched off as a whole; absent means on. */
   hiddenEnabled?: boolean
+  groups?: SceneGroup[]
+  sounds?: MapSound[]
 }
 
 /** A floor's part of a scene (the scene shows one floor; see applyLevel). */
@@ -42,6 +45,8 @@ export function extractLevel(scene: Scene, base: Pick<Level, 'id' | 'name'>): Le
     objects: scene.objects,
     hiddenAreas: scene.hiddenAreas ?? [],
     hiddenEnabled: scene.hiddenEnabled ?? true,
+    groups: scene.groups ?? [],
+    sounds: scene.sounds ?? [],
   }
 }
 
@@ -58,6 +63,8 @@ export function applyLevel(scene: Scene, level: Level): Scene {
     objects: level.objects,
     hiddenAreas: level.hiddenAreas ?? [],
     hiddenEnabled: level.hiddenEnabled ?? true,
+    groups: level.groups ?? [],
+    sounds: level.sounds ?? [],
   }
 }
 
@@ -75,6 +82,8 @@ export function emptyLevel(id: string, name: string, like: Scene): Level {
     objects: [],
     hiddenAreas: [],
     hiddenEnabled: true,
+    groups: [],
+    sounds: [],
   }
 }
 

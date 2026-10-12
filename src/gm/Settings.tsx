@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CALIBRATION_MM } from '../shared/geometry'
 import { positive, round } from './numbers'
 import { Field } from './ui'
+import { SoundOutput } from './Sound'
 import { useGm } from './store'
 import { useDropdown } from './useDropdown'
 import { Icon } from './icons'
@@ -25,6 +26,8 @@ export function SettingsMenu() {
       </button>
       {open && (
         <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Settings">
+          <h2>Sound output</h2>
+          <SoundOutput />
           <h2>Table calibration</h2>
           <p className="hint">
             Show the square on the table, measure its marked edge with a ruler, and enter what you measured.

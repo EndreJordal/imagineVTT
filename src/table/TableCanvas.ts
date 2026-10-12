@@ -1,10 +1,13 @@
 import { Container, Graphics, Text } from 'pixi.js'
 import { CurtainLayer } from '../render/CurtainLayer'
+import { DoorRevealLayer } from '../render/DoorRevealLayer'
 import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
 import type { CurtainState } from '../shared/curtain'
+import { doorMiddle, doorReveal, openedDoors } from '../shared/doors'
 import { CALIBRATION_MM, tableTransform } from '../shared/geometry'
 import type { FogMemory } from '../shared/fog'
+import { activeAreas } from '../shared/hidden'
 import type { AssetImages } from '../shared/mapObjects'
 import { reuse } from '../shared/reuse'
 import type { TableState } from '../shared/types'
@@ -14,6 +17,8 @@ export class TableCanvas extends PixiHost {
   private sceneLayer = new SceneLayer()
   private calibration = new Container()
   private curtain = new CurtainLayer()
+  /** A door opening: what it hid comes into view with its effect. */
+  private doorReveal = new DoorRevealLayer()
   private curtainState: CurtainState | null = null
   private curtainImages: Record<string, Blob> = {}
   private state: TableState | null = null
@@ -25,7 +30,7 @@ export class TableCanvas extends PixiHost {
   }
 
   protected setup() {
-    this.app.stage.addChild(this.sceneLayer, this.curtain, this.calibration)
+    this.app.stage.addChild(this.sceneLayer, this.doorReveal, this.curtain, this.calibration)
     this.sceneLayer.onChange = () => this.requestRender()
     this.curtain.onChange = () => this.requestRender()
     this.updateCurtain()
@@ -40,8 +45,31 @@ export class TableCanvas extends PixiHost {
     // (lights, sight, hidden areas) hold, and a message that changes nothing draws nothing.
     const next = reuse(this.state, state)
     if (next === this.state) return
+    this.revealOpenedDoor(next)
     this.state = next
     this.render()
+  }
+
+  /**
+   * A door opened where something is obscured: keep the view from before it did, to reveal
+   * the new one with the door's effect, from the door out as far as the party's sight reaches.
+   */
+  private revealOpenedDoor(next: TableState) {
+    const scene = next.scene
+    if (!this.ready || !this.state || this.state.scene.walls === scene.walls) return
+    if (scene.fog.mode === 'off' && !activeAreas(scene).length) return
+    const door = openedDoors(this.state.scene.walls, scene.walls).find((w) => doorReveal(scene, w).effect !== 'none')
+    if (!door) return
+    const middle = doorMiddle(door.points)
+    let reach = 0
+    for (const l of scene.lights) {
+      if (l.vision) reach = Math.max(reach, Math.hypot(l.x - middle.x, l.y - middle.y) + l.visionRange * scene.grid.size)
+    }
+    if (!reach) return
+    const at = this.sceneLayer.toGlobal(middle)
+    const scale = this.sceneLayer.worldTransform.a ** 2 + this.sceneLayer.worldTransform.b ** 2
+    this.doorReveal.start(this.app.renderer, this.app.stage, at, reach * Math.sqrt(scale), doorReveal(scene, door))
+    this.requestRender()
   }
 
   setFogMemory(memory: FogMemory | null) {
@@ -78,12 +106,13 @@ export class TableCanvas extends PixiHost {
   }
 
   protected override isAnimating() {
-    return this.sceneLayer.isAnimating() || this.curtain.animated
+    return this.sceneLayer.isAnimating() || this.curtain.animated || this.doorReveal.animated
   }
 
   protected override beforeRender(seconds: number) {
     this.sceneLayer.animate(this.app.renderer, seconds)
     this.curtain.animate(seconds)
+    this.doorReveal.animate(seconds)
   }
 
   private render() {
@@ -92,6 +121,7 @@ export class TableCanvas extends PixiHost {
     const { scene, display, calibrating } = this.state
     const screen = this.app.screen
     this.curtain.resize(screen.width, screen.height)
+    this.doorReveal.resize(screen.width, screen.height)
 
     this.sceneLayer.visible = !calibrating
     this.sceneLayer.update(scene, 'players')

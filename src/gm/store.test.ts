@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createLight } from '../shared/lights'
 import { extractLevel } from '../shared/levels'
 import { allLevels, levelImage } from './store'
-import { activeAreas } from '../shared/hidden'
+import { activeAreas, decodeHidden } from '../shared/hidden'
 import { migrateScene } from '../shared/migrate'
 import { gmDarkness, tableState, useGm } from './store'
 import { SELECT } from './tools'
@@ -227,8 +227,8 @@ describe('walls', () => {
     const wallId = gm().scene.walls[0].id
     const [brazier, candle] = gm().scene.lights.map((l) => l.id)
 
-    gm().selectMany([brazier], [{ wallId, index: 2 }], false)
-    gm().selectMany([candle], [{ wallId, index: 2 }], true) // add; no duplicate point
+    gm().selectMany([brazier], [{ wallId, index: 2 }], [], false)
+    gm().selectMany([candle], [{ wallId, index: 2 }], [], true) // add; no duplicate point
     expect(gm().selectedLightIds).toEqual([brazier, candle])
     expect(gm().selectedWallPoints).toEqual([{ wallId, index: 2 }])
 
@@ -510,6 +510,7 @@ describe('opening a scene file', () => {
         mapImages: { f: image },
         fogMemories: { f: { cols: 1, rows: 1, data: new Uint8Array([255]) } },
         objectImages: {},
+        soundClips: {},
       },
       'Goblin cave',
     )
@@ -648,14 +649,16 @@ describe('hidden areas', () => {
     before = useGm.getState().scene.lights
     updateLight(id, { x: 500, y: 500 })
     revealEntered(before)
-    expect(areas()).toHaveLength(0)
+    const [walkedInto] = areas()
+    expect(decodeHidden(walkedInto.cells).some((v) => v)).toBe(false) // all uncovered, kept for Reset
 
-    // Painted over where the token already stands: stays hidden while it moves about inside.
-    hideFill({ x: 500, y: 500 })
+    // Reset: hidden again as drawn. The token is already inside: moving about doesn't reveal it.
+    useGm.getState().resetHidden(walkedInto.id)
+    expect(areas()[0].cells).toBe(walkedInto.shape)
     before = useGm.getState().scene.lights
     updateLight(id, { x: 520, y: 520 })
     revealEntered(before)
-    expect(areas()).toHaveLength(1)
+    expect(decodeHidden(areas()[0].cells).some((v) => v)).toBe(true)
   })
 
   it("doesn't remember what's under a hidden area as explored, but sees past it", () => {
@@ -779,9 +782,151 @@ describe('visibility', () => {
     expect(useGm.getState().scene.objects.map((o) => !!o.seen)).toEqual([false, true])
   })
 
+  it('copies an object with its settings; a copy shown once seen is unseen', () => {
+    const { addObject, copyObject } = useGm.getState()
+    addObject({ asset: 'a', name: 'Rock', x: 100, y: 100, width: 60, height: 40, rotation: 1, visibility: 'seen' })
+    const rock = useGm.getState().scene.objects[0]
+    useGm.getState().updateObject(rock.id, { seen: true })
+    copyObject(rock.id, { x: 300, y: 200 })
+    const [, copy] = useGm.getState().scene.objects
+    expect(copy).toMatchObject({ x: 300, y: 200, width: 60, height: 40, rotation: 1, visibility: 'seen', seen: false })
+    expect(copy.id).not.toBe(rock.id)
+    expect(useGm.getState().selectedObjectIds).toEqual([copy.id])
+  })
+
+  it('selects objects as a group: box, shift-toggle, moving and changing them together', () => {
+    const { addObject, selectMany, toggleObjectSelected, moveObjects, updateObjects } = useGm.getState()
+    for (const x of [100, 200, 300]) addObject({ asset: 'a', name: 'Crate', x, y: 100, width: 50, height: 50, rotation: 0 })
+    const [a, b, c] = useGm.getState().scene.objects.map((o) => o.id)
+    selectMany([], [], [a, b], false)
+    toggleObjectSelected(c)
+    toggleObjectSelected(a)
+    expect(useGm.getState().selectedObjectIds).toEqual([b, c])
+    moveObjects([b, c], 10, 5)
+    updateObjects([b, c], { visibility: 'hidden' })
+    const objs = useGm.getState().scene.objects
+    expect(objs.map((o) => [o.x, o.y])).toEqual([[100, 100], [210, 105], [310, 105]])
+    expect(objs.map((o) => o.visibility)).toEqual([undefined, 'hidden', 'hidden'])
+  })
+
   it('reads scenes saved with fog of war on or off', () => {
     const legacy = (enabled: boolean) => ({ ...useGm.getState().scene, fog: { enabled, safety: true } }) as never
     expect(migrateScene(legacy(true)).fog.mode).toBe('full')
     expect(migrateScene(legacy(false)).fog.mode).toBe('off')
+  })
+})
+
+describe('seeing into hidden areas', () => {
+  // A room 400..600 with a door in its left wall (x = 400, y 450..550).
+  const walls = [
+    { id: 'top', points: [{ x: 400, y: 450 }, { x: 400, y: 400 }, { x: 600, y: 400 }, { x: 600, y: 600 }, { x: 400, y: 600 }, { x: 400, y: 550 }] },
+    { id: 'door', points: [{ x: 400, y: 550 }, { x: 400, y: 450 }], door: { open: false } },
+  ]
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      levelId: s.tableLevelId,
+      scene: {
+        ...s.scene,
+        map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
+        grid: { ...s.scene.grid, size: 100 },
+        walls,
+        lights: [],
+        hiddenAreas: [],
+        hiddenEnabled: true,
+        objects: [],
+      },
+    }))
+  })
+
+  const hiddenCells = () =>
+    (useGm.getState().scene.hiddenAreas ?? []).reduce((n, a) => n + decodeHidden(a.cells).reduce((m, v) => m + v, 0), 0)
+
+  it('uncovers what vision sees through an open door, not the rest', () => {
+    const { hideFill, addLight, updateLight, revealSeen, toggleDoor } = useGm.getState()
+    expect(hideFill({ x: 500, y: 500 })).toBe('filled')
+    const all = hiddenCells()
+    // Looking at the room from the left, a little off the door's line.
+    addLight('vision', { x: 250, y: 420 })
+    updateLight(useGm.getState().scene.lights[0].id, { vision: true, visionRange: 6 })
+    revealSeen()
+    expect(hiddenCells()).toBeGreaterThan(all * 0.95) // the door's shut: the wall's face at most
+    toggleDoor('door')
+    revealSeen()
+    const left = hiddenCells()
+    expect(left).toBeLessThan(all * 0.9) // the view through the door is uncovered...
+    expect(left).toBeGreaterThan(all * 0.2) // ...not the corner it can't see
+    // Reset: all of it hidden again.
+    useGm.getState().resetHidden(useGm.getState().scene.hiddenAreas![0].id)
+    expect(hiddenCells()).toBe(all)
+  })
+})
+
+describe('groups and names', () => {
+  beforeEach(() =>
+    useGm.setState((s) => ({
+      levelId: s.tableLevelId,
+      scene: { ...s.scene, lights: [], objects: [], hiddenAreas: [], groups: [] },
+      selectedLightIds: [],
+      selectedObjectIds: [],
+      selectedHiddenId: null,
+    })),
+  )
+
+  it('names lights by kind, numbered, and objects after their asset, copies numbered', () => {
+    const { addLight, addObject, copyObject } = useGm.getState()
+    addLight('torch', { x: 0, y: 0 })
+    addLight('torch', { x: 0, y: 0 })
+    addLight('candle', { x: 0, y: 0 })
+    expect(useGm.getState().scene.lights.map((l) => l.name)).toEqual(['Torch 1', 'Torch 2', 'Candle 1'])
+    addObject({ asset: 'a', name: 'Crate', x: 0, y: 0, width: 50, height: 50, rotation: 0 })
+    copyObject(useGm.getState().scene.objects[0].id, { x: 100, y: 0 })
+    copyObject(useGm.getState().scene.objects[1].id, { x: 200, y: 0 })
+    expect(useGm.getState().scene.objects.map((o) => o.name)).toEqual(['Crate', 'Crate 2', 'Crate 3'])
+  })
+
+  it('groups the selection, selects it as one, and ungroups', () => {
+    const { addLight, addObject, groupSelection, selectGroup, selectLight, ungroup } = useGm.getState()
+    addLight('torch', { x: 0, y: 0 })
+    addObject({ asset: 'a', name: 'Crate', x: 0, y: 0, width: 50, height: 50, rotation: 0 })
+    const light = useGm.getState().scene.lights[0].id
+    const object = useGm.getState().scene.objects[0].id
+    useGm.setState({ selectedLightIds: [light], selectedObjectIds: [object] })
+    groupSelection()
+    const group = useGm.getState().scene.groups![0]
+    expect(group.name).toBe('Group 1')
+    selectLight(null)
+    selectGroup(group.id)
+    expect([useGm.getState().selectedLightIds, useGm.getState().selectedObjectIds]).toEqual([[light], [object]])
+    ungroup(group.id)
+    expect(useGm.getState().scene.lights[0].group).toBeUndefined()
+    expect(useGm.getState().scene.groups).toEqual([])
+  })
+})
+
+describe('sounds in the store', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({ scene: { ...s.scene, sounds: [], globalSounds: [] }, soundClips: {} }))
+  })
+
+  it('places sounds named after the sound, numbering copies, and selects the new one', () => {
+    const { addSound } = useGm.getState()
+    addSound('crow', 'Crow', { x: 1, y: 2 })
+    addSound('crow', 'Crow', { x: 3, y: 4 })
+    const sounds = useGm.getState().scene.sounds!
+    expect(sounds.map((x) => x.name)).toEqual(['Crow', 'Crow 2'])
+    expect(useGm.getState().selectedSoundId).toBe(sounds[1].id)
+    expect(sounds[0].loop).toBe(false)
+  })
+
+  it('moves a sound into the mixer, playing if it was a running loop', () => {
+    const { addSound, updateSound, makeGlobal } = useGm.getState()
+    addSound('rain', 'Rain', { x: 0, y: 0 })
+    const id = useGm.getState().scene.sounds![0].id
+    updateSound(id, { loop: true, volume: 0.5 })
+    makeGlobal(id)
+    const s = useGm.getState()
+    expect(s.scene.sounds).toEqual([])
+    expect(s.scene.globalSounds).toEqual([{ id, name: 'Rain', clip: 'rain', volume: 0.5, loop: true, playing: true }])
+    expect(s.selectedSoundId).toBeNull()
   })
 })

@@ -248,9 +248,9 @@ export class SceneLayer extends Container {
     }
     this.map.mesh.position.set(bounds.x, bounds.y)
     this.map.mesh.scale.set(bounds.width, bounds.height)
-    this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness)
+    this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness, scene.walls)
     this.fog.sync(scene.lights, bounds, scene.grid.size, scene.walls)
-    this.objects.sync(scene.objects ?? [], this.fogMode === 'players')
+    this.objects.sync(scene.objects ?? [], { players: viewer === 'players', obscured: this.fogMode === 'players' })
 
     const u = this.map.uniforms
     u.uBounds.set([bounds.x, bounds.y, bounds.width, bounds.height])

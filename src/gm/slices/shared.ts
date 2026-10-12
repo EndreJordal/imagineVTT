@@ -5,7 +5,8 @@ import { extractLevel, type Level } from '../../shared/levels'
 import { carryObject } from '../../shared/mapObjects'
 import { DEFAULT_GRID_STYLE } from '../../shared/migrate'
 import type { Display, MapInfo, Scene, Size } from '../../shared/types'
-import type { Wall } from '../../shared/visibility'
+import { createVisibilityTest, visibilityPolygon, wallSegments, type Wall } from '../../shared/visibility'
+import type { Seer } from '../../shared/hidden'
 import type { GmStore } from '../store'
 import { SELECT } from '../tools'
 
@@ -47,6 +48,8 @@ export const TOOLS_OFF = {
   selectedWallPoints: [],
   selectedObjectIds: [],
   selectedHiddenId: null,
+  selectedDoorId: null,
+  selectedSoundId: null,
   tool: SELECT,
   wallDraft: [],
   doorDraft: null,
@@ -91,4 +94,16 @@ export function placeMap(scene: Scene, map: MapInfo | null): Pick<Scene, 'map' |
     // Walls are drawn on the map, so they always go with it.
     walls: scene.walls.map((w) => ({ ...w, points: w.points.map((p) => carryPoint(p, from, map)) })),
   }
+}
+
+/** The vision tokens on the scene, with their line of sight (walls and closed doors block it). */
+export function seersOf(scene: Scene): Seer[] {
+  const segments = wallSegments(scene.walls)
+  return scene.lights
+    .filter((l) => l.vision)
+    .map((l) => {
+      const range = l.visionRange * scene.grid.size
+      const sees = segments.length ? createVisibilityTest(l, visibilityPolygon(l, range, segments)) : () => true
+      return { x: l.x, y: l.y, range, sees }
+    })
 }

@@ -2,7 +2,11 @@ import { selectedSegment } from '../shared/walls'
 import { AutoWalls } from './AutoWalls'
 import { useGm } from './store'
 import { SELECT } from './tools'
+import { DEFAULT_DOOR_REVEAL, DOOR_EFFECTS, type DoorReveal } from '../shared/doors'
+import { Slider } from './ui'
 import { Icon } from './icons'
+import { DEFAULT_DOOR_SOUNDS } from '../shared/sound'
+import { DoorSoundsPicker } from './Sound'
 
 /** Selection box for wall points: how many, and delete them. */
 export function WallPointsPanel() {
@@ -60,6 +64,7 @@ export function DoorToolbox() {
           <kbd>Esc</kbd> {started ? 'cancel this door' : 'stop building doors'}
         </li>
         <li>Click a door’s middle button to open or close it.</li>
+        <li>Right-click it for the door’s settings (how it reveals what it hid).</li>
       </ul>
       {started && <button onClick={cancelDoorDraft}>Cancel</button>}
     </aside>
@@ -113,6 +118,94 @@ export function WallToolbox() {
         >
           Remove all walls &amp; doors
         </button>
+      )}
+    </aside>
+  )
+}
+
+/** Picking a reveal effect and its time. */
+export function RevealPicker(props: { value: DoorReveal; onChange(reveal: DoorReveal): void }) {
+  const { value, onChange } = props
+  return (
+    <>
+      <div className="segmented" role="radiogroup" aria-label="Effect">
+        {DOOR_EFFECTS.map((e) => (
+          <button
+            key={e.value}
+            role="radio"
+            aria-checked={value.effect === e.value}
+            className={value.effect === e.value ? 'active' : ''}
+            onClick={() => onChange({ ...value, effect: e.value })}
+          >
+            {e.label}
+          </button>
+        ))}
+      </div>
+      <Slider
+        label="Time"
+        unit="s"
+        value={value.duration}
+        fallback={DEFAULT_DOOR_REVEAL.duration}
+        min={0.2}
+        max={5}
+        step={0.1}
+        disabled={value.effect === 'none'}
+        title="How long the reveal takes"
+        onChange={(duration) => onChange({ ...value, duration })}
+      />
+    </>
+  )
+}
+
+/**
+ * A door's settings (right-click on its button): how what it hid comes into view on the
+ * table when it's opened. Doors follow the settings for all doors (sidebar) unless overridden.
+ */
+export function DoorPanel() {
+  const door = useGm((s) => s.scene.walls.find((w) => w.id === s.selectedDoorId && w.door))
+  const all = useGm((s) => s.scene.doorReveal ?? DEFAULT_DOOR_REVEAL)
+  const allSounds = useGm((s) => s.scene.doorSounds ?? DEFAULT_DOOR_SOUNDS)
+  if (!door?.door) return null
+  const { selectDoor, setDoorOwnReveal, setDoorOwnSounds, toggleDoor } = useGm.getState()
+  const own = door.door.reveal
+  const ownSounds = door.door.sounds
+
+  return (
+    <aside className="light-panel" aria-label="Door">
+      <header>
+        <span className="light-panel-title">
+          <Icon name="doors" /> Door
+        </span>
+        <button className="icon-button" title="Close" onClick={() => selectDoor(null)}>
+          <Icon name="close" />
+        </button>
+      </header>
+      <button onClick={() => toggleDoor(door.id)}>{door.door.open ? 'Close the door' : 'Open the door'}</button>
+      <label className="check" title="How what it hid comes into view when it opens">
+        <input
+          type="checkbox"
+          checked={!!own}
+          onChange={(e) => setDoorOwnReveal(door.id, e.target.checked ? { ...all } : undefined)}
+        />
+        Override door settings
+      </label>
+      {own ? (
+        <RevealPicker value={own} onChange={(reveal) => setDoorOwnReveal(door.id, reveal)} />
+      ) : (
+        <p className="hint">Opens like all doors (Doors, in the sidebar).</p>
+      )}
+      <label className="check" title="The sounds it makes opening and closing">
+        <input
+          type="checkbox"
+          checked={!!ownSounds}
+          onChange={(e) => setDoorOwnSounds(door.id, e.target.checked ? { ...allSounds } : undefined)}
+        />
+        Own sounds
+      </label>
+      {ownSounds ? (
+        <DoorSoundsPicker value={ownSounds} onChange={(sounds) => setDoorOwnSounds(door.id, sounds)} />
+      ) : (
+        <p className="hint">Sounds like all doors.</p>
       )}
     </aside>
   )

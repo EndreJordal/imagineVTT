@@ -2,7 +2,7 @@
 import type { StateCreator } from 'zustand'
 import { turnFogMemory } from '../../shared/fog'
 import { alignMapToGrid, boundingRect, fitMapToRect, followGrid, mapNatural, mapPivot, tableViewCorners, turnPoint, turnRect } from '../../shared/geometry'
-import { turnHidden } from '../../shared/hidden'
+import { nothingHidden, turnHidden } from '../../shared/hidden'
 import type { GridSettings, MapInfo, Point, Size } from '../../shared/types'
 import type { GmStore } from '../store'
 import { placeMap } from './shared'
@@ -130,8 +130,10 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
           lights: s.scene.lights.map((l) => ({ ...l, ...turn(l), angle: l.angle + quarter })),
           objects: s.scene.objects.map((o) => ({ ...o, ...turn(o), rotation: o.rotation + quarter })),
           hiddenAreas: (s.scene.hiddenAreas ?? []).flatMap((a) => {
-            const cells = turnHidden(a.cells, direction)
-            return cells ? [{ ...a, cells }] : []
+            const shape = a.shape && turnHidden(a.shape, direction)
+            const cells = turnHidden(a.cells, direction) ?? (shape && nothingHidden(shape))
+            if (!cells) return []
+            return [{ ...a, cells, ...(shape && { shape }) }]
           }),
           view: onTable ? turn(s.scene.view) : s.scene.view,
         },

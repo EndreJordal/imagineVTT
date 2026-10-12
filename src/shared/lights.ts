@@ -19,6 +19,10 @@ export type LightKind =
 export interface Light {
   id: string
   kind: LightKind
+  /** "Torch 1"; absent in lights placed before names: the kind's label. */
+  name?: string
+  /** The group it's in (see Scene.groups). */
+  group?: string
   /** Scene position. */
   x: number
   y: number
@@ -266,3 +270,6 @@ export function seedOf(id: string): number {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
   return (h >>> 0) / 2 ** 32
 }
+
+/** A light's name (lights placed before names go by their kind). */
+export const lightName = (l: Light) => l.name ?? LIGHT_PRESETS[l.kind].label

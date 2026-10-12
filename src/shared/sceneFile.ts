@@ -2,7 +2,9 @@ import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import type { FogMemory } from './fog'
 import { extractLevel, type Level } from './levels'
 import type { AssetImage, AssetImages } from './mapObjects'
+import type { SoundClip, SoundClips } from './sound'
 import type { Orientation, Scene } from './types'
+import { usedClips } from './soundUse'
 
 /**
  * Scene files (.ivtt): a zip with
@@ -11,6 +13,7 @@ import type { Orientation, Scene } from './types'
  * - maps/<n>.<ext>: each floor's original map image, byte for byte
  * - fog/<n>.bin: each floor's fog memory (what the party has explored), if any
  * - assets/<n>.<ext>: the images of the objects placed (so the file needs no asset library)
+ * - sounds/<n>-<take>.ogg: the audio of the sounds used (map sounds, the mixer's, doors')
  *
  * Version 1 files (one map, map.<ext> and fog.bin) open as a scene with one floor.
  * Calibration (a property of the TV) and GM preferences are not part of a scene.
@@ -40,6 +43,8 @@ export interface SceneFile {
   camera: GmCamera | null
   /** Images of the assets the scene's objects show. */
   objectImages: AssetImages
+  /** Audio of the sounds the scene uses. */
+  soundClips: SoundClips
 }
 
 interface SceneJson {
@@ -59,6 +64,8 @@ interface SceneJson {
   fog?: { cols: number; rows: number } | null
   /** Asset key -> image file in the zip, and its other details. */
   assets?: Record<string, Omit<AssetImage, 'image'> & { file: string; type: string }>
+  /** Clip key -> its takes' files in the zip, and its other details. */
+  sounds?: Record<string, Omit<SoundClip, 'takes'> & { files: string[] }>
 }
 
 const EXTENSIONS: Record<string, string> = {
@@ -102,6 +109,22 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     const { image, ...rest } = img
     assets[key] = { ...rest, file, type: image.type }
   }
+  // Only the sounds the scene uses.
+  const usedSounds = usedClips(s.scene, s.levels.map((l) => l.sounds ?? []), s.soundClips)
+  const sounds: NonNullable<SceneJson['sounds']> = {}
+  let k = 0
+  for (const [key, clip] of Object.entries(s.soundClips)) {
+    if (!usedSounds.has(key)) continue
+    const { takes, ...rest } = clip
+    const names: string[] = []
+    for (const [t, take] of takes.entries()) {
+      const file = `sounds/${k}-${t}.ogg`
+      files[file] = await stored(take)
+      names.push(file)
+    }
+    k++
+    sounds[key] = { ...rest, files: names }
+  }
   const json: SceneJson = {
     format: FORMAT,
     version: VERSION,
@@ -114,6 +137,7 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     maps,
     fogs,
     assets,
+    sounds,
   }
   files['scene.json'] = strToU8(JSON.stringify(json, null, 2))
   return new Blob([zipSync(files)], { type: 'application/zip' })
@@ -174,6 +198,11 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
     const image = blob(name, type)
     if (image) objectImages[key] = { ...rest, image }
   }
+  const soundClips: SoundClips = {}
+  for (const [key, { files, ...rest }] of Object.entries(json.sounds ?? {})) {
+    const takes = files.map((f) => blob(f, 'audio/ogg')).filter((b): b is Blob => !!b)
+    soundClips[key] = { ...rest, takes }
+  }
   return {
     scene: json.scene,
     levels,
@@ -184,6 +213,7 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
     orientation: json.orientation ?? 0,
     camera: json.camera ?? null,
     objectImages,
+    soundClips,
   }
 }
 

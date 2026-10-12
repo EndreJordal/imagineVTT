@@ -4,6 +4,7 @@ import { CurtainButton } from './Curtain'
 import { redo, undo } from './history'
 import { newScene, openScene, saveScene } from './sceneFiles'
 import { SettingsMenu } from './Settings'
+import { SoundMixer } from './Sound'
 import { useGm } from './store'
 import { openTableWindow } from './tableWindow'
 import { useDropdown } from './useDropdown'
@@ -36,6 +37,7 @@ export function Toolbar() {
       </label>
       <GmVision />
       <ObscuringMenu />
+      <SoundMixer />
       <CurtainButton />
       <span className="toolbar-spacer" />
       <SettingsMenu />

@@ -119,3 +119,25 @@ export function Slider(props: {
 function round(n: number, digits: number) {
   return Math.round(n * 10 ** digits) / 10 ** digits
 }
+
+/**
+ * A slide switch between two named states: `left` and `right`, the knob on the side that
+ * holds (`on` means right).
+ */
+export function Switch(props: { left: string; right: string; on: boolean; title?: string; onChange(on: boolean): void }) {
+  return (
+    <div className="switch-row" title={props.title}>
+      <span className={props.on ? '' : 'switch-current'}>{props.left}</span>
+      <button
+        role="switch"
+        aria-checked={props.on}
+        aria-label={`${props.left} or ${props.right}`}
+        className={`switch${props.on ? ' on' : ''}`}
+        onClick={() => props.onChange(!props.on)}
+      >
+        <span className="switch-knob" />
+      </button>
+      <span className={props.on ? 'switch-current' : ''}>{props.right}</span>
+    </div>
+  )
+}

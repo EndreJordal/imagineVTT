@@ -84,7 +84,7 @@ export function HiddenAreaPanel() {
   const area = useGm((s) => s.scene.hiddenAreas?.find((a) => a.id === s.selectedHiddenId))
   const enabled = useGm((s) => s.scene.hiddenEnabled !== false)
   if (!area) return null
-  const { selectHidden, updateHidden, removeHidden } = useGm.getState()
+  const { selectHidden, updateHidden, resetHidden, removeHidden } = useGm.getState()
 
   return (
     <aside className="light-panel" aria-label="Hidden area">
@@ -129,6 +129,13 @@ export function HiddenAreaPanel() {
           ? 'Revealed when a vision token walks in.'
           : 'Stays hidden until you remove it, whoever walks in.'}
       </p>
+      <button
+        disabled={!area.shape || area.cells === area.shape}
+        title="Hide all of it again, as drawn: what vision has uncovered too"
+        onClick={() => resetHidden(area.id)}
+      >
+        Reset
+      </button>
       <button onClick={() => removeHidden(area.id)}>Remove area hiding</button>
     </aside>
   )

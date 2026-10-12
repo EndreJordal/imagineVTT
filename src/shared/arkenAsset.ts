@@ -3,7 +3,9 @@ import { readNrbf, type NrbfObject, type NrbfValue } from './nrbf'
 /**
  * Arkenforge asset files, as found in an asset folder:
  * - <name>.rwmeta: library entry (name, tags, thumbnail, placement preset: scale, animation)
- * - <name>.rwfile: the asset itself; for images, PNGs (one, or one per animation frame)
+ * - <name>.rwfile: the asset itself; for images, PNGs (one, or one per animation frame); for
+ *   sounds, Ogg Vorbis takes
+ * - <name>.rwamb: an ambience, layering other sounds (referred to by their Arkenforge paths)
  * Both are .NET BinaryFormatter streams (see nrbf.ts).
  */
 
@@ -20,6 +22,8 @@ export interface AssetMeta {
   /** Animation: frames per second, and frame count (0 for stills). */
   fps: number
   frames: number
+  /** Sounds: seconds. */
+  duration: number
 }
 
 const isObject = (v: NrbfValue | undefined): v is NrbfObject =>
@@ -56,6 +60,7 @@ export function parseAssetMeta(bytes: Uint8Array): AssetMeta {
     scale: { x: num(scale?.x, 1), y: num(scale?.y, 1) },
     fps: num(anim?._framesPerSecond, 30) || 30,
     frames: num(anim?._noOfFrames, 0),
+    duration: num(meta._duration, 0),
   }
 }
 
@@ -95,8 +100,37 @@ export function pngSize(png: Uint8Array): { width: number; height: number } {
 }
 
 /** Kinds of visual asset, by the folder they're in. */
-export type AssetKind = 'Objects' | 'Textures' | 'Lines' | 'Tokens'
-export const ASSET_KINDS: AssetKind[] = ['Objects', 'Textures', 'Lines', 'Tokens']
+export type AssetKind = 'Objects' | 'Textures' | 'Lines' | 'Tokens' | 'Sounds' | 'Ambience'
+export const VISUAL_KINDS: AssetKind[] = ['Objects', 'Textures', 'Lines', 'Tokens']
+export const AUDIO_KINDS: AssetKind[] = ['Sounds', 'Ambience']
+export const ASSET_KINDS: AssetKind[] = [...VISUAL_KINDS, ...AUDIO_KINDS]
+export const isAudio = (kind: AssetKind) => AUDIO_KINDS.includes(kind)
+
+/** The Ogg Vorbis takes of a sound's file. */
+export function parseSoundTakes(bytes: Uint8Array): Uint8Array[] {
+  const file = readNrbf(bytes)
+  if (!isObject(file)) return []
+  return (listItems(file._tracks) ?? [])
+    .map((t) => (isObject(t) && t._clipRAW instanceof Uint8Array ? t._clipRAW : null))
+    .filter((b): b is Uint8Array => !!b && b.length > 4 && b[0] === 0x4f && b[1] === 0x67) // "Og"
+}
+
+/** An ambience's layers: the sounds (by Arkenforge path), their volume and timing. */
+export function parseAmbience(bytes: Uint8Array): { path: string; volume: number; every: number }[] {
+  const file = readNrbf(bytes)
+  if (!isObject(file)) return []
+  return (listItems(file._tracks) ?? []).flatMap((item) => {
+    if (!isObject(item) || typeof item._filePath !== 'string' || !isObject(item._content)) return []
+    const track = item._content
+    const options = isObject(track._options) && Array.isArray(track._options.KeyValuePairs) ? track._options.KeyValuePairs : []
+    const volumeEntry = options.find((kv) => isObject(kv) && kv.key === 'Volume')
+    const volume = isObject(volumeEntry) ? num(volumeEntry.value, 0.5) : 0.5
+    // Timing in seconds (Arkenforge's minutes, unit 1, made seconds); 0: loops.
+    const unit = isObject(track._timeUnit) ? num(track._timeUnit.value__, 0) : 0
+    const every = num(track._timing, 0) * (unit === 1 ? 60 : 1)
+    return [{ path: item._filePath, volume, every }]
+  })
+}
 
 /** How many squares across a texture is placed at (they're tiling fills in Arkenforge). */
 const TEXTURE_SQUARES = 4

@@ -1,6 +1,6 @@
 /**
  * The GM's store, put together from slices (src/gm/slices/), one per part of the work: floors,
- * tools, hidden areas, walls, lights, objects, map, fog, the table view and the session.
+ * tools, hidden areas, walls, lights, objects, map, fog, the table view, the session and groups.
  */
 import { create } from 'zustand'
 import type { FogMemory } from '../shared/fog'
@@ -9,9 +9,12 @@ import type { AssetImages } from '../shared/mapObjects'
 import { migrateLevel, migrateScene } from '../shared/migrate'
 import { load } from '../shared/persist'
 import type { GmCamera } from '../shared/sceneFile'
+import type { SoundClips } from '../shared/sound'
 import type { Display, Scene, Size, TableState } from '../shared/types'
 import { type FloorsSlice, floorsSlice } from './slices/floors'
+import { audioSlice, type AudioSlice } from './slices/audio'
 import { fogSlice, type FogSlice } from './slices/fog'
+import { groupsSlice, type GroupsSlice } from './slices/groups'
 import { type HiddenSlice, hiddenSlice } from './slices/hidden'
 import { type LightsSlice, lightsSlice } from './slices/lights'
 import { mapSlice, type MapSlice } from './slices/map'
@@ -41,7 +44,9 @@ export interface GmStore
     MapSlice,
     FogSlice,
     ViewSlice,
-    SessionSlice {}
+    SessionSlice,
+    GroupsSlice,
+    AudioSlice {}
 
 export const useGm = create<GmStore>()((...a) => ({
   ...floorsSlice(...a),
@@ -54,6 +59,8 @@ export const useGm = create<GmStore>()((...a) => ({
   ...fogSlice(...a),
   ...viewSlice(...a),
   ...sessionSlice(...a),
+  ...groupsSlice(...a),
+  ...audioSlice(...a),
 }))
 
 /** What the table shows: its floor, with the shared parts of the scene. */
@@ -73,7 +80,7 @@ export interface SavedFloors {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors] =
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
@@ -85,6 +92,7 @@ export async function hydrate() {
       load<{ name: string | null; unsaved: boolean }>('sceneName'),
       load<AssetImages>('objectImages'),
       load<SavedFloors>('floors'),
+      load<{ clips: SoundClips; master: number; output: string }>('sound'),
     ])
   const restored = scene ? migrateScene(scene) : defaultScene
   // Sessions from before floors: the scene is the one floor.
@@ -106,6 +114,9 @@ export async function hydrate() {
     fogMemory: fogMemory ?? null,
     gmCamera: gmCamera ?? null,
     objectImages: objectImages ?? {},
+    soundClips: sound?.clips ?? {},
+    masterVolume: sound?.master ?? 0.8,
+    audioOutput: sound?.output ?? '',
     cameraVersion: s.cameraVersion + 1,
     sceneName: sceneName?.name ?? null,
     unsaved: sceneName?.unsaved ?? false,

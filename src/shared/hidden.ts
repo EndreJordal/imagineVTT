@@ -20,14 +20,27 @@ export interface HiddenMask {
 
 export interface HiddenArea {
   id: string
+  /** What's still hidden (vision uncovers it bit by bit). */
   cells: HiddenMask
+  /** The area as drawn (what Reset hides again); absent in areas saved before: their cells. */
+  shape?: HiddenMask
   /** How far its edges fade out, in squares (outwards: all of it stays hidden). */
   softness: number
   /** Revealed when a vision token walks into it. */
   revealWithVision: boolean
   /** Switched off (kept, not drawn); absent means on. */
   active?: boolean
+  /** "Hidden area 1"; absent in areas made before names. */
+  name?: string
+  /** The group it's in (see Scene.groups). */
+  group?: string
 }
+
+/** An area as drawn: what it hides when nothing's been uncovered. */
+export const areaShape = (area: HiddenArea): HiddenMask => area.shape ?? area.cells
+
+/** A mask with nothing hidden in it (an area all uncovered). */
+export const nothingHidden = (like: HiddenMask): HiddenMask => ({ cols: like.cols, rows: like.rows, runs: [like.cols * like.rows] })
 
 const actives = new WeakMap<HiddenArea[], HiddenArea[]>()
 
@@ -146,9 +159,9 @@ export function inArea(area: HiddenArea, bounds: Rect, p: Point): boolean {
   return i >= 0 && mask[i] === 1
 }
 
-/** The area at a scene point (the topmost, last drawn), if any. */
+/** The area drawn at a scene point (the topmost, last drawn), if any. */
 export function areaAt(areas: HiddenArea[] | undefined, bounds: Rect, p: Point): HiddenArea | undefined {
-  return [...(areas ?? [])].reverse().find((a) => inArea(a, bounds, p))
+  return [...(areas ?? [])].reverse().find((a) => inArea({ ...a, cells: areaShape(a) }, bounds, p))
 }
 
 /** An area's middle and extent, as fractions of the grid (computed once per mask). */
@@ -186,9 +199,9 @@ function shapeOf(cells: HiddenMask) {
   return shape
 }
 
-/** Where an area's token sits: the middle of its cells, in scene coordinates. */
+/** Where an area's token sits: the middle of the area as drawn, in scene coordinates. */
 export function areaCentre(area: HiddenArea, bounds: Rect): Point {
-  const { cx, cy } = shapeOf(area.cells)
+  const { cx, cy } = shapeOf(areaShape(area))
   return { x: bounds.x + cx * bounds.width, y: bounds.y + cy * bounds.height }
 }
 
@@ -236,6 +249,49 @@ function splitHidden(cells: HiddenMask): HiddenMask[] {
     if (encoded) out.push(encoded)
   }
   return out
+}
+
+/** Something that sees: where, how far (scene units), and whether a point is in its line of sight. */
+export interface Seer {
+  x: number
+  y: number
+  range: number
+  sees: (p: Point) => boolean
+}
+
+/**
+ * The area with what the seers see in it uncovered (cells whose middle is in sight, well
+ * within range); null if they see none of it.
+ */
+export function uncoverSeen(area: HiddenArea, bounds: Rect, seers: Seer[]): HiddenMask | null {
+  const mask = areaMask(area, bounds)
+  if (!mask || !seers.length) return null
+  const { cols, rows } = area.cells
+  const box = areaRect(area, bounds)
+  const sx = cols / bounds.width
+  const sy = rows / bounds.height
+  let out: Uint8Array | null = null
+  const p = { x: 0, y: 0 }
+  for (const v of seers) {
+    // Where the soft edge of sight is mostly clear (see visionFalloff).
+    const reach = v.range * 0.9
+    const x0 = Math.max(0, Math.floor((Math.max(box.x, v.x - reach) - bounds.x) * sx))
+    const x1 = Math.min(cols - 1, Math.ceil((Math.min(box.x + box.width, v.x + reach) - bounds.x) * sx))
+    const y0 = Math.max(0, Math.floor((Math.max(box.y, v.y - reach) - bounds.y) * sy))
+    const y1 = Math.min(rows - 1, Math.ceil((Math.min(box.y + box.height, v.y + reach) - bounds.y) * sy))
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = y * cols + x
+        if (!(out ?? mask)[i]) continue
+        p.x = bounds.x + (x + 0.5) / sx
+        p.y = bounds.y + (y + 0.5) / sy
+        if (Math.hypot(p.x - v.x, p.y - v.y) > reach || !v.sees(p)) continue
+        out ??= mask.slice()
+        out[i] = 0
+      }
+    }
+  }
+  return out && (encodeHidden(cols, rows, out) ?? { cols, rows, runs: [cols * rows] })
 }
 
 /** Cell coordinates (fractional) of a scene point. *//** Cell coordinates (fractional) of a scene point. */

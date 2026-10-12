@@ -51,6 +51,7 @@ export async function saveScene(saveAs = false) {
     mapImages: Object.fromEntries(s.levels.map((l) => [l.id, levelImage(s, l.id)])),
     fogMemories: Object.fromEntries(s.levels.map((l) => [l.id, levelFogMemory(s, l.id)])),
     objectImages: s.objectImages,
+    soundClips: s.soundClips,
   })
   const suggestedName = `${s.sceneName ?? 'Untitled scene'}${SCENE_FILE_EXTENSION}`
 

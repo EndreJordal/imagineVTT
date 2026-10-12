@@ -71,7 +71,10 @@ export const fogSlice: StateCreator<GmStore, [], [], FogSlice> = (set, get) => (
       fogMemory: createFogMemory(sceneBounds(s.scene)),
       fogVersion: s.fogVersion + 1,
       // Objects shown once seen are unseen again too.
-      scene: { ...s.scene, objects: s.scene.objects.map((o) => (o.seen ? { ...o, seen: false } : o)) },
+      scene: {
+        ...s.scene,
+        objects: s.scene.objects.map((o) => (o.seen && o.visibility === 'seen' ? { ...o, seen: false } : o)),
+      },
     }))
     get().stampFog()
     get().noticeObjects()

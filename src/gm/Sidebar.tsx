@@ -11,6 +11,10 @@ import { MM_PER_INCH, useGm } from './store'
 import { openTableWindow } from './tableWindow'
 import { Field, Section, Slider } from './ui'
 import { Icon } from './icons'
+import { DEFAULT_DOOR_REVEAL } from '../shared/doors'
+import { RevealPicker } from './Walls'
+import { DEFAULT_DOOR_SOUNDS } from '../shared/sound'
+import { DoorSoundsPicker } from './Sound'
 
 async function readImage(file: File) {
   const bitmap = await createImageBitmap(file)
@@ -248,7 +252,24 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           </Field>
         </details>
       </Section>
+      <DoorsSection />
       <AssetsSection />
     </aside>
+  )
+}
+
+/** How doors reveal what they hid when opened on the table (each can override it). */
+function DoorsSection() {
+  const reveal = useGm((g) => g.scene.doorReveal ?? DEFAULT_DOOR_REVEAL)
+  const sounds = useGm((g) => g.scene.doorSounds ?? DEFAULT_DOOR_SOUNDS)
+  return (
+    <Section title="Doors">
+      <p className="hint">
+        When a door opens while something is obscured, what it hid comes into view on the table like this.
+        Right-click a door’s button to override it for that door.
+      </p>
+      <RevealPicker value={reveal} onChange={useGm.getState().setDoorReveal} />
+      <DoorSoundsPicker value={sounds} onChange={useGm.getState().setDoorSounds} />
+    </Section>
   )
 }

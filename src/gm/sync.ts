@@ -61,6 +61,7 @@ export function startGmSync(): () => void {
   let stampTimer: number | undefined
   let stampPending = false
   const look = () => {
+    useGm.getState().revealSeen() // first: what's uncovered is then remembered
     useGm.getState().stampFog()
     useGm.getState().noticeObjects()
   }
@@ -108,7 +109,8 @@ export function startGmSync(): () => void {
       else if (s.scene.lights !== prev.scene.lights) useGm.getState().revealEntered(prev.scene.lights)
     }
     // Vision tokens moving (or the map under them) reveal more of the fog.
-    if (s.scene.fog.mode !== 'off' && s.scene !== prev.scene) scheduleStamp()
+    const sightMatters = s.scene.fog.mode !== 'off' || activeAreas(s.scene).some((a) => a.revealWithVision)
+    if (sightMatters && s.scene !== prev.scene) scheduleStamp()
     if (s.fogVersion !== prev.fogVersion || s.tableLevelId !== prev.tableLevelId) {
       sendFog()
       clearTimeout(fogSaveTimer)
@@ -129,7 +131,7 @@ export function startGmSync(): () => void {
       s.display !== prev.display ||
       s.calibrating !== prev.calibrating
     ) {
-      channel.post({ type: 'state', state: tableState(s) })
+      channel.post({ type: 'state', state: tableState(useGm.getState()) })
     }
     if (floorsChanged) {
       clearTimeout(floorsSaveTimer)
@@ -150,6 +152,9 @@ export function startGmSync(): () => void {
     if (s.gmVision !== prev.gmVision) void save('gmVision', s.gmVision)
     if (tableImage(s) !== tableImage(prev)) channel.post({ type: 'map', image: tableImage(s) })
     if (s.mapImage !== prev.mapImage) void save('mapImage', s.mapImage)
+    if (s.soundClips !== prev.soundClips || s.masterVolume !== prev.masterVolume || s.audioOutput !== prev.audioOutput) {
+      void save('sound', { clips: s.soundClips, master: s.masterVolume, output: s.audioOutput })
+    }
     if (s.objectImages !== prev.objectImages) {
       channel.post({ type: 'assets', images: s.objectImages })
       void save('objectImages', s.objectImages)

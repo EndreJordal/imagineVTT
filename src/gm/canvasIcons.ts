@@ -1,4 +1,4 @@
-import { BrickWall, DoorOpen, Eye, EyeOff, Flame, Flashlight, Lightbulb, PaintBucket } from 'lucide-static'
+import { BrickWall, DoorOpen, Eye, EyeOff, Flame, Flashlight, Lightbulb, PaintBucket, Volume2 } from 'lucide-static'
 import { Texture } from 'pixi.js'
 import type { LightIcon } from '../shared/lights'
 
@@ -6,7 +6,7 @@ import type { LightIcon } from '../shared/lights'
  * Icons drawn on the GM canvas (light tokens) and used as cursors (placing lights, building
  * walls and doors): the same Lucide icons as the UI, as SVG.
  */
-export type CanvasIcon = LightIcon | 'walls' | 'doors' | 'fill' | 'hide'
+export type CanvasIcon = LightIcon | 'walls' | 'doors' | 'fill' | 'hide' | 'sound'
 
 const SVGS: Record<CanvasIcon, string> = {
   lamp: Lightbulb,
@@ -17,6 +17,7 @@ const SVGS: Record<CanvasIcon, string> = {
   doors: DoorOpen,
   fill: PaintBucket,
   hide: EyeOff,
+  sound: Volume2,
 }
 
 /** The drawing inside an icon's <svg> element. */

@@ -3,6 +3,8 @@ import type { StateCreator } from 'zustand'
 import { createLight, type Light, type LightKind } from '../../shared/lights'
 import type { Point } from '../../shared/types'
 import { moveCrossesWall, wallSegments } from '../../shared/visibility'
+import { LIGHT_PRESETS } from '../../shared/lights'
+import { nextName } from '../../shared/names'
 import type { GmStore } from '../store'
 
 export interface LightsSlice {
@@ -30,6 +32,7 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
   addLight: (kind, at) =>
     set((s) => {
       const light = createLight(kind, at.x, at.y, crypto.randomUUID())
+      light.name = nextName(LIGHT_PRESETS[kind].label, s.scene.lights.map((l) => l.name))
       return {
         scene: { ...s.scene, lights: [...s.scene.lights, light] },
         selectedLightIds: [light.id],
@@ -74,7 +77,7 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
       }
     }),
   selectLight: (id) =>
-    set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null }),
+    set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null }),
   toggleLightSelected: (id) =>
     set((s) => ({
       selectedLightIds: s.selectedLightIds.includes(id)

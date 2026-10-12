@@ -5,12 +5,15 @@ import { GmCanvas, UI_KEYS } from './GmCanvas'
 import { LightPanel } from './LightPanel'
 import { ASSET_DRAG_TYPE, initAssetLibrary, placeAsset } from './assetLibrary'
 import { AssetPreview } from './Assets'
-import { ObjectPanel } from './ObjectPanel'
+import { ObjectPanel, ObjectsPanel } from './ObjectPanel'
 import { PlacementHint } from './PlacementHint'
 import { openDroppedScene, openScene, saveScene } from './sceneFiles'
 import { GmNotice } from './GmNotice'
-import { DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
+import { DoorPanel, DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
 import { HiddenAreaPanel, HideToolbox } from './Hide'
+import { GroupBar, ScenePanel } from './ScenePanel'
+import { SoundPanel } from './Sound'
+import { playMapSound, startSoundController } from './soundController'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
 import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
@@ -62,11 +65,13 @@ export function GmApp() {
     let stop: (() => void) | undefined
     let stopHistory: (() => void) | undefined
     let stopCurtain: (() => void) | undefined
+    let stopSound: (() => void) | undefined
     void Promise.all([hydrate(), hydrateCurtain()]).then(([, saveCurtain]) => {
       if (cancelled) return saveCurtain()
       stopCurtain = saveCurtain
       stop = startGmSync()
       stopHistory = startHistory()
+      stopSound = startSoundController()
       void initAssetLibrary()
       setHydrated(true)
     })
@@ -75,6 +80,7 @@ export function GmApp() {
       stop?.()
       stopHistory?.()
       stopCurtain?.()
+      stopSound?.()
     }
   }, [])
 
@@ -86,6 +92,7 @@ export function GmApp() {
       onHideFill: hideFill,
       onHidePaint: (from, to, erase, stroke) => useGm.getState().hidePaint(from, to, erase, stroke),
       onHiddenSelect: (id) => useGm.getState().selectHidden(id),
+      onDoorSettings: (id) => useGm.getState().selectDoor(id),
       onMapResize: (scale) => useGm.getState().setMapScale(scale),
       onMapMove: (position) => useGm.getState().setMapPosition(position),
       onLightMove: (id, to, force) => {
@@ -94,7 +101,13 @@ export function GmApp() {
         const light = scene.lights.find((l) => l.id === id)
         if (!light) return false
         const ids = selectedLightIds.includes(id) ? selectedLightIds : [id]
-        return moveLights(ids, to.x - light.x, to.y - light.y, !force)
+        const dx = to.x - light.x
+        const dy = to.y - light.y
+        if (!moveLights(ids, dx, dy, !force)) return false
+        // Objects selected with them (a group) come along.
+        const { selectedObjectIds, moveObjects } = useGm.getState()
+        if (selectedLightIds.includes(id) && selectedObjectIds.length) moveObjects(selectedObjectIds, dx, dy)
+        return true
       },
       onLightAim: (id, angle) => useGm.getState().updateLight(id, { angle }),
       onLightSelect: (id) => useGm.getState().selectLight(id),
@@ -118,8 +131,23 @@ export function GmApp() {
       onDoorPoint: (p) => useGm.getState().placeDoorPoint(p),
       onDoorToggle: (id) => useGm.getState().toggleDoor(id),
       onObjectSelect: (id) => useGm.getState().selectObject(id),
+      onObjectCopy: (p) => {
+        const { selectedObjectIds, copyObject } = useGm.getState()
+        if (selectedObjectIds.length === 1) copyObject(selectedObjectIds[0], p)
+      },
       onObjectChange: (id, patch) => useGm.getState().updateObject(id, patch),
-      onBoxSelect: (lightIds, points, add) => useGm.getState().selectMany(lightIds, points, add),
+      onBoxSelect: (lightIds, points, objectIds, add) => useGm.getState().selectMany(lightIds, points, objectIds, add),
+      onObjectToggle: (id) => useGm.getState().toggleObjectSelected(id),
+      onObjectsMove: (ids, dx, dy) => {
+        // Lights selected with them (a group) come along.
+        const { selectedLightIds, moveLights, moveObjects } = useGm.getState()
+        moveObjects(ids, dx, dy)
+        if (selectedLightIds.length) moveLights(selectedLightIds, dx, dy, false)
+      },
+      onGroupSelect: (id) => useGm.getState().selectGroup(id),
+      onSoundSelect: (id) => useGm.getState().selectSound(id),
+      onSoundMove: (id, p) => useGm.getState().updateSound(id, { x: p.x, y: p.y }),
+      onSoundPlay: (id) => playMapSound(id),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),
     })
     canvasRef.current = canvas
@@ -310,12 +338,17 @@ export function GmApp() {
             <WallPointsPanel />
             <LightPanel />
             <ObjectPanel />
+            <ObjectsPanel />
             <HiddenAreaPanel />
+            <DoorPanel />
+            <SoundPanel />
+            <GroupBar />
             <AssetPreview />
           </div>
           <PlacementHint />
           <GmNotice />
         </div>
+        <ScenePanel canvas={canvasRef} />
       </div>
     </div>
   )
