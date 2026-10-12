@@ -1,5 +1,6 @@
 import type { CurtainState } from './curtain'
 import type { FogMemory } from './fog'
+import type { Turn } from './handout'
 import type { AssetImages } from './mapObjects'
 import type { Size, TableState } from './types'
 
@@ -14,6 +15,7 @@ export type Message =
   | { type: 'assets'; images: AssetImages } // gm -> table: images of the objects placed
   | { type: 'curtain'; state: CurtainState } // gm -> table: curtain dropped, raised, set up
   | { type: 'curtain-images'; images: Record<string, Blob> } // gm -> table: the curtain's pictures
+  | { type: 'handout'; handout: { id: string; image: Blob; turn: Turn; fill: boolean } | null } // gm -> table: picture shown
   | { type: 'bye'; from: 'gm' | 'table' }
 
 /** Table heartbeat interval; the GM treats the table as gone after a few missed beats. */

@@ -23,7 +23,8 @@ import {
   withLinked,
   type WallPointRef,
 } from '../shared/walls'
-import type { MapInfo, Point, TableState } from '../shared/types'
+import type { MapInfo, Point, Size, TableState } from '../shared/types'
+import { handoutBox, type Turn } from '../shared/handout'
 import { createTool, wallPointAt, type CanvasTool, type ToolCanvas } from './canvasTools'
 import {
   DOOR_COLOR,
@@ -42,6 +43,8 @@ import { activeAreas, areaCentre } from '../shared/hidden'
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const VIEW_COLOR = 0xffb020
+/** The outline of the picture shown to the players. */
+const HANDOUT_COLOR = 0xd8c9a3
 /** Sounds' tokens and ranges. */
 const SOUND_COLOR = 0x4dd2c0
 /** A sound's play button: its radius, and how far right of the token it sits (GM screen px). */
@@ -163,6 +166,8 @@ export type GmUi = Pick<GmStore, (typeof UI_KEYS)[number]> & {
   onion: { image: Blob; map: MapInfo } | null
   /** The curtain is down: the table shows a picture instead of the map. */
   curtainDown: boolean
+  /** The picture shown to the players (its size and turn), outlined in the table view. */
+  handout: { size: Size; turn: Turn; fill: boolean } | null
   /**
    * Lights in the scene that are only visiting: the party (on the table's floor) shown on a
    * floor being prepared, to line them up with it. Drawn faintly; they can't be picked up.
@@ -192,7 +197,7 @@ type Drag =
   // pointer's last scene position, for moving the group by the difference.
   | { mode: 'object'; id: string; grab: Point; group: string[]; last: Point; wasSelected: boolean }
   // Resizing scales about the centre, keeping the shape: by the pointer's distance from it.
-  | { mode: 'objectResize'; id: string; startDist: number; startW: number; startH: number }
+  | { mode: 'objectResize'; id: string; startDist: number; startW: number; startH: number; cursor: string }
   | { mode: 'objectRotate'; id: string }
 
 /**
@@ -200,10 +205,21 @@ type Drag =
  * a map locked to the grid.
  */
 type Target =
-  | { kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'object' | 'objectResize' | 'objectRotate'; id: string }
+  | { kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'object' | 'objectRotate'; id: string }
+  /** A selected object's corner handle, with the resize cursor for its direction. */
+  | { kind: 'objectResize'; id: string; cursor: string }
   | { kind: 'wallPoint'; ref: WallPointRef }
   | { kind: 'view' | 'viewZoom' | 'map' | 'resize' | 'locked' }
   | null
+
+/** The resize cursor for a handle in direction (dx, dy) from the middle (screen y down). */
+function resizeCursor(dx: number, dy: number) {
+  const a = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 180
+  if (a < 22.5 || a >= 157.5) return 'ew-resize'
+  if (a < 67.5) return 'nwse-resize'
+  if (a < 112.5) return 'ns-resize'
+  return 'nesw-resize'
+}
 
 const CURSORS: Record<Drag['mode'] | 'locked' | 'door' | 'hidden' | 'soundPlay', string> = {
   hidden: 'pointer',
@@ -300,6 +316,7 @@ export class GmCanvas extends PixiHost {
     selectedSoundId: null,
     onion: null,
     curtainDown: false,
+    handout: null,
     ghostLightIds: [],
   }
   /** Selections as sets, for looking up (kept while the store's arrays are the same). */
@@ -586,6 +603,23 @@ export class GmCanvas extends PixiHost {
     g.poly(corners).stroke({ width: 5 * px, color: 0x000000, alpha: 0.7 })
     const color = this.ui.curtainDown ? CURTAIN_COLOR : VIEW_COLOR
     g.poly(corners).stroke({ width: (this.ui.curtainDown ? 4 : 2) * px, color })
+
+    // The picture shown to the players, where it sits on the table.
+    if (this.ui.handout) {
+      const screen = this.ui.tableScreen
+      const box = handoutBox(screen, this.ui.handout.size, this.ui.handout.turn, this.ui.handout.fill)
+      // Screen point (u, v in 0..1) to scene: corners are the table's top-left, top-right,
+      // bottom-right, bottom-left.
+      const [c0, c1, , c3] = corners
+      const at = (u: number, v: number) => ({
+        x: c0.x + (c1.x - c0.x) * u + (c3.x - c0.x) * v,
+        y: c0.y + (c1.y - c0.y) * u + (c3.y - c0.y) * v,
+      })
+      const u0 = 0.5 - box.width / screen.width / 2
+      const v0 = 0.5 - box.height / screen.height / 2
+      const outline = [at(u0, v0), at(1 - u0, v0), at(1 - u0, 1 - v0), at(u0, 1 - v0)]
+      g.poly(outline).fill({ color: HANDOUT_COLOR, alpha: 0.18 }).stroke({ width: 2 * px, color: HANDOUT_COLOR })
+    }
 
     // The marker on the table's "up" edge doubles as the handle for moving the view.
     this.marker = upMarker(corners, this.state.scene.view, MARKER_PX * px)
@@ -916,7 +950,9 @@ export class GmCanvas extends PixiHost {
       const h = this.rotateHandle(o)
       if (Math.hypot(p.x - h.x, p.y - h.y) <= (ROTATE_HANDLE_PX + SLACK_PX) * px) return { kind: 'objectRotate', id: o.id }
       for (const c of objectCorners(o)) {
-        if (Math.hypot(p.x - c.x, p.y - c.y) <= (OBJECT_HANDLE_PX + SLACK_PX) * px) return { kind: 'objectResize', id: o.id }
+        if (Math.hypot(p.x - c.x, p.y - c.y) <= (OBJECT_HANDLE_PX + SLACK_PX) * px) {
+          return { kind: 'objectResize', id: o.id, cursor: resizeCursor(c.x - o.x, c.y - o.y) }
+        }
       }
     }
     const objects = state.scene.objects
@@ -951,6 +987,7 @@ export class GmCanvas extends PixiHost {
 
   private cursorFor(target: Target) {
     if (this.active) return this.active.cursor(this.toolView, this.pointer)
+    if (target?.kind === 'objectResize') return target.cursor
     return CURSORS[target?.kind ?? 'pan']
   }
 
@@ -1011,7 +1048,7 @@ export class GmCanvas extends PixiHost {
     }
     this.pressedAt = this.toCanvas(e)
 
-    if (e.button === 0 && e.shiftKey) {
+    if (e.button === 0 && e.shiftKey && target?.kind !== 'objectResize') {
       // Shift-drag draws a selection box, whatever is under the pointer.
       this.drag = { mode: 'box', start: p, end: p }
     } else if (target?.kind === 'wallPoint') {
@@ -1042,7 +1079,7 @@ export class GmCanvas extends PixiHost {
       const o = scene?.objects.find((x) => x.id === target.id)
       if (!o) return
       const startDist = Math.max(1e-6, Math.hypot(p.x - o.x, p.y - o.y))
-      this.drag = { mode: 'objectResize', id: o.id, startDist, startW: o.width, startH: o.height }
+      this.drag = { mode: 'objectResize', id: o.id, startDist, startW: o.width, startH: o.height, cursor: target.cursor }
     } else if (target?.kind === 'objectRotate') {
       this.drag = { mode: 'objectRotate', id: target.id }
     } else if (target?.kind === 'aim') {
@@ -1087,7 +1124,8 @@ export class GmCanvas extends PixiHost {
     } else {
       this.drag = { mode: 'pan', last: this.toCanvas(e) }
     }
-    this.app.canvas.style.cursor = this.drag.mode === 'pan' ? 'grabbing' : CURSORS[this.drag.mode]
+    this.app.canvas.style.cursor =
+      this.drag.mode === 'pan' ? 'grabbing' : this.drag.mode === 'objectResize' ? this.drag.cursor : CURSORS[this.drag.mode]
     this.app.canvas.setPointerCapture(e.pointerId)
   }
 
@@ -1133,10 +1171,21 @@ export class GmCanvas extends PixiHost {
       } else if (drag.mode === 'object') {
         this.handlers.onObjectChange(o.id, { x: p.x + drag.grab.x, y: p.y + drag.grab.y })
       } else if (drag.mode === 'objectResize') {
-        const k = Math.max(0.02, Math.hypot(p.x - o.x, p.y - o.y) / drag.startDist)
         const min = (this.state?.scene.grid.size ?? 100) * 0.1
-        const kk = Math.max(k, min / Math.min(drag.startW, drag.startH))
-        this.handlers.onObjectChange(o.id, { width: drag.startW * kk, height: drag.startH * kk })
+        if (e.shiftKey) {
+          // Shift: squish, width and height each to the pointer (in the object's own axes).
+          const dx = p.x - o.x
+          const dy = p.y - o.y
+          const c = Math.cos(o.rotation)
+          const s = Math.sin(o.rotation)
+          const width = Math.max(min, 2 * Math.abs(dx * c + dy * s))
+          const height = Math.max(min, 2 * Math.abs(-dx * s + dy * c))
+          this.handlers.onObjectChange(o.id, { width, height })
+        } else {
+          const k = Math.max(0.02, Math.hypot(p.x - o.x, p.y - o.y) / drag.startDist)
+          const kk = Math.max(k, min / Math.min(drag.startW, drag.startH))
+          this.handlers.onObjectChange(o.id, { width: drag.startW * kk, height: drag.startH * kk })
+        }
       } else {
         let rotation = Math.atan2(p.y - o.y, p.x - o.x) + Math.PI / 2
         if (e.shiftKey) rotation = Math.round(rotation / (Math.PI / 12)) * (Math.PI / 12)
@@ -1183,7 +1232,7 @@ export class GmCanvas extends PixiHost {
     const clicked = start && Math.hypot(c.x - start.x, c.y - start.y) < CLICK_PX
     const drag = this.drag
     const onSomething =
-      drag && ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate'].includes(drag.mode)
+      drag && ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate', 'sound'].includes(drag.mode)
     if (drag?.mode === 'box') {
       // Shift+click (no box drawn) on an object or light: in or out of the selection.
       const on = clicked ? this.targetAt(drag.start) : null

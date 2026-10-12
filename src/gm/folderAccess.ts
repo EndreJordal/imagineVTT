@@ -23,3 +23,39 @@ type Picker = (o: { id?: string; mode?: 'read' }) => Promise<DirHandle>
 
 /** The folder picker, if the browser has one. */
 export const folderPicker = () => (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker
+
+/** A picture in a folder. */
+export interface Picture {
+  /** Path in the folder, e.g. "Intro/Title.jpg": the picture's key (kept in settings). */
+  id: string
+  /** File name without extension. */
+  name: string
+  file: File
+}
+
+const IMAGE = /\.(jpe?g|png|webp|gif|avif|bmp)$/i
+
+/** A folder's pictures (subfolders too), sorted by path. */
+export async function listPictures(dir: DirHandle): Promise<Picture[]> {
+  const found: Picture[] = []
+  const walk = async (d: DirHandle, path: string) => {
+    for await (const entry of d.values()) {
+      if (entry.kind === 'directory') await walk(entry, `${path}${entry.name}/`)
+      else if (IMAGE.test(entry.name)) {
+        found.push({ id: path + entry.name, name: entry.name.replace(/\.[^.]+$/, ''), file: await entry.getFile() })
+      }
+    }
+  }
+  await walk(dir, '')
+  return found.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+}
+
+/** Whether a rescan found the same pictures (so the list, and its thumbnails, can stay). */
+export function samePictures(before: Picture[], found: Picture[]) {
+  return (
+    before.length === found.length &&
+    before.every(
+      (b, i) => b.id === found[i].id && b.file.size === found[i].file.size && b.file.lastModified === found[i].file.lastModified,
+    )
+  )
+}

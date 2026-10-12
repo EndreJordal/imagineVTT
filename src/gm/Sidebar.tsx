@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import { mapNatural, tableScale } from '../shared/geometry'
 import { AssetsSection } from './Assets'
 import { CurtainSection } from './Curtain'
+import { HandoutsSection } from './Handouts'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
@@ -104,6 +105,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
         )}
       </Section>
       <CurtainSection />
+      <HandoutsSection />
 
       <Section title="Map">
         <input

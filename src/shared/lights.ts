@@ -45,7 +45,17 @@ export interface Light {
   visionRange: number
   /** Flicker settings, for flickering lights (see Flicker); the preset's if absent. */
   flicker?: Flicker
+  /** How strongly it bathes what it lights in its colour, 0..1 (DEFAULT_COLOR_STRENGTH if absent). */
+  colorStrength?: number
+  /** Flames: steady (0) to erratic (1); 0.5 if absent. */
+  liveliness?: number
 }
+
+/** Lights' colour strength unless set: a light tint (beyond it, the colour bathes the map). */
+export const DEFAULT_COLOR_STRENGTH = 0.32
+
+/** Whether a light burns (its flame's liveliness can be set). */
+export const isFlame = (l: Pick<Light, 'kind'>) => ['fire', 'candle', 'lantern'].includes(LIGHT_PRESETS[l.kind].animation)
 
 /**
  * How a flickering light (failing fixture, buzzing neon) misbehaves. Every so often it
@@ -187,34 +197,52 @@ export interface FlickerInput {
  * flicker in unison. Fire is layered smooth noise (a slow sway plus fast licks); flickering
  * lights are steady with occasional stutters, as configured.
  */
-export function animateLight(animation: Animation, t: number, seed: number, flicker?: FlickerInput): LightFrame {
-  const n = (speed: number, offset: number) => smoothNoise(t * speed + seed * 17.3 + offset)
+export function animateLight(
+  animation: Animation,
+  t: number,
+  seed: number,
+  flicker?: FlickerInput,
+  liveliness = 0.5,
+): LightFrame {
+  // Liveliness scales a flame's swings (0.15x steady .. 1x at 0.5 .. 2.6x erratic) and pace.
+  const l = Math.min(1, Math.max(0, liveliness))
+  const amp = l <= 0.5 ? 0.15 + 1.7 * l : 1 + 3.2 * (l - 0.5)
+  const pace = 0.6 + 0.8 * l
+  const n = (speed: number, offset: number) => smoothNoise(t * speed * pace + seed * 17.3 + offset)
+  const c = (speed: number, offset: number) => n(speed, offset) - 0.5
+  // Erratic flames now and then gutter, as if in a draught.
+  const gust = () => 1 - 0.45 * Math.max(0, 2 * l - 1) * Math.max(0, n(0.7, 500) - 0.7) * 3.3
   switch (animation) {
     case 'steady':
       return STEADY
     case 'fire': {
-      const sway = n(1.3, 0) // slow breathing of the flame
-      const lick = n(7, 50) // fast flicker
-      const crackle = n(19, 90)
+      const sway = c(1.3, 0) // slow breathing of the flame
+      const lick = c(7, 50) // fast flicker
+      const crackle = c(19, 90)
       return {
-        brightness: 0.82 + 0.1 * sway + 0.07 * lick + 0.03 * crackle,
-        reach: 0.95 + 0.04 * sway + 0.02 * lick,
-        dx: 0.012 * (n(2.1, 200) - 0.5),
-        dy: 0.012 * (n(2.4, 300) - 0.5),
+        brightness: Math.max(0.2, (0.92 + amp * (0.1 * sway + 0.07 * lick + 0.03 * crackle)) * gust()),
+        reach: 0.98 + amp * (0.04 * sway + 0.02 * lick),
+        dx: amp * 0.012 * c(2.1, 200),
+        dy: amp * 0.012 * c(2.4, 300),
       }
     }
     case 'candle': {
-      const sway = n(0.9, 0)
-      const lick = n(5, 40)
+      const sway = c(0.9, 0)
+      const lick = c(5, 40)
       return {
-        brightness: 0.86 + 0.08 * sway + 0.05 * lick,
-        reach: 0.97 + 0.03 * sway,
-        dx: 0.01 * (n(1.6, 200) - 0.5),
-        dy: 0.01 * (n(1.9, 300) - 0.5),
+        brightness: Math.max(0.2, (0.925 + amp * (0.08 * sway + 0.05 * lick)) * gust()),
+        reach: 0.985 + amp * 0.03 * sway,
+        dx: amp * 0.01 * c(1.6, 200),
+        dy: amp * 0.01 * c(1.9, 300),
       }
     }
     case 'lantern':
-      return { brightness: 0.95 + 0.04 * n(1.1, 0) + 0.01 * n(6, 30), reach: 1, dx: 0, dy: 0 }
+      return {
+        brightness: Math.max(0.2, (0.975 + amp * (0.04 * c(1.1, 0) + 0.01 * c(6, 30))) * gust()),
+        reach: 1,
+        dx: 0,
+        dy: 0,
+      }
     case 'flicker':
       return flickerFrame(t, seed, flicker)
   }

@@ -1,6 +1,15 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { emitsLight, flickerOf, isDirectional, LIGHT_PRESETS, type Flicker, type Light } from '../shared/lights'
+import {
+  DEFAULT_COLOR_STRENGTH,
+  emitsLight,
+  flickerOf,
+  isDirectional,
+  isFlame,
+  LIGHT_PRESETS,
+  type Flicker,
+  type Light,
+} from '../shared/lights'
 import { useGm } from './store'
 import { Slider } from './ui'
 import { Icon, LightKindIcon } from './icons'
@@ -45,6 +54,9 @@ export function LightPanel() {
   const radius = common(emitters, (l) => l.radius)
   const intensity = common(emitters, (l) => l.intensity)
   const color = common(emitters, (l) => l.color)
+  const colorStrength = common(emitters, (l) => l.colorStrength ?? DEFAULT_COLOR_STRENGTH)
+  const flames = lights.filter(isFlame)
+  const liveliness = common(flames, (l) => l.liveliness ?? 0.5)
   const degrees = common(directional, (l) => Math.round(((((l.angle * 180) / Math.PI) % 360) + 360) % 360))
   const cone = common(cones, (l) => l.cone)
   const first = emitters[0] ?? lights[0]
@@ -141,6 +153,37 @@ export function LightPanel() {
               onChange={(e) => set(only(emitters, { color: e.target.value }))}
             />
           </Row>
+          <Slider
+            label="Colour strength"
+            unit="%"
+            scale={100}
+            value={colorStrength}
+            fallback={DEFAULT_COLOR_STRENGTH}
+            min={0}
+            max={1}
+            step={0.01}
+            title="How heavily it bathes what it lights in its colour (0: white light). Strongest at night."
+            onChange={(colorStrength) => set(only(emitters, { colorStrength }))}
+          />
+          {flames.length > 0 && (
+            <div title="How lively the flame is: 0 a steady glow, 50 a normal flame, 100 erratic and guttering">
+              <Slider
+                label="Liveliness"
+                unit="%"
+                scale={100}
+                value={liveliness}
+                fallback={0.5}
+                min={0}
+                max={1}
+                step={0.01}
+                onChange={(liveliness) => set(only(flames, { liveliness }))}
+              />
+              <div className="slider-ends">
+                <span>Steady</span>
+                <span>Erratic</span>
+              </div>
+            </div>
+          )}
         </>
       )}
       {directional.length > 0 && (

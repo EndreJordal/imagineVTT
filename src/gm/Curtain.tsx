@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { CURTAIN_TRANSITIONS, type CurtainTransition } from '../shared/curtain'
 import {
   chooseCurtainFolder,
@@ -9,6 +9,7 @@ import {
   type CurtainPicture,
 } from './curtainStore'
 import { Icon } from './icons'
+import { useThumbnail } from './thumbnails'
 import { Field, Section, Slider } from './ui'
 
 /** Toolbar button: drops a picture over the table instead of the map, or raises it (C). */
@@ -218,44 +219,4 @@ function Thumb(props: { image: CurtainPicture; chosen: boolean; ticked: boolean;
       />
     </div>
   )
-}
-
-const THUMB_PX = 240
-
-/** Thumbnails made this visit, by picture (and its size and date: a changed file gets a new one). */
-const thumbs = new Map<string, { key: string; url: Promise<string | null> }>()
-/** One at a time, so a folder of big photos doesn't stall the page. */
-let queue: Promise<unknown> = Promise.resolve()
-
-function thumbnail(image: CurtainPicture): Promise<string | null> {
-  const key = `${image.file.size}|${image.file.lastModified}`
-  const made = thumbs.get(image.id)
-  if (made?.key === key) return made.url
-  if (made) void made.url.then((old) => old && URL.revokeObjectURL(old))
-  const url = queue.then(async () => {
-    try {
-      const bitmap = await createImageBitmap(image.file, { resizeWidth: THUMB_PX, resizeQuality: 'medium' })
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
-      canvas.getContext('2d')!.drawImage(bitmap, 0, 0)
-      bitmap.close()
-      return URL.createObjectURL(await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 }))
-    } catch {
-      return null // not a picture the browser can read
-    }
-  })
-  queue = url
-  thumbs.set(image.id, { key, url })
-  return url
-}
-
-function useThumbnail(image: CurtainPicture) {
-  const [shown, setShown] = useState<{ image: CurtainPicture; url: string | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    void thumbnail(image).then((url) => live && setShown({ image, url }))
-    return () => {
-      live = false
-    }
-  }, [image])
-  return shown?.image === image ? shown.url : null
 }

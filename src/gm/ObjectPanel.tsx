@@ -107,7 +107,7 @@ export function ObjectPanel() {
         </button>
       </div>
       <p className="hint">
-        Drag to move; drag a corner to resize, the top handle to rotate (Shift: 15° steps). <kbd>Ctrl</kbd>
+        Drag to move; drag a corner to resize (Shift: squish), the top handle to rotate (Shift: 15° steps). <kbd>Ctrl</kbd>
         +click the map to drop copies.
       </p>
       <button onClick={() => removeObjects([object.id])}>Remove object</button>

@@ -81,7 +81,14 @@ vec3 shade(vec3 day, vec2 uv) {
   // Light sources reveal the day-lit colour, and add their own.
   if (uLightsOn > 0.5) {
     vec2 luv = uv * uLightUv;
-    color = mix(night, day, clamp(texture(uLightMask, luv).r, 0.0, 1.0)) + texture(uGlow, luv).rgb;
+    vec3 lit = mix(night, day, clamp(texture(uLightMask, luv).r, 0.0, 1.0));
+    // Up to a light tint the glow adds its colour; beyond, it bathes the map in it (keeping
+    // the map's brightness, so details stay).
+    vec3 glow = texture(uGlow, luv).rgb;
+    float g = max(glow.r, max(glow.g, glow.b));
+    vec3 tint = g > 0.0 ? glow * (min(g, 0.32) / g) : vec3(0.0);
+    vec3 hue = glow / max(dot(glow, LUMA), 1e-4);
+    color = mix(lit, lit * hue, clamp((g - 0.32) / 0.68, 0.0, 1.0)) + tint;
   }
 
   if (uFogMode > 2.5) {

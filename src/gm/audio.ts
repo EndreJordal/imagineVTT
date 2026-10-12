@@ -8,6 +8,12 @@ import type { SoundClip, SoundClips } from '../shared/sound'
 
 type SinkContext = AudioContext & { setSinkId?: (id: string) => Promise<void> }
 
+/** A sound playing once: `done` when it has finished (or been stopped). */
+export interface OnceHandle {
+  done: boolean
+  stop(): void
+}
+
 /** A sound that keeps playing: a loop, or an ambience's layers. */
 export interface LoopHandle {
   setVolume(volume: number): void
@@ -77,25 +83,57 @@ class Player {
     return this.decode(clip.takes[Math.floor(Math.random() * clip.takes.length)], ctx)
   }
 
-  /** Play a clip once (an ambience: its layers once). */
-  async playOnce(clips: SoundClips, key: string, volume: number) {
-    const clip = clips[key]
-    if (!clip) return
+  /** Play a clip once (an ambience: its layers once); the handle cuts it short. */
+  playOnce(clips: SoundClips, key: string, volume: number): OnceHandle {
     const { ctx, master } = this.game()
-    if (clip.layers) {
-      for (const l of clip.layers) void this.playOnce(clips, l.clip, volume * l.volume * 2)
-      return
-    }
-    const buffer = await this.take(clip, ctx)
-    if (!buffer) return
     const gain = ctx.createGain()
     gain.gain.value = volume
     gain.connect(master)
-    const source = ctx.createBufferSource()
-    source.buffer = buffer
-    source.connect(gain)
-    source.onended = () => gain.disconnect()
-    source.start()
+    const sources = new Set<AudioBufferSourceNode>()
+    let stopped = false
+    const handle: OnceHandle = {
+      done: false,
+      stop: () => {
+        if (stopped) return
+        stopped = true
+        handle.done = true
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.02)
+        window.setTimeout(() => {
+          for (const s of sources) s.stop()
+          gain.disconnect()
+        }, 150)
+      },
+    }
+    const play = async (k: string, v: number) => {
+      const clip = clips[k]
+      if (!clip || stopped) return
+      if (clip.layers) {
+        await Promise.all(clip.layers.map((l) => play(l.clip, v * l.volume * 2)))
+        return
+      }
+      const buffer = await this.take(clip, ctx)
+      if (!buffer || stopped) return
+      const layer = ctx.createGain()
+      layer.gain.value = v
+      layer.connect(gain)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(layer)
+      sources.add(source)
+      source.onended = () => {
+        sources.delete(source)
+        layer.disconnect()
+        if (!sources.size && !stopped) {
+          handle.done = true
+          gain.disconnect()
+        }
+      }
+      source.start()
+    }
+    void play(key, 1).then(() => {
+      if (!sources.size && !stopped) handle.done = true
+    })
+    return handle
   }
 
   /** Keep a clip playing (an ambience: its loops looping, the rest repeating now and then). */

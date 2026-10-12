@@ -17,6 +17,7 @@ import { playMapSound, startSoundController } from './soundController'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
 import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
+import { hydrateHandouts, useHandouts } from './handoutStore'
 import { gmDarkness, hydrate, levelImage, useGm, type GmStore } from './store'
 import { SELECT } from './tools'
 import { Floors } from './Floors'
@@ -66,9 +67,9 @@ export function GmApp() {
     let stopHistory: (() => void) | undefined
     let stopCurtain: (() => void) | undefined
     let stopSound: (() => void) | undefined
-    void Promise.all([hydrate(), hydrateCurtain()]).then(([, saveCurtain]) => {
-      if (cancelled) return saveCurtain()
-      stopCurtain = saveCurtain
+    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts()]).then(([, saveCurtain, saveHandouts]) => {
+      if (cancelled) return (saveCurtain(), saveHandouts())
+      stopCurtain = () => (saveCurtain(), saveHandouts())
       stop = startGmSync()
       stopHistory = startHistory()
       stopSound = startSoundController()
@@ -168,7 +169,14 @@ export function GmApp() {
       // Only when something the canvas shows changed (not the camera it reported, history,
       // notices and the like): an update redraws all the overlays.
       const curtainDown = useCurtain.getState().state.down
+      const handouts = useHandouts.getState()
+      const handout = handouts.shown && {
+        size: handouts.shown.size,
+        turn: handouts.turns[handouts.shown.id] ?? 0,
+        fill: handouts.fill,
+      }
       const inputs = [
+        handouts.shown, handout?.turn, handouts.fill,
         s.scene, s.levels, s.levelId, s.tableLevelId, s.levelImages, s.onionSkin, s.display, s.calibrating,
         s.gmVision, s.fogMemory, s.fogVersion, s.mapImage, curtainDown, ...UI_KEYS.map((k) => s[k]),
       ]
@@ -186,15 +194,17 @@ export function GmApp() {
       const darkness = gmDarkness(s)
       const shown = darkness === state.scene.darkness ? state : { ...state, scene: { ...state.scene, darkness } }
       const ui = Object.fromEntries(UI_KEYS.map((k) => [k, s[k]])) as Pick<GmStore, (typeof UI_KEYS)[number]>
-      canvas.update(shown, { ...ui, onion: onionOf(s), curtainDown, ghostLightIds: party.map((l) => l.id) })
+      canvas.update(shown, { ...ui, onion: onionOf(s), curtainDown, handout, ghostLightIds: party.map((l) => l.id) })
       canvas.setFogMemory(s.fogMemory, s.fogVersion)
     }
     push()
     const unsubscribe = useGm.subscribe((s) => push(s))
     const unsubscribeCurtain = useCurtain.subscribe((c, prev) => c.state.down !== prev.state.down && push())
+    const unsubscribeHandouts = useHandouts.subscribe((h, prev) => (h.shown !== prev.shown || h.turns !== prev.turns || h.fill !== prev.fill) && push())
     return () => {
       unsubscribe()
       unsubscribeCurtain()
+      unsubscribeHandouts()
       canvas.destroy()
       canvasRef.current = null
     }

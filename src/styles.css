@@ -1307,3 +1307,36 @@ button.curtain-down:hover:not(:disabled) {
   height: 8em;
   width: 1.5em;
 }
+
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Show to players: the picture showing, and the turn buttons. */
+.curtain-thumb.showing {
+  outline: 2px solid #d8c9a3;
+  outline-offset: 1px;
+}
+
+.curtain-thumb img {
+  transition: transform 0.2s;
+}
+
+.handout-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  padding: 2px;
+  border-radius: 4px;
+  background: #d8c9a3;
+  color: #1c1a17;
+}
+
+.handout-turns {
+  align-items: center;
+}

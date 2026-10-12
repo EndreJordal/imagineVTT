@@ -1,6 +1,7 @@
 import { Container, Graphics, RenderTexture, Sprite, type Renderer } from 'pixi.js'
 import {
   animateLight,
+  DEFAULT_COLOR_STRENGTH,
   emitsLight,
   flickerOf,
   LIGHT_PRESETS,
@@ -17,8 +18,6 @@ import { coneTexture, radialTexture } from './lightTextures'
  * overlapping lights here instead of at screen resolution is what keeps lights cheap.
  */
 const LIGHT_MAP_SIZE = 1024
-/** How strongly a light tints what it lights, at full night. */
-const GLOW = 0.32
 /** A flashlight also spills a little light around whoever holds it. */
 const SPILL_RADIUS = 0.22
 const SPILL_BRIGHTNESS = 0.35
@@ -179,7 +178,7 @@ export class LightingLayer {
       const preset = LIGHT_PRESETS[light.kind]
       const flicker = flickerOf(light)
       const input = flicker && { flicker, intensity: light.intensity, buzz: !!preset.buzz }
-      this.place(light, animateLight(preset.animation, t, seedOf(light.id), input))
+      this.place(light, animateLight(preset.animation, t, seedOf(light.id), input, light.liveliness))
     }
     for (const [root, target] of [
       [this.maskRoot, this.maskMap],
@@ -199,7 +198,8 @@ export class LightingLayer {
     const x = light.x + f.dx * radius
     const y = light.y + f.dy * radius
     const brightness = light.on ? light.intensity * f.brightness : 0
-    const glow = brightness * GLOW * this.darkness
+    // How strongly it tints what it lights, at full night (the shader bathes beyond the default).
+    const glow = brightness * (light.colorStrength ?? DEFAULT_COLOR_STRENGTH) * this.darkness
 
     let sx: number
     let sy: number

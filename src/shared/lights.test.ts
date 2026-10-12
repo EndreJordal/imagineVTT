@@ -34,6 +34,22 @@ describe('animateLight', () => {
     expect(a).not.toEqual(b)
   })
 
+  it('makes flames steadier or wilder with liveliness', () => {
+    const spread = (liveliness: number) => {
+      const b = Array.from({ length: 1200 }, (_, i) => animateLight('fire', i / 60, 0.3, undefined, liveliness).brightness)
+      return Math.max(...b) - Math.min(...b)
+    }
+    expect(spread(0)).toBeLessThan(spread(0.5) / 3)
+    expect(spread(1)).toBeGreaterThan(spread(0.5) * 2)
+    expect(spread(0.5)).toBeCloseTo(
+      (() => {
+        const b = sample('fire').map((f) => f.brightness)
+        return Math.max(...b) - Math.min(...b)
+      })(),
+      6,
+    )
+  })
+
 })
 
 describe('configurable flicker', () => {

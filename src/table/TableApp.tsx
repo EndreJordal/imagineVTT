@@ -49,6 +49,9 @@ export function TableApp() {
         case 'curtain-images':
           canvas.setCurtainImages(msg.images)
           break
+        case 'handout':
+          canvas.setHandout(msg.handout)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break

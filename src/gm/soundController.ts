@@ -2,7 +2,7 @@ import { openedDoors } from '../shared/doors'
 import { hearing, DEFAULT_DOOR_SOUNDS, type MapSound } from '../shared/sound'
 import type { Point, Scene } from '../shared/types'
 import type { Wall } from '../shared/visibility'
-import { player, type LoopHandle } from './audio'
+import { player, type LoopHandle, type OnceHandle } from './audio'
 import { tableState, useGm, type GmStore } from './store'
 
 /**
@@ -24,6 +24,22 @@ function closedDoors(before: Wall[], after: Wall[]): Wall[] {
   return after.filter((w) => w.door && !w.door.open && wasOpen.get(w.id) === true)
 }
 
+/** Sounds playing once, by the map or mixer sound playing them: cut short when it goes. */
+const playing = new Map<string, OnceHandle[]>()
+
+function playFor(id: string, handle: OnceHandle) {
+  playing.set(id, [...(playing.get(id) ?? []).filter((h) => !h.done), handle])
+}
+
+/** Cut short what's playing for sounds no longer there (or switched off). */
+function stopGone(keep: Set<string>) {
+  for (const [id, handles] of playing) {
+    if (keep.has(id)) continue
+    for (const h of handles) h.stop()
+    playing.delete(id)
+  }
+}
+
 export function startSoundController(): () => void {
   const loops = new Map<string, { key: string; volume: number; handle: LoopHandle }>()
 
@@ -40,6 +56,15 @@ export function startSoundController(): () => void {
     const table = tableState(s).scene
     const ears = listeners(table)
     const grid = table.grid.size
+
+    // Removed or disabled sounds go quiet at once, even mid-play.
+    stopGone(
+      new Set([
+        ...(table.sounds ?? []).filter((x) => x.enabled).map((x) => x.id),
+        ...(s.scene.sounds ?? []).filter((x) => x.enabled).map((x) => x.id),
+        ...(s.scene.globalSounds ?? []).map((x) => x.id),
+      ]),
+    )
 
     // Loops: what should be playing, and how loud.
     const wanted = new Map<string, { key: string; volume: number }>()
@@ -77,7 +102,7 @@ export function startSoundController(): () => void {
         if (sound.loop || !sound.enabled || sound.spent || sound.trigger === 'manual') continue
         const now = hearing(sound, ears, grid)
         if (now > 0 && hearing(sound, before, grid) === 0) {
-          void player.playOnce(s.soundClips, sound.clip, sound.volume * now)
+          playFor(sound.id, player.playOnce(s.soundClips, sound.clip, sound.volume * now))
           fired.push(sound)
         }
       }
@@ -90,11 +115,11 @@ export function startSoundController(): () => void {
       const all = table.doorSounds ?? DEFAULT_DOOR_SOUNDS
       for (const door of openedDoors(prevTable.walls, table.walls)) {
         const own = door.door?.sounds ?? all
-        if (own.open) void player.playOnce(s.soundClips, own.open, own.volume)
+        if (own.open) player.playOnce(s.soundClips, own.open, own.volume)
       }
       for (const door of closedDoors(prevTable.walls, table.walls)) {
         const own = door.door?.sounds ?? all
-        if (own.close) void player.playOnce(s.soundClips, own.close, own.volume)
+        if (own.close) player.playOnce(s.soundClips, own.close, own.volume)
       }
     }
   }
@@ -111,6 +136,7 @@ export function startSoundController(): () => void {
     window.removeEventListener('keydown', wake, true)
     for (const l of loops.values()) l.handle.stop()
     loops.clear()
+    stopGone(new Set())
   }
 }
 
@@ -120,7 +146,7 @@ export function playMapSound(id: string) {
   const sound = tableState(s).scene.sounds?.find((x) => x.id === id) ?? s.scene.sounds?.find((x) => x.id === id)
   if (!sound) return
   if (sound.loop) s.updateSound(id, { enabled: !sound.enabled })
-  else void player.playOnce(s.soundClips, sound.clip, sound.volume)
+  else playFor(id, player.playOnce(s.soundClips, sound.clip, sound.volume))
 }
 
 /** Play a mixer sound now: a loop starts or stops; others play once. */
@@ -129,5 +155,5 @@ export function playGlobalSound(id: string) {
   const g = s.scene.globalSounds?.find((x) => x.id === id)
   if (!g) return
   if (g.loop) s.updateGlobal(id, { playing: !g.playing })
-  else void player.playOnce(s.soundClips, g.clip, g.volume)
+  else playFor(id, player.playOnce(s.soundClips, g.clip, g.volume))
 }

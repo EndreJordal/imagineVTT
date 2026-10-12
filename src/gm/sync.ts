@@ -2,6 +2,7 @@ import { HEARTBEAT_MS, openChannel } from '../shared/channel'
 import { activeAreas } from '../shared/hidden'
 import { save } from '../shared/persist'
 import { curtainImageMap, useCurtain } from './curtainStore'
+import { tableHandout, useHandouts } from './handoutStore'
 import { levelFogMemory, levelImage, tableState, useGm, type SavedFloors } from './store'
 
 const SAVE_DELAY_MS = 300
@@ -24,6 +25,7 @@ export function startGmSync(): () => void {
         // The curtain first (pictures, then state): a table opening with it down never shows the map.
         channel.post({ type: 'curtain-images', images: curtainImageMap(useCurtain.getState().images) })
         channel.post({ type: 'curtain', state: useCurtain.getState().state })
+        channel.post({ type: 'handout', handout: tableHandout(useHandouts.getState()) })
         useGm.getState().setTableScreen(msg.screen)
         channel.post({ type: 'state', state: tableState(useGm.getState()) })
         channel.post({ type: 'map', image: tableImage(useGm.getState()) })
@@ -161,6 +163,15 @@ export function startGmSync(): () => void {
     }
   })
 
+  // The picture shown to the players: when it, or its turn, changes.
+  const unsubscribeHandouts = useHandouts.subscribe((s, prev) => {
+    const now = tableHandout(s)
+    const before = tableHandout(prev)
+    if (now?.id !== before?.id || now?.turn !== before?.turn || now?.image !== before?.image || now?.fill !== before?.fill) {
+      channel.post({ type: 'handout', handout: now })
+    }
+  })
+
   // The curtain: pictures first, so the state finds them.
   const unsubscribeCurtain = useCurtain.subscribe((s, prev) => {
     if (s.images !== prev.images) channel.post({ type: 'curtain-images', images: curtainImageMap(s.images) })
@@ -185,6 +196,7 @@ export function startGmSync(): () => void {
     clearInterval(watchdog)
     unsubscribe()
     unsubscribeCurtain()
+    unsubscribeHandouts()
     clearTimeout(saveTimer)
     clearTimeout(stampTimer)
     clearTimeout(fogSaveTimer)
