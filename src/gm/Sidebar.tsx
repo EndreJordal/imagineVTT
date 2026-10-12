@@ -3,6 +3,8 @@ import { mapNatural, tableScale } from '../shared/geometry'
 import { AssetsSection } from './Assets'
 import { CurtainSection } from './Curtain'
 import { HandoutsSection } from './Handouts'
+import { FolderPictures } from './FolderPictures'
+import { isMapInUse, mapFolder, chooseMap, useMapFolder } from './mapFolder'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
@@ -22,6 +24,47 @@ async function readImage(file: File) {
   const size = { width: bitmap.width, height: bitmap.height }
   bitmap.close()
   return size
+}
+
+/** The maps folder's pictures, to pick the scene's map from (a file, where folders can't be opened). */
+function MapPicker() {
+  const state = useMapFolder()
+  const mapImage = useGm((g) => g.mapImage)
+  const selected = state.images.find((i) => i.id === state.selectedId)
+  if (state.status === 'unsupported') {
+    return (
+      <input
+        type="file"
+        accept="image/*"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          if (file) useGm.getState().setMap(file, await readImage(file))
+          e.target.value = ''
+        }}
+      />
+    )
+  }
+  const inUse = (file: File) => isMapInUse(file, mapImage)
+  return (
+    <>
+      <FolderPictures
+        state={state}
+        folder={mapFolder}
+        what="maps"
+        ns="map:"
+        onSelect={(selectedId) => useMapFolder.setState({ selectedId })}
+        onOpen={(id) => void chooseMap(id)}
+        thumb={(image) =>
+          inUse(image.file) ? { className: 'showing', title: `“${image.id}”: the map in use` } : {}
+        }
+      />
+      {selected && (
+        <button disabled={inUse(selected.file)} onClick={() => void chooseMap(selected.id)}>
+          {inUse(selected.file) ? 'In use' : `Use “${selected.name}” as map`}
+        </button>
+      )}
+    </>
+  )
 }
 
 export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
@@ -108,15 +151,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       <HandoutsSection />
 
       <Section title="Map">
-        <input
-          type="file"
-          accept="image/*"
-          onChange={async (e) => {
-            const file = e.target.files?.[0]
-            if (file) s.setMap(file, await readImage(file))
-            e.target.value = ''
-          }}
-        />
+        <MapPicker />
         {map && (
           <>
             <Field label="Scale (%)">

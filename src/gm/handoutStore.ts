@@ -2,14 +2,12 @@ import { create } from 'zustand'
 import { turnBy, type Turn } from '../shared/handout'
 import { load, save } from '../shared/persist'
 import type { Size } from '../shared/types'
-import { folderPicker, listPictures, samePictures, type DirHandle, type Picture } from './folderAccess'
+import { FOLDER_DEFAULTS, pictureFolder, type FolderFields } from './pictureFolder'
 
 /**
  * Pictures to show the players (handouts): the images in a folder on this computer, read in
  * place. The GM's own, kept across scenes; what's showing is this session's only.
  */
-
-export type HandoutFolderStatus = 'none' | 'unsupported' | 'reconnect' | 'scanning' | 'ready'
 
 /** What the table shows: a picture (its size, for the GM's outline of it), turned. */
 export interface ShownHandout {
@@ -17,12 +15,7 @@ export interface ShownHandout {
   size: Size
 }
 
-interface HandoutStore {
-  folderName: string | null
-  status: HandoutFolderStatus
-  images: Picture[]
-  /** The picture picked in the list. */
-  selectedId: string | null
+interface HandoutStore extends FolderFields {
   /** The picture on the table, if any. */
   shown: ShownHandout | null
   /** How each picture is turned (remembered). */
@@ -36,10 +29,7 @@ interface HandoutStore {
 }
 
 export const useHandouts = create<HandoutStore>()((set) => ({
-  folderName: null,
-  status: 'none',
-  images: [],
-  selectedId: null,
+  ...FOLDER_DEFAULTS,
   shown: null,
   turns: {},
   fill: false,
@@ -48,46 +38,8 @@ export const useHandouts = create<HandoutStore>()((set) => ({
   turn: (id, by) => set((s) => ({ turns: { ...s.turns, [id]: turnBy(s.turns[id] ?? 0, by) } })),
 }))
 
-let folder: DirHandle | null = null
-
-export async function chooseHandoutFolder() {
-  const pick = folderPicker()
-  if (!pick) return
-  let handle: DirHandle
-  try {
-    handle = await pick({ id: 'imaginevtt-handouts', mode: 'read' })
-  } catch {
-    return // cancelled
-  }
-  folder = handle
-  await save('handoutFolder', handle).catch(() => {})
-  useHandouts.setState({ folderName: handle.name, selectedId: null })
-  await scanHandoutFolder()
-}
-
-export async function reconnectHandoutFolder() {
-  if (!folder) return
-  const permission = await folder.requestPermission({ mode: 'read' }).catch(() => 'denied' as const)
-  if (permission === 'granted') await scanHandoutFolder()
-}
-
-export async function scanHandoutFolder() {
-  if (!folder) return
-  const dir = folder
-  useHandouts.setState({ status: 'scanning' })
-  try {
-    const found = await listPictures(dir)
-    if (dir !== folder) return
-    useHandouts.setState((s) => ({
-      images: samePictures(s.images, found) ? s.images : found,
-      status: 'ready',
-      selectedId: s.selectedId && found.some((f) => f.id === s.selectedId) ? s.selectedId : (found[0]?.id ?? null),
-    }))
-  } catch (e) {
-    console.warn('Could not read the handout folder', e)
-    useHandouts.setState({ status: 'reconnect' })
-  }
-}
+/** The pictures folder. */
+export const handoutFolder = pictureFolder(useHandouts, 'handout')
 
 /** Show a picture to the players (another one showing is swapped for it). */
 export async function showHandout(id: string) {
@@ -113,20 +65,9 @@ export function tableHandout(s: HandoutStore): { id: string; image: Blob; turn: 
 
 /** Restore the folder and turns, and save the turns on every change from then on. */
 export async function hydrateHandouts(): Promise<() => void> {
-  const [turns, handle, fill] = await Promise.all([
-    load<Record<string, Turn>>('handoutTurns'),
-    load<DirHandle>('handoutFolder'),
-    load<boolean>('handoutFill'),
-  ])
+  const [turns, fill] = await Promise.all([load<Record<string, Turn>>('handoutTurns'), load<boolean>('handoutFill')])
   useHandouts.setState({ turns: turns ?? {}, fill: !!fill })
-  if (!folderPicker()) useHandouts.setState({ status: 'unsupported' })
-  else if (handle) {
-    folder = handle
-    useHandouts.setState({ folderName: handle.name })
-    const permission = await handle.queryPermission({ mode: 'read' }).catch(() => 'prompt' as const)
-    if (permission === 'granted') void scanHandoutFolder()
-    else useHandouts.setState({ status: 'reconnect' })
-  }
+  await handoutFolder.restore()
   return useHandouts.subscribe((s, prev) => {
     if (s.turns !== prev.turns) void save('handoutTurns', s.turns)
     if (s.fill !== prev.fill) void save('handoutFill', s.fill)

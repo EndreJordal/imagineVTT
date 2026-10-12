@@ -18,6 +18,7 @@ import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
 import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
 import { hydrateHandouts, useHandouts } from './handoutStore'
+import { mapFolder } from './mapFolder'
 import { gmDarkness, hydrate, levelImage, useGm, type GmStore } from './store'
 import { SELECT } from './tools'
 import { Floors } from './Floors'
@@ -67,7 +68,7 @@ export function GmApp() {
     let stopHistory: (() => void) | undefined
     let stopCurtain: (() => void) | undefined
     let stopSound: (() => void) | undefined
-    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts()]).then(([, saveCurtain, saveHandouts]) => {
+    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts(), mapFolder.restore()]).then(([, saveCurtain, saveHandouts]) => {
       if (cancelled) return (saveCurtain(), saveHandouts())
       stopCurtain = () => (saveCurtain(), saveHandouts())
       stop = startGmSync()
