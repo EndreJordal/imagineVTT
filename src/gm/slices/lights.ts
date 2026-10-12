@@ -51,7 +51,7 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
   moveLights: (ids, dx, dy, safe = false) => {
     const s = get()
     const chosen = new Set(ids)
-    if (safe && s.scene.fog.safety) {
+    if (safe && s.scene.fog.safety && s.scene.fog.mode !== 'off') {
       const segments = wallSegments(s.scene.walls)
       const crossing = s.scene.lights.some(
         (l) => chosen.has(l.id) && l.vision && moveCrossesWall(l, { x: l.x + dx, y: l.y + dy }, segments),

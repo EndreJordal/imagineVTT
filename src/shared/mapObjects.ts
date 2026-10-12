@@ -13,7 +13,18 @@ export interface MapObject {
   width: number
   height: number
   rotation: number
+  /** How the players see it when something is obscured (see ObjectVisibility); absent: 'map'. */
+  visibility?: ObjectVisibility
+  /** For 'seen' objects: a vision token has seen it. */
+  seen?: boolean
 }
+
+/**
+ * How the players see an object while something is obscured: like the map (greyscale out of
+ * sight, hidden where unexplored), only while a vision token sees it ('sight'), or not until
+ * one has, then like the map ('seen').
+ */
+export type ObjectVisibility = 'map' | 'sight' | 'seen'
 
 /**
  * An asset's image, kept with the scene (so placed objects don't need the library): a still

@@ -20,6 +20,8 @@ export class ObjectsLayer extends Container {
   private meshes = new Map<string, { mesh: ObjectMesh; asset: string; placed: MapObject | null }>()
   private loaded = new Map<string, LoadedImage>()
   private images: AssetImages = {}
+  /** Drawn for the players while something is obscured (see sync). */
+  private sight = false
   private shared: Partial<Record<SharedTextureSlot, TextureSource | null>> = {}
   private objects: MapObject[] = []
   private mapGroup: UniformGroup
@@ -42,7 +44,7 @@ export class ObjectsLayer extends Container {
     for (const [key, l] of this.loaded) {
       if (images[key] !== l.image) this.unload(key)
     }
-    this.sync(this.objects)
+    this.sync(this.objects, this.sight)
   }
 
   /** The light, sight and memory maps the shading reads. */
@@ -52,8 +54,13 @@ export class ObjectsLayer extends Container {
     for (const { mesh } of this.meshes.values()) mesh.setTexture(slot, source)
   }
 
-  sync(objects: MapObject[]) {
+  /**
+   * `sight`: drawn for the players while something is obscured, so objects shown only in
+   * sight, or once seen, are hidden as they say.
+   */
+  sync(objects: MapObject[], sight: boolean) {
     this.objects = objects
+    this.sight = sight
     const ids = new Set(objects.map((o) => o.id))
     for (const [id, m] of this.meshes) {
       if (ids.has(id)) continue
@@ -82,7 +89,9 @@ export class ObjectsLayer extends Container {
         m.mesh.setCorners(objectCorners(o))
         m.placed = o
       }
-      m.mesh.mesh.visible = !!this.loaded.get(o.asset)?.source
+      const unseen = sight && o.visibility === 'seen' && !o.seen
+      m.mesh.mesh.visible = !!this.loaded.get(o.asset)?.source && !unseen
+      m.mesh.setSightOnly(sight && o.visibility === 'sight')
       // Draw order follows the scene's order.
       if (this.getChildIndex(m.mesh.mesh) !== index) this.setChildIndex(m.mesh.mesh, Math.min(index, this.children.length - 1))
     })
@@ -128,8 +137,8 @@ export class ObjectsLayer extends Container {
           for (const m of this.meshes.values()) {
             if (m.asset !== key) continue
             m.mesh.setTexture('uObject', entry.source)
-            m.mesh.mesh.visible = true
           }
+          this.sync(this.objects, this.sight) // shown now, where it should be
           this.onChange()
         },
         () => {},

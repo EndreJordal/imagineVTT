@@ -49,13 +49,28 @@ uniform float uSaturation;     // night: colour kept (1 = day)
 uniform float uBrightness;     // night: light kept (1 = day)
 uniform float uLightsOn;
 uniform vec2 uLightUv;         // map uv -> light map uv (light maps are rounded up in size)
-uniform float uFogMode;        // 0 off, 1 players, 2 GM
+uniform float uFogMode;        // 0 off, 1 players (fog of war), 2 GM (fog of war), 3 players (dim)
 uniform vec2 uVisionUv;        // map uv -> sight map uv
 uniform float uMemoryBrightness;
 uniform float uGmShade;
 uniform float uHiddenMode;     // hidden areas: 0 none, 1 players (black), 2 GM (shaded)
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float valueNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+/** Cloudy noise, about 0.2..0.8, a few octaves (p in squares). */
+float clouds(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * valueNoise(p); p = p * 2.03 + 17.0; a *= 0.5; }
+  return v;
+}
 
 /** A day-lit colour as seen at map uv: under night, light sources and fog of war. */
 vec3 shade(vec3 day, vec2 uv) {
@@ -69,7 +84,11 @@ vec3 shade(vec3 day, vec2 uv) {
     color = mix(night, day, clamp(texture(uLightMask, luv).r, 0.0, 1.0)) + texture(uGlow, luv).rgb;
   }
 
-  if (uFogMode > 1.5) {
+  if (uFogMode > 2.5) {
+    // Players, dimmed: what's in sight now; elsewhere the map in greyscale, as remembered.
+    float seen = clamp(texture(uVision, uv * uVisionUv).r, 0.0, 1.0);
+    color = mix(vec3(dot(day, LUMA)) * uMemoryBrightness, color, seen);
+  } else if (uFogMode > 1.5) {
     // GM: everything, with unexplored parts shaded.
     color *= 1.0 - uGmShade * (1.0 - texture(uMemory, uv).r);
   } else if (uFogMode > 0.5) {
@@ -82,6 +101,13 @@ vec3 shade(vec3 day, vec2 uv) {
   // Hidden areas: black for the players whatever they see; shaded and tinted for the GM.
   if (uHiddenMode > 0.5) {
     float hidden = texture(uHidden, uv).r;
+    // Soft edges like a cloud's: noise fixed to the map pushes the fade in and out, so it
+    // frays into soft wisps instead of an even blur. Fully hidden stays fully hidden.
+    if (hidden > 0.0 && hidden < 1.0) {
+      vec2 squares = (uBounds.xy + uv * uBounds.zw) / max(uGrid.x, 1.0);
+      float n = clouds(squares * 0.9);
+      hidden = smoothstep(0.0, 1.0, clamp(hidden + (n - 0.5) * 1.1, 0.0, 1.0));
+    }
     color = uHiddenMode > 1.5 ? mix(color, color * 0.3 + vec3(0.06, 0.02, 0.1), hidden) : color * (1.0 - hidden);
   }
   return color;
@@ -129,6 +155,7 @@ out vec4 finalColor;
 
 uniform sampler2D uObject;
 uniform vec4 uFrame;           // the frame's rect in the image: x, y, width, height (uv)
+uniform float uSightOnly;      // 1: shown only where a vision token sees it now
 ${shading}
 
 void main() {
@@ -136,7 +163,9 @@ void main() {
   if (tex.a < 0.004) discard;
   vec3 day = tex.rgb / tex.a;
   vec2 uv = clamp((vScene - uBounds.xy) / uBounds.zw, 0.0, 1.0);
-  finalColor = vec4(shade(day, uv) * tex.a, tex.a);
+  float alpha = tex.a;
+  if (uSightOnly > 0.5) alpha *= clamp(texture(uVision, uv * uVisionUv).r, 0.0, 1.0);
+  finalColor = vec4(shade(day, uv) * alpha, alpha);
 }
 `
 
@@ -222,7 +251,10 @@ export function createMapMesh() {
  * apply to it as they do to the map.
  */
 export function createObjectMesh(mapGroup: UniformGroup) {
-  const frame = new UniformGroup({ uFrame: { value: new Float32Array([0, 0, 1, 1]), type: 'vec4<f32>' } })
+  const frame = new UniformGroup({
+    uFrame: { value: new Float32Array([0, 0, 1, 1]), type: 'vec4<f32>' },
+    uSightOnly: { value: 0, type: 'f32' },
+  })
   const empty = Texture.EMPTY.source
   const shader = Shader.from({
     gl: { vertex, fragment: objectFragment, name: 'imaginevtt-object', preferredFragmentPrecision: 'highp' },
@@ -259,6 +291,13 @@ export function createObjectMesh(mapGroup: UniformGroup) {
     },
     setTexture(slot: 'uObject' | SharedTextureSlot, source: TextureSource | null) {
       shader.resources[slot] = source ?? empty
+    },
+    /** Shown only where a vision token sees it now. */
+    setSightOnly(on: boolean) {
+      const v = on ? 1 : 0
+      if (frame.uniforms.uSightOnly === v) return
+      frame.uniforms.uSightOnly = v
+      frame.update()
     },
     destroy() {
       mesh.destroy()

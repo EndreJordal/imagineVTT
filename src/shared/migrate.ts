@@ -14,8 +14,9 @@ export function migrateScene(scene: Scene): Scene {
   scene.grid = { ...DEFAULT_GRID_STYLE, ...scene.grid }
   scene.darkness ??= 0
   scene.lights ??= []
-  const fog: Partial<Scene['fog']> = scene.fog ?? {}
-  scene.fog = { enabled: fog.enabled ?? false, safety: fog.safety ?? true }
+  // Fog of war was on or off before it had a dim mode.
+  const fog: Partial<Scene['fog']> & { enabled?: boolean } = scene.fog ?? {}
+  scene.fog = { mode: fog.mode ?? (fog.enabled ? 'full' : 'off'), safety: fog.safety ?? true }
   scene.walls ??= []
   scene.objects ??= []
   // Before areas, hidden areas were one mask with one softness.
@@ -39,10 +40,11 @@ export function migrateScene(scene: Scene): Scene {
 
 /** A floor saved by an earlier version: fill in what's missing, as for scenes. */
 export function migrateLevel(level: Level, shared: Scene): Level {
-  const old = level as Level & { hidden?: HiddenMask | null }
+  const old = level as Level & { hidden?: HiddenMask | null; fogEnabled?: boolean }
   const hiddenAreas = level.hiddenAreas ?? legacyAreas(old.hidden, (shared as { hiddenSoftness?: number }).hiddenSoftness)
+  const fogMode = level.fogMode ?? (old.fogEnabled ? 'full' : 'off')
   const scene = migrateScene(
-    applyLevel(shared, { ...level, objects: level.objects ?? [], walls: level.walls ?? [], hiddenAreas }),
+    applyLevel(shared, { ...level, objects: level.objects ?? [], walls: level.walls ?? [], hiddenAreas, fogMode }),
   )
   return extractLevel(scene, level)
 }

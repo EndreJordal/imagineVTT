@@ -32,7 +32,7 @@ export const defaultScene: Scene = {
   view: { x: 2000, y: 1250 },
   darkness: 0,
   lights: [],
-  fog: { enabled: false, safety: true },
+  fog: { mode: 'off', safety: true },
   walls: [],
   objects: [],
 }

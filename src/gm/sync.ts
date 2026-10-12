@@ -1,4 +1,5 @@
 import { HEARTBEAT_MS, openChannel } from '../shared/channel'
+import { activeAreas } from '../shared/hidden'
 import { save } from '../shared/persist'
 import { curtainImageMap, useCurtain } from './curtainStore'
 import { levelFogMemory, levelImage, tableState, useGm, type SavedFloors } from './store'
@@ -59,16 +60,20 @@ export function startGmSync(): () => void {
    */
   let stampTimer: number | undefined
   let stampPending = false
+  const look = () => {
+    useGm.getState().stampFog()
+    useGm.getState().noticeObjects()
+  }
   const scheduleStamp = () => {
     if (stampTimer !== undefined) {
       stampPending = true
       return
     }
-    useGm.getState().stampFog()
+    look()
     stampTimer = window.setTimeout(function settle() {
       if (stampPending) {
         stampPending = false
-        useGm.getState().stampFog()
+        look()
         stampTimer = window.setTimeout(settle, FOG_STAMP_MS)
       } else {
         stampTimer = undefined
@@ -98,12 +103,12 @@ export function startGmSync(): () => void {
       cameraSaveTimer = window.setTimeout(() => void save('gmCamera', useGm.getState().gmCamera), CAMERA_SAVE_MS)
     }
     // A vision token walking into a hidden area reveals it (also on arriving on a floor).
-    if (s.scene.hiddenAreas?.length && s.levelId === s.tableLevelId) {
+    if (activeAreas(s.scene).length && s.levelId === s.tableLevelId) {
       if (s.tableLevelId !== prev.tableLevelId || s.levelId !== prev.levelId) useGm.getState().revealEntered(null)
       else if (s.scene.lights !== prev.scene.lights) useGm.getState().revealEntered(prev.scene.lights)
     }
     // Vision tokens moving (or the map under them) reveal more of the fog.
-    if (s.scene.fog.enabled && s.scene !== prev.scene) scheduleStamp()
+    if (s.scene.fog.mode !== 'off' && s.scene !== prev.scene) scheduleStamp()
     if (s.fogVersion !== prev.fogVersion || s.tableLevelId !== prev.tableLevelId) {
       sendFog()
       clearTimeout(fogSaveTimer)

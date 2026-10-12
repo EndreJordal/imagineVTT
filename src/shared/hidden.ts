@@ -25,6 +25,25 @@ export interface HiddenArea {
   softness: number
   /** Revealed when a vision token walks into it. */
   revealWithVision: boolean
+  /** Switched off (kept, not drawn); absent means on. */
+  active?: boolean
+}
+
+const actives = new WeakMap<HiddenArea[], HiddenArea[]>()
+
+/**
+ * The hidden areas in effect: the active ones, unless hidden areas are switched off on the
+ * floor. The same array while the areas don't change (for caches keyed by it).
+ */
+export function activeAreas(scene: { hiddenAreas?: HiddenArea[]; hiddenEnabled?: boolean }): HiddenArea[] {
+  const areas = scene.hiddenAreas
+  if (!areas?.length || scene.hiddenEnabled === false) return []
+  let active = actives.get(areas)
+  if (!active) {
+    active = areas.every((a) => a.active !== false) ? areas : areas.filter((a) => a.active !== false)
+    actives.set(areas, active)
+  }
+  return active
 }
 
 /** Edge softness (in squares) for new areas. */

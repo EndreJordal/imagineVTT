@@ -73,7 +73,7 @@ export const viewSlice: StateCreator<GmStore, [], [], ViewSlice & Pick<TableStat
     // Lights carried by the party travel with the table view.
     const dx = view.x - s.scene.view.x
     const dy = view.y - s.scene.view.y
-    const guarded = safe && s.scene.fog.safety
+    const guarded = safe && s.scene.fog.safety && s.scene.fog.mode !== 'off'
     const segments = guarded ? wallSegments(s.scene.walls) : []
     let stuck = false
     const lights = s.scene.lights.map((l) => {

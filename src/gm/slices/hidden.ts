@@ -1,7 +1,7 @@
 /** Hidden areas ("local fog"): hiding, setting up and revealing them. */
 import type { StateCreator } from 'zustand'
 import { sceneBounds } from '../../shared/geometry'
-import { areaAt, areaRect, DEFAULT_HIDDEN_SOFTNESS, editableGrid, encodeHidden, fillHidden, type FillResult, type HiddenArea, type HiddenMask, inArea, paintHidden } from '../../shared/hidden'
+import { activeAreas, areaAt, areaRect, DEFAULT_HIDDEN_SOFTNESS, editableGrid, encodeHidden, fillHidden, type FillResult, type HiddenArea, type HiddenMask, inArea, paintHidden } from '../../shared/hidden'
 import type { Light } from '../../shared/lights'
 import type { Point } from '../../shared/types'
 import type { GmStore } from '../store'
@@ -34,7 +34,9 @@ export interface HiddenSlice {
   /** The hidden area whose token is selected (GM-only). */
   selectedHiddenId: string | null
   selectHidden(id: string | null): void
-  updateHidden(id: string, patch: Partial<Pick<HiddenArea, 'softness' | 'revealWithVision'>>): void
+  updateHidden(id: string, patch: Partial<Pick<HiddenArea, 'softness' | 'revealWithVision' | 'active'>>): void
+  /** Switch all hidden areas on the floor off (kept, not drawn) or back on. */
+  setHiddenEnabled(on: boolean): void
   /** Remove an area: what it hid shows again. */
   removeHidden(id: string): void
   /** Reveal every hidden area on this floor. */
@@ -117,6 +119,10 @@ export const hiddenSlice: StateCreator<GmStore, [], [], HiddenSlice> = (set, get
     set((s) => ({
       scene: { ...s.scene, hiddenAreas: (s.scene.hiddenAreas ?? []).map((a) => (a.id === id ? { ...a, ...patch } : a)) },
     })),
+  setHiddenEnabled: (hiddenEnabled) => {
+    if (!hiddenEnabled) stamped.reveals++ // what they hid may be seen now
+    set((s) => ({ scene: { ...s.scene, hiddenEnabled } }))
+  },
   removeHidden: (id) =>
     set((s) => {
       stamped.reveals++
@@ -134,7 +140,8 @@ export const hiddenSlice: StateCreator<GmStore, [], [], HiddenSlice> = (set, get
   revealEntered: (before) =>
     set((s) => {
       const areas = s.scene.hiddenAreas ?? []
-      if (!areas.some((a) => a.revealWithVision) || s.levelId !== s.tableLevelId) return s
+      const active = new Set(activeAreas(s.scene))
+      if (!areas.some((a) => a.revealWithVision && active.has(a)) || s.levelId !== s.tableLevelId) return s
       const bounds = sceneBounds(s.scene)
       const was = new Map((before ?? []).map((l) => [l.id, l]))
       const viewers = s.scene.lights.filter((l) => l.vision)
@@ -145,7 +152,7 @@ export const hiddenSlice: StateCreator<GmStore, [], [], HiddenSlice> = (set, get
           const prev = was.get(l.id)
           return !(prev && prev.vision && inArea(a, bounds, prev))
         })
-      const hiddenAreas = areas.filter((a) => !(a.revealWithVision && entered(a)))
+      const hiddenAreas = areas.filter((a) => !(a.revealWithVision && active.has(a) && entered(a)))
       if (hiddenAreas.length === areas.length) return s
       stamped.reveals++
       const selected = hiddenAreas.some((a) => a.id === s.selectedHiddenId) ? s.selectedHiddenId : null

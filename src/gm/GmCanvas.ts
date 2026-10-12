@@ -36,7 +36,7 @@ import {
 } from './canvasStyle'
 import type { GmStore } from './store'
 import { SELECT } from './tools'
-import { areaCentre } from '../shared/hidden'
+import { activeAreas, areaCentre } from '../shared/hidden'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
@@ -595,6 +595,7 @@ export class GmCanvas extends PixiHost {
     }
     if (!scene) return
     const bounds = sceneBounds(scene)
+    const active = new Set(activeAreas(scene))
     for (const area of areas) {
       let t = this.hiddenTokenMap.get(area.id)
       if (!t) {
@@ -608,6 +609,7 @@ export class GmCanvas extends PixiHost {
       const c = areaCentre(area, bounds)
       t.root.position.set(c.x, c.y)
       t.root.scale.set(this.px)
+      t.root.alpha = active.has(area) ? 1 : 0.4 // switched off: kept, not drawn
       t.icon.texture = iconTexture('hide')
       t.icon.setSize(ICON_PX)
       t.ring.clear().circle(0, 0, TOKEN_PX).fill({ color: 0x1d1d22, alpha: 0.85 }).stroke({ width: 2.5, color: HIDDEN_COLOR })

@@ -82,6 +82,7 @@ export function HideToolbox() {
 /** Floating panel for the selected hidden area: its soft edges, revealing, removing. */
 export function HiddenAreaPanel() {
   const area = useGm((s) => s.scene.hiddenAreas?.find((a) => a.id === s.selectedHiddenId))
+  const enabled = useGm((s) => s.scene.hiddenEnabled !== false)
   if (!area) return null
   const { selectHidden, updateHidden, removeHidden } = useGm.getState()
 
@@ -95,6 +96,15 @@ export function HiddenAreaPanel() {
           <Icon name="close" />
         </button>
       </header>
+      <label className="check" title="Switched off, the area is kept but not drawn">
+        <input
+          type="checkbox"
+          checked={area.active !== false}
+          onChange={(e) => updateHidden(area.id, { active: e.target.checked })}
+        />
+        Active
+      </label>
+      {!enabled && <p className="hint">Hidden areas are switched off on this floor (Obscuring menu).</p>}
       <Slider
         label="Soft edges"
         unit="sq"

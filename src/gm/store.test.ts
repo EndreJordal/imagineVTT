@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createLight } from '../shared/lights'
 import { extractLevel } from '../shared/levels'
 import { allLevels, levelImage } from './store'
+import { activeAreas } from '../shared/hidden'
 import { migrateScene } from '../shared/migrate'
 import { gmDarkness, tableState, useGm } from './store'
 import { SELECT } from './tools'
@@ -123,7 +124,7 @@ describe('fog of war', () => {
         lights: [],
         grid: { ...s.scene.grid, size: 100 },
         map: { x: 0, y: 0, width: 5000, height: 5000, naturalWidth: 5000, naturalHeight: 5000 },
-        fog: { enabled: false, safety: true },
+        fog: { mode: 'off', safety: true },
         walls: [],
       },
       fogMemory: null,
@@ -132,13 +133,13 @@ describe('fog of war', () => {
   })
 
   it('reveals around vision tokens (lit or not), and not around fixed lights', () => {
-    const { addLight, setFogEnabled, updateLight } = useGm.getState()
+    const { addLight, setFogMode, updateLight } = useGm.getState()
     addLight('torch', { x: 1000, y: 1000 }) // unlit, but sees
     addLight('vision', { x: 4000, y: 1000 })
     addLight('fixture', { x: 1000, y: 4000 }) // lit, no vision
     updateLight(lights()[1].id, { vision: true, visionRange: 5 })
 
-    setFogEnabled(true)
+    setFogMode('full')
     expect(seen(1000, 1000)).toBe(255)
     expect(seen(1000 + 1500, 1000)).toBe(255) // 15 squares: inside the torch's 20
     expect(seen(4000 + 700, 1000)).toBe(0) // beyond the vision token's 5
@@ -146,10 +147,10 @@ describe('fog of war', () => {
   })
 
   it('remembers where vision tokens have been, until reset', () => {
-    const { addLight, setFogEnabled, updateLight, stampFog, resetFog } = useGm.getState()
+    const { addLight, setFogMode, updateLight, stampFog, resetFog } = useGm.getState()
     addLight('vision', { x: 500, y: 500 })
     updateLight(lights()[0].id, { vision: true, visionRange: 3 })
-    setFogEnabled(true)
+    setFogMode('full')
     updateLight(lights()[0].id, { x: 3000, y: 3000 })
     stampFog() // the GM's sync does this on every scene change
     expect(seen(500, 500)).toBe(255) // still remembered
@@ -325,7 +326,7 @@ describe('vision safety', () => {
           { ...createLight('fixture', 100, 100, 'lamp'), id: 'lamp' },
         ],
         view: { x: 200, y: 200 },
-        fog: { enabled: true, safety: true },
+        fog: { mode: 'full', safety: true },
       },
       tableScreen: { width: 400, height: 400 },
       display: { ...s.display, pxPerMm: 1, orientation: 0 },
@@ -589,7 +590,7 @@ describe('hidden areas', () => {
         walls: [{ id: 'room', points: room }],
         lights: [],
         hiddenAreas: [],
-        fog: { enabled: true, safety: true },
+        fog: { mode: 'full', safety: true },
       },
       fogMemory: null,
       selectedHiddenId: null,
@@ -719,5 +720,68 @@ describe('tools', () => {
     gm().toggleTool('hide')
     gm().toggleTool('hide')
     expect(gm().tool).toEqual({ kind: 'hide', mode: 'brush' })
+  })
+})
+
+describe('visibility', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      levelId: s.tableLevelId,
+      scene: {
+        ...s.scene,
+        map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
+        grid: { ...s.scene.grid, size: 100 },
+        walls: [],
+        lights: [],
+        hiddenAreas: [],
+        hiddenEnabled: true,
+        objects: [],
+      },
+      fogMemory: null,
+    }))
+  })
+
+  it('remembers explored areas only under full fog of war', () => {
+    const { addLight, updateLight, setFogMode } = useGm.getState()
+    addLight('vision', { x: 500, y: 500 })
+    updateLight(useGm.getState().scene.lights[0].id, { vision: true })
+    setFogMode('dim')
+    expect(useGm.getState().fogMemory).toBeNull()
+    setFogMode('full')
+    expect(useGm.getState().fogMemory?.data.some((v) => v > 0)).toBe(true)
+  })
+
+  it('switches hidden areas off, all or one, without removing them', () => {
+    const { hidePaint, setHiddenEnabled, updateHidden } = useGm.getState()
+    hidePaint({ x: 100, y: 100 }, { x: 100, y: 100 }, false, 'a')
+    hidePaint({ x: 800, y: 800 }, { x: 800, y: 800 }, false, 'b')
+    const [a] = useGm.getState().scene.hiddenAreas!
+    updateHidden(a.id, { active: false })
+    expect(activeAreas(useGm.getState().scene)).toHaveLength(1)
+    setHiddenEnabled(false)
+    expect(activeAreas(useGm.getState().scene)).toHaveLength(0)
+    expect(useGm.getState().scene.hiddenAreas).toHaveLength(2)
+  })
+
+  it('notices objects shown once seen, only where vision reaches, and forgets them on reset', () => {
+    const { addLight, updateLight, setFogMode, addObject, noticeObjects, resetFog } = useGm.getState()
+    const object = { asset: 'a', name: 'Chest', width: 50, height: 50, rotation: 0, visibility: 'seen' as const }
+    addObject({ ...object, x: 300, y: 500 })
+    addObject({ ...object, x: 950, y: 950 })
+    addLight('vision', { x: 200, y: 500 })
+    updateLight(useGm.getState().scene.lights[0].id, { vision: true, visionRange: 3 })
+    setFogMode('dim')
+    noticeObjects()
+    expect(useGm.getState().scene.objects.map((o) => !!o.seen)).toEqual([true, false])
+    setFogMode('full')
+    useGm.getState().updateLight(useGm.getState().scene.lights[0].id, { x: 900, y: 900 })
+    resetFog() // forgets the first; the token sees the second now
+    expect(useGm.getState().scene.objects.map((o) => !!o.seen)).toEqual([false, true])
+  })
+
+  it('reads scenes saved with fog of war on or off', () => {
+    const legacy = (enabled: boolean) => ({ ...useGm.getState().scene, fog: { enabled, safety: true } }) as never
+    expect(migrateScene(legacy(true)).fog.mode).toBe('full')
+    expect(migrateScene(legacy(false)).fog.mode).toBe('off')
   })
 })

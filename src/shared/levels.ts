@@ -1,7 +1,7 @@
 import type { HiddenArea } from './hidden'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
-import type { GridSettings, MapInfo, Scene } from './types'
+import type { FogMode, GridSettings, MapInfo, Scene } from './types'
 import type { Wall } from './visibility'
 
 /**
@@ -19,11 +19,13 @@ export interface Level {
   darkness: number
   /** Lights on this floor (the party's travel with the table view to the floor shown). */
   lights: Light[]
-  fogEnabled: boolean
+  fogMode: FogMode
   walls: Wall[]
   objects: MapObject[]
   /** Hidden areas ("local fog"); absent in floors saved before them. */
   hiddenAreas?: HiddenArea[]
+  /** Hidden areas switched off as a whole; absent means on. */
+  hiddenEnabled?: boolean
 }
 
 /** A floor's part of a scene (the scene shows one floor; see applyLevel). */
@@ -35,10 +37,11 @@ export function extractLevel(scene: Scene, base: Pick<Level, 'id' | 'name'>): Le
     grid: scene.grid,
     darkness: scene.darkness,
     lights: scene.lights,
-    fogEnabled: scene.fog.enabled,
+    fogMode: scene.fog.mode,
     walls: scene.walls,
     objects: scene.objects,
     hiddenAreas: scene.hiddenAreas ?? [],
+    hiddenEnabled: scene.hiddenEnabled ?? true,
   }
 }
 
@@ -50,10 +53,11 @@ export function applyLevel(scene: Scene, level: Level): Scene {
     grid: level.grid,
     darkness: level.darkness,
     lights: level.lights,
-    fog: { ...scene.fog, enabled: level.fogEnabled },
+    fog: { ...scene.fog, mode: level.fogMode },
     walls: level.walls,
     objects: level.objects,
     hiddenAreas: level.hiddenAreas ?? [],
+    hiddenEnabled: level.hiddenEnabled ?? true,
   }
 }
 
@@ -66,10 +70,11 @@ export function emptyLevel(id: string, name: string, like: Scene): Level {
     grid: { ...like.grid },
     darkness: like.darkness,
     lights: [],
-    fogEnabled: like.fog.enabled,
+    fogMode: like.fog.mode,
     walls: [],
     objects: [],
     hiddenAreas: [],
+    hiddenEnabled: true,
   }
 }
 

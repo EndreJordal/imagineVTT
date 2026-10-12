@@ -1,6 +1,9 @@
 /** Objects placed from the asset library. */
 import type { StateCreator } from 'zustand'
-import type { AssetImage, AssetImages, MapObject } from '../../shared/mapObjects'
+import { sceneBounds } from '../../shared/geometry'
+import { activeAreas, inArea } from '../../shared/hidden'
+import { objectCorners, type AssetImage, type AssetImages, type MapObject } from '../../shared/mapObjects'
+import { createVisibilityTest, visibilityPolygon, wallSegments } from '../../shared/visibility'
 import type { GmStore } from '../store'
 
 export interface ObjectsSlice {
@@ -18,6 +21,12 @@ export interface ObjectsSlice {
   selectObject(id: string | null): void
   /** Bring an object to the front, or send it to the back. */
   reorderObject(id: string, to: 'front' | 'back'): void
+  /**
+   * Mark objects shown once seen as seen, where a vision token sees them now (their middle
+   * or a corner, not under a hidden area). On the floor the table shows, while something is
+   * obscured.
+   */
+  noticeObjects(): void
 }
 
 export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) => ({
@@ -48,6 +57,30 @@ export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) =
     }),
   selectObject: (id) =>
     set({ selectedObjectIds: id ? [id] : [], selectedLightIds: [], selectedWallPoints: [], selectedHiddenId: null }),
+  noticeObjects: () =>
+    set((s) => {
+      const { scene } = s
+      if (scene.fog.mode === 'off' || s.levelId !== s.tableLevelId) return s
+      const waiting = scene.objects.filter((o) => o.visibility === 'seen' && !o.seen)
+      if (!waiting.length) return s
+      const segments = wallSegments(scene.walls)
+      const viewers = scene.lights
+        .filter((l) => l.vision)
+        .map((l) => {
+          const range = l.visionRange * scene.grid.size
+          const sees = segments.length ? createVisibilityTest(l, visibilityPolygon(l, range, segments)) : () => true
+          return { at: l, range, sees }
+        })
+      if (!viewers.length) return s
+      const bounds = sceneBounds(scene)
+      const hidden = activeAreas(scene)
+      const seen = (p: { x: number; y: number }) =>
+        !hidden.some((a) => inArea(a, bounds, p)) &&
+        viewers.some((v) => Math.hypot(p.x - v.at.x, p.y - v.at.y) <= v.range && v.sees(p))
+      const found = new Set(waiting.filter((o) => [o, ...objectCorners(o)].some(seen)).map((o) => o.id))
+      if (!found.size) return s
+      return { scene: { ...scene, objects: scene.objects.map((o) => (found.has(o.id) ? { ...o, seen: true } : o)) } }
+    }),
   reorderObject: (id, to) =>
     set((s) => {
       const o = s.scene.objects.find((x) => x.id === id)

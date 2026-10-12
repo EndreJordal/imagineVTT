@@ -27,7 +27,7 @@ export function LightPanel() {
   const canSee = lights.filter((l) => LIGHT_PRESETS[l.kind].handheld)
   const seeing = canSee.filter((l) => l.vision)
   const range = common(canSee, (l) => l.visionRange)
-  const fogOn = useGm.getState().scene.fog.enabled
+  const fogOn = useGm.getState().scene.fog.mode !== 'off'
   const directional = lights.filter(isDirectional)
   const cones = lights.filter((l) => LIGHT_PRESETS[l.kind].shape === 'cone')
   const flickering = lights.filter((l) => !!flickerOf(l))

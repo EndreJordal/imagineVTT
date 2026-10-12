@@ -1028,3 +1028,9 @@ button.curtain-down:hover:not(:disabled) {
 .menu-list .segmented button.active {
   border-color: var(--accent);
 }
+
+/* Wide enough for its longest label ("Full (Fog of War)"), so it doesn't change size. */
+.obscuring-button {
+  min-width: 18.5em;
+  justify-content: space-between;
+}

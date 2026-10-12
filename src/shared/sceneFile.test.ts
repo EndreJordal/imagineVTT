@@ -11,7 +11,7 @@ const scene: Scene = {
   view: { x: 700, y: 400 },
   darkness: 0.8,
   lights: [],
-  fog: { enabled: true, safety: true },
+  fog: { mode: 'full', safety: true },
   walls: [{ id: 'w', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] }],
   objects: [{ id: 'o', asset: 'Fantasy/Objects/Fire/Brazier', name: 'Brazier', x: 50, y: 60, width: 100, height: 100, rotation: 0.5 }],
 }

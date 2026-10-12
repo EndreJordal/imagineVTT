@@ -1,7 +1,7 @@
 import { BufferImageSource, Container, ImageSource, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import { mapNatural, sceneBounds } from '../shared/geometry'
-import { areaMask, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
+import { activeAreas, areaMask, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
 import { MEMORY_BRIGHTNESS, NIGHT_DESATURATION, NIGHT_DIMMING } from '../shared/night'
 import type { AssetImages } from '../shared/mapObjects'
 import type { Scene } from '../shared/types'
@@ -49,6 +49,8 @@ export class SceneLayer extends Container {
   /** Decoded map pixels; closed explicitly when replaced (Pixi doesn't, and they're big). */
   private bitmap: ImageBitmap | null = null
   private fogMode: 'off' | FogViewer = 'off'
+  /** Out of sight is dimmed, not fogged (nothing to explore). */
+  private dimOnly = false
   /** Images placed on the map, drawn over it with the same shading. */
   private objects = new ObjectsLayer(this.map.group)
 
@@ -157,7 +159,7 @@ export class SceneLayer extends Container {
 
   /** Whether any hidden areas are shown (and their texture is up to date). */
   private syncHidden(scene: Scene): boolean {
-    const areas = scene.hiddenAreas
+    const areas = activeAreas(scene)
     const bounds = sceneBounds(scene)
     const { cols, rows } = hiddenGrid(bounds)
     const cellsPerSquare = (cols / bounds.width) * scene.grid.size
@@ -226,9 +228,12 @@ export class SceneLayer extends Container {
     super.destroy(options)
   }
 
-  /** `viewer` is who this view is for when fog of war is on. */
+  /** `viewer` is who this view is for when something is obscured. */
   update(scene: Scene, viewer: FogViewer) {
-    this.fogMode = scene.fog.enabled ? viewer : 'off'
+    const mode = scene.fog.mode
+    // The GM sees everything when what's out of sight is only dimmed (peeking shows it).
+    this.fogMode = mode === 'off' || (mode === 'dim' && viewer === 'gm') ? 'off' : viewer
+    this.dimOnly = mode === 'dim'
     const bounds = sceneBounds(scene)
     // Decode the map again if it should be kept at a clearly different size now.
     const map = scene.map
@@ -245,7 +250,7 @@ export class SceneLayer extends Container {
     this.map.mesh.scale.set(bounds.width, bounds.height)
     this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness)
     this.fog.sync(scene.lights, bounds, scene.grid.size, scene.walls)
-    this.objects.sync(scene.objects ?? [])
+    this.objects.sync(scene.objects ?? [], this.fogMode === 'players')
 
     const u = this.map.uniforms
     u.uBounds.set([bounds.x, bounds.y, bounds.width, bounds.height])
@@ -258,7 +263,7 @@ export class SceneLayer extends Container {
     u.uSaturation = 1 - NIGHT_DESATURATION * d
     u.uBrightness = 1 - NIGHT_DIMMING * d
     u.uLightsOn = this.lighting.active ? 1 : 0
-    u.uFogMode = this.fogMode === 'off' ? 0 : this.fogMode === 'players' ? 1 : 2
+    u.uFogMode = this.fogMode === 'off' ? 0 : this.fogMode === 'gm' ? 2 : this.dimOnly ? 3 : 1
     u.uMemoryBrightness = MEMORY_BRIGHTNESS
     u.uGmShade = GM_UNEXPLORED_SHADE
     // Hidden areas apply with or without fog of war: black for the players, shaded for the GM.

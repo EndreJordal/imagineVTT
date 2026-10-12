@@ -72,7 +72,7 @@ export interface Scene {
    * enabled: fog of war on. safety: vision safety, where vision tokens can't be dragged
    * through walls or closed doors (so a careless drag doesn't reveal the next room).
    */
-  fog: { enabled: boolean; safety: boolean }
+  fog: { mode: FogMode; safety: boolean }
   /** Walls block sight. Scene coordinates; they move and scale with the map. */
   walls: Wall[]
   /** Images placed on the map (asset library), bottom first. They go with the map too. */
@@ -82,7 +82,16 @@ export interface Scene {
    * block sight past them. Absent in scenes saved before them.
    */
   hiddenAreas?: HiddenArea[]
+  /** Hidden areas switched off as a whole (kept, not drawn); absent means on. */
+  hiddenEnabled?: boolean
 }
+
+/**
+ * What the players see of the map beyond their vision tokens' sight: everything ('off'),
+ * the rest dimmed to greyscale ('dim'), or only what they've explored, greyscale, and black
+ * elsewhere ('full': fog of war).
+ */
+export type FogMode = 'off' | 'dim' | 'full'
 
 export type Orientation = 0 | 90 | 180 | 270
 

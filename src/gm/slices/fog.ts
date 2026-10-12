@@ -2,8 +2,9 @@
 import type { StateCreator } from 'zustand'
 import { createFogMemory, fitsBounds, type FogMemory, stampVision } from '../../shared/fog'
 import { boundingRect, sceneBounds } from '../../shared/geometry'
-import { unionMask } from '../../shared/hidden'
+import { activeAreas, unionMask } from '../../shared/hidden'
 import { createVisibilityTest, visibilityPolygon, wallSegments } from '../../shared/visibility'
+import type { FogMode } from '../../shared/types'
 import type { GmStore } from '../store'
 import { stamped } from './shared'
 
@@ -18,7 +19,8 @@ export interface FogSlice {
   stampFog(): void
   /** Forget everything the party has seen. */
   resetFog(): void
-  setFogEnabled(enabled: boolean): void
+  /** Fog of war off, dimming what's out of sight, or full (see FogMode). */
+  setFogMode(mode: FogMode): void
   setVisionSafety(on: boolean): void
 }
 
@@ -28,7 +30,8 @@ export const fogSlice: StateCreator<GmStore, [], [], FogSlice> = (set, get) => (
   stampFog: () =>
     set((s) => {
       // The party explores the floor the table shows.
-      if (!s.scene.fog.enabled || s.levelId !== s.tableLevelId) return s
+      // The party explores the floor the table shows, under full fog of war.
+      if (s.scene.fog.mode !== 'full' || s.levelId !== s.tableLevelId) return s
       const bounds = sceneBounds(s.scene)
       // A memory made for another map (different shape) starts over.
       const memory = s.fogMemory && fitsBounds(s.fogMemory, bounds) ? s.fogMemory : createFogMemory(bounds)
@@ -58,17 +61,23 @@ export const fogSlice: StateCreator<GmStore, [], [], FogSlice> = (set, get) => (
           const polygon = visibilityPolygon(l, range, segments)
           return { x: l.x, y: l.y, range, sees: createVisibilityTest(l, polygon), reach: boundingRect(polygon) }
         })
-      const hidden = unionMask(s.scene.hiddenAreas, bounds)
+      const hidden = unionMask(activeAreas(s.scene), bounds)
       const changed = viewers.length > 0 && stampVision(memory, bounds, viewers, hidden)
       if (!changed && memory === s.fogMemory) return s
       return { fogMemory: memory, fogVersion: s.fogVersion + 1 }
     }),
   resetFog: () => {
-    set((s) => ({ fogMemory: createFogMemory(sceneBounds(s.scene)), fogVersion: s.fogVersion + 1 }))
+    set((s) => ({
+      fogMemory: createFogMemory(sceneBounds(s.scene)),
+      fogVersion: s.fogVersion + 1,
+      // Objects shown once seen are unseen again too.
+      scene: { ...s.scene, objects: s.scene.objects.map((o) => (o.seen ? { ...o, seen: false } : o)) },
+    }))
     get().stampFog()
+    get().noticeObjects()
   },
-  setFogEnabled: (enabled) => {
-    set((s) => ({ scene: { ...s.scene, fog: { ...s.scene.fog, enabled } } }))
+  setFogMode: (mode) => {
+    set((s) => ({ scene: { ...s.scene, fog: { ...s.scene.fog, mode } } }))
     get().stampFog()
   },
   setVisionSafety: (safety) => set((s) => ({ scene: { ...s.scene, fog: { ...s.scene.fog, safety } } })),

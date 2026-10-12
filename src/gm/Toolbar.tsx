@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import type { FogMode } from '../shared/types'
 import { CurtainButton } from './Curtain'
 import { redo, undo } from './history'
 import { newScene, openScene, saveScene } from './sceneFiles'
@@ -34,7 +35,7 @@ export function Toolbar() {
         <Icon name="night" />
       </label>
       <GmVision />
-      <FogMenu />
+      <ObscuringMenu />
       <CurtainButton />
       <span className="toolbar-spacer" />
       <SettingsMenu />
@@ -72,23 +73,44 @@ function SceneFile() {
   )
 }
 
-/** Fog dropdown: fog of war on/off, forgetting what was explored, and vision safety. */
-function FogMenu() {
-  const enabled = useGm((s) => s.scene.fog.enabled)
+const FOG_MODES: { value: FogMode; label: string; hint: string }[] = [
+  { value: 'off', label: 'Off', hint: 'Players see the whole map.' },
+  {
+    value: 'dim',
+    label: 'Dim',
+    hint: 'Players see what vision tokens see; the rest of the map shows in greyscale. Nothing to explore.',
+  },
+  {
+    value: 'full',
+    label: 'Full (Fog of War)',
+    hint: 'Fog of war: players see what vision tokens see, a greyscale memory of where they’ve been, and black elsewhere.',
+  },
+]
+
+/**
+ * Obscuring dropdown: what the players see beyond their vision (off, dimmed, fog of war),
+ * forgetting what was explored, vision safety, and hidden areas on or off.
+ */
+function ObscuringMenu() {
+  const mode = useGm((s) => s.scene.fog.mode)
   const safety = useGm((s) => s.scene.fog.safety)
-  const { setFogEnabled, resetFog, setVisionSafety } = useGm.getState()
+  const hiddenOn = useGm((s) => s.scene.hiddenEnabled !== false)
+  const hiddenCount = useGm((s) => s.scene.hiddenAreas?.length ?? 0)
+  const { setFogMode, resetFog, setVisionSafety, setHiddenEnabled } = useGm.getState()
   const { open, setOpen, root } = useDropdown()
+  const current = FOG_MODES.find((m) => m.value === mode)!
   return (
     <div className="menu" ref={root}>
       <button
-        className={enabled ? 'active' : ''}
+        // One width whatever the setting, so the button (and its dropdown) stays put.
+        className={`obscuring-button${mode !== 'off' ? ' active' : ''}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Fog of war and vision safety"
+        title="What the players see: fog of war, vision safety and hidden areas (this floor)"
         onClick={() => setOpen(!open)}
       >
-        <Icon name="fog" /> Fog {enabled ? 'on' : 'off'}
-        {safety && (
+        <Icon name="fog" /> Obscuring: {current.label}
+        {safety && mode !== 'off' && (
           <span title="Vision safety on">
             <Icon name="safety" size={14} />
           </span>
@@ -96,29 +118,51 @@ function FogMenu() {
         <Icon name="chevron-down" size={14} />
       </button>
       {open && (
-        <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Fog of war">
-          <label className="check">
-            <input type="checkbox" checked={enabled} onChange={(e) => setFogEnabled(e.target.checked)} />
-            Fog of war
-          </label>
-          <p className="hint">
-            Players see only what vision tokens see, and a greyscale memory of where they’ve been.
-          </p>
+        <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Obscuring">
+          <h2>Beyond the party’s sight</h2>
+          <div className="segmented" role="radiogroup" aria-label="Fog of war">
+            {FOG_MODES.map((m) => (
+              <button
+                key={m.value}
+                role="radio"
+                aria-checked={mode === m.value}
+                className={mode === m.value ? 'active' : ''}
+                onClick={() => setFogMode(m.value)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">{current.hint}</p>
           <button
-            disabled={!enabled}
+            disabled={mode !== 'full'}
+            title={mode === 'full' ? undefined : 'Only Full (Fog of War) remembers explored areas'}
             onClick={() => {
               if (confirm('Forget everything the party has explored?')) resetFog()
             }}
           >
             <Icon name="reset-fog" /> Reset explored areas
           </button>
-          <label className="check">
-            <input type="checkbox" checked={safety} onChange={(e) => setVisionSafety(e.target.checked)} />
+          <label className="check" title={mode === 'off' ? 'Only while something is out of sight (Dim or Full)' : undefined}>
+            <input
+              type="checkbox"
+              checked={safety}
+              disabled={mode === 'off'}
+              onChange={(e) => setVisionSafety(e.target.checked)}
+            />
             <Icon name="safety" /> Vision safety
           </label>
           <p className="hint">
             Vision tokens can’t be dragged through walls or closed doors, so a careless drag doesn’t reveal the
             next room. Hold <kbd>Alt</kbd> while dragging to go through anyway.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={hiddenOn} onChange={(e) => setHiddenEnabled(e.target.checked)} />
+            <Icon name="hide" /> Hidden areas{hiddenCount ? ` (${hiddenCount})` : ''}
+          </label>
+          <p className="hint">
+            Unticked, all hidden areas on this floor are switched off, not removed. Each can also be switched off
+            on its own: click its token.
           </p>
         </div>
       )}
