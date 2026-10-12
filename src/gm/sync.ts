@@ -97,6 +97,11 @@ export function startGmSync(): () => void {
       clearTimeout(cameraSaveTimer)
       cameraSaveTimer = window.setTimeout(() => void save('gmCamera', useGm.getState().gmCamera), CAMERA_SAVE_MS)
     }
+    // A vision token walking into a hidden area reveals it (also on arriving on a floor).
+    if (s.scene.hiddenAreas?.length && s.levelId === s.tableLevelId) {
+      if (s.tableLevelId !== prev.tableLevelId || s.levelId !== prev.levelId) useGm.getState().revealEntered(null)
+      else if (s.scene.lights !== prev.scene.lights) useGm.getState().revealEntered(prev.scene.lights)
+    }
     // Vision tokens moving (or the map under them) reveal more of the fog.
     if (s.scene.fog.enabled && s.scene !== prev.scene) scheduleStamp()
     if (s.fogVersion !== prev.fogVersion || s.tableLevelId !== prev.tableLevelId) {
@@ -104,8 +109,16 @@ export function startGmSync(): () => void {
       clearTimeout(fogSaveTimer)
       fogSaveTimer = window.setTimeout(() => void save('fogMemory', useGm.getState().fogMemory), FOG_SAVE_MS)
     }
+    // Editing a floor the table doesn't show changes nothing there but the shared parts.
+    const tableSceneChanged =
+      s.levelId === s.tableLevelId || prev.levelId === prev.tableLevelId
+        ? s.scene !== prev.scene
+        : s.scene.view !== prev.scene.view ||
+          s.scene.viewZoom !== prev.scene.viewZoom ||
+          s.scene.squareMm !== prev.scene.squareMm ||
+          s.scene.fog.safety !== prev.scene.fog.safety
     if (
-      s.scene !== prev.scene ||
+      tableSceneChanged ||
       s.levels !== prev.levels ||
       s.tableLevelId !== prev.tableLevelId ||
       s.display !== prev.display ||

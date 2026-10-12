@@ -17,7 +17,7 @@ interface LoadedImage {
  * through their sprite sheet.
  */
 export class ObjectsLayer extends Container {
-  private meshes = new Map<string, { mesh: ObjectMesh; asset: string }>()
+  private meshes = new Map<string, { mesh: ObjectMesh; asset: string; placed: MapObject | null }>()
   private loaded = new Map<string, LoadedImage>()
   private images: AssetImages = {}
   private shared: Partial<Record<SharedTextureSlot, TextureSource | null>> = {}
@@ -31,9 +31,9 @@ export class ObjectsLayer extends Container {
     this.mapGroup = mapGroup
   }
 
-  /** Whether any shown object is animated. */
+  /** Whether any shown object is animated (and its frames are in). */
   get animated() {
-    return this.objects.some((o) => this.images[o.asset]?.frames)
+    return this.objects.some((o) => this.images[o.asset]?.frames && this.loaded.get(o.asset)?.source)
   }
 
   setImages(images: AssetImages) {
@@ -72,13 +72,16 @@ export class ObjectsLayer extends Container {
       if (!m) {
         const mesh = createObjectMesh(this.mapGroup)
         for (const slot of SHARED_SLOTS) mesh.setTexture(slot, this.shared[slot] ?? null)
-        m = { mesh, asset: o.asset }
+        m = { mesh, asset: o.asset, placed: null }
         this.meshes.set(o.id, m)
         this.addChild(mesh.mesh)
         const l = this.acquire(o.asset)
         if (l?.source) mesh.setTexture('uObject', l.source)
       }
-      m.mesh.setCorners(objectCorners(o))
+      if (m.placed !== o) {
+        m.mesh.setCorners(objectCorners(o))
+        m.placed = o
+      }
       m.mesh.mesh.visible = !!this.loaded.get(o.asset)?.source
       // Draw order follows the scene's order.
       if (this.getChildIndex(m.mesh.mesh) !== index) this.setChildIndex(m.mesh.mesh, Math.min(index, this.children.length - 1))

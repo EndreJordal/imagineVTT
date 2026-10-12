@@ -18,13 +18,13 @@ export function sceneBounds(scene: Scene): Rect {
  * Table-screen CSS pixels per map pixel, so one grid square = squareMm physically (times
  * the table zoom, when the GM zooms out for an overview).
  */
-export function tableScale(scene: Scene, display: Display): number {
+export function tableScale(scene: Pick<Scene, 'grid' | 'squareMm' | 'viewZoom'>, display: Display): number {
   return ((display.pxPerMm * scene.squareMm) / scene.grid.size) * (scene.viewZoom ?? 1)
 }
 
 /** Table zoom limits, and how close to true scale snaps to it. */
-export const MIN_VIEW_ZOOM = 0.05
-export const MAX_VIEW_ZOOM = 4
+const MIN_VIEW_ZOOM = 0.05
+const MAX_VIEW_ZOOM = 4
 const VIEW_ZOOM_SNAP = 0.04
 
 /** A table zoom within limits, snapped to true scale when it's close. */

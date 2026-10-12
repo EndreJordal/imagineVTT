@@ -4,7 +4,7 @@ import { LightKindIcon } from './icons'
 
 /** Banner shown while a light is waiting to be placed. */
 export function PlacementHint() {
-  const kind = useGm((s) => s.placingLight)
+  const kind = useGm((s) => (s.tool.kind === 'light' ? s.tool.light : null))
   if (!kind) return null
   const { icon, label } = LIGHT_PRESETS[kind]
   return (

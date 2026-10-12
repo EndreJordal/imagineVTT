@@ -1,4 +1,4 @@
-import type { HiddenAreas } from './hidden'
+import type { HiddenArea } from './hidden'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
 import type { Wall } from './visibility'
@@ -79,11 +79,9 @@ export interface Scene {
   objects: MapObject[]
   /**
    * Hidden areas ("local fog"): black on the table whatever the party sees, but they don't
-   * block sight past them. Null or absent: none.
+   * block sight past them. Absent in scenes saved before them.
    */
-  hidden?: HiddenAreas | null
-  /** How soft hidden areas' edges are, in squares (shared by the floors). */
-  hiddenSoftness?: number
+  hiddenAreas?: HiddenArea[]
 }
 
 export type Orientation = 0 | 90 | 180 | 270

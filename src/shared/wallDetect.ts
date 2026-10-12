@@ -37,7 +37,7 @@ export interface GridSpec {
 }
 
 /** Image in CIE Lab (L 0..100), 3 values per pixel. */
-export interface LabImage {
+interface LabImage {
   width: number
   height: number
   data: Float32Array
@@ -54,7 +54,7 @@ export function toRgb(rgba: ArrayLike<number>, width: number, height: number): R
 }
 
 /** Area-average resample by a (fractional) factor < 1. */
-export function resample(img: RgbImage, scale: number): RgbImage {
+function resample(img: RgbImage, scale: number): RgbImage {
   const width = Math.max(1, Math.round(img.width * scale))
   const height = Math.max(1, Math.round(img.height * scale))
   const data = new Float32Array(width * height * 3)
@@ -94,7 +94,7 @@ function toGrayImage(img: RgbImage): GrayImage {
   return { width: img.width, height: img.height, data }
 }
 
-export function toLab(img: RgbImage): LabImage {
+function toLab(img: RgbImage): LabImage {
   const data = new Float32Array(img.data.length)
   const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
   const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
@@ -138,7 +138,7 @@ const dist = (a: ArrayLike<number>, b: ArrayLike<number>) =>
  * it don't count) is compared with the colours well inside the squares either side.
  * `S`, `px`, `py`: square size and grid line position in the work image's pixels.
  */
-export function scoreEdges(lab: LabImage, S: number, px: number, py: number): Edge[] {
+function scoreEdges(lab: LabImage, S: number, px: number, py: number): Edge[] {
   const edges: Edge[] = []
   const { width, height, data } = lab
   const half = Math.floor(0.45 * S)
@@ -222,7 +222,7 @@ function strokeOf(profile: number[][], S: number) {
 }
 
 /** Box blur of each channel, radius r (separable, clamped at the borders). */
-export function blurLab(img: LabImage, r: number): LabImage {
+function blurLab(img: LabImage, r: number): LabImage {
   const { width, height } = img
   const tmp = new Float32Array(img.data.length)
   const out = new Float32Array(img.data.length)
@@ -248,7 +248,7 @@ export function blurLab(img: LabImage, r: number): LabImage {
   return { width, height, data: out }
 }
 
-export interface VoidResult {
+interface VoidResult {
   /** 1 where void. */
   mask: Uint8Array
   /** 'none': no void (outdoor maps); 'frame': only a dark frame around the map. */
@@ -262,7 +262,7 @@ export interface VoidResult {
  * drop shadows and shading around the walls up to their drawn edges. Empty when the border
  * isn't dark (outdoor maps); only the frame when the dark border is just a frame.
  */
-export function voidMask(lab: LabImage, S: number, log: (m: string) => void = () => {}): VoidResult {
+function voidMask(lab: LabImage, S: number, log: (m: string) => void = () => {}): VoidResult {
   const { width, height } = lab
   const smooth = blurLab(lab, Math.max(1, Math.round(0.15 * S)))
   const d = smooth.data
@@ -352,7 +352,7 @@ export function voidMask(lab: LabImage, S: number, log: (m: string) => void = ()
 }
 
 /** 4-connected components of set pixels, as lists of pixel indices. */
-export function components(mask: Uint8Array, width: number, height: number): number[][] {
+function components(mask: Uint8Array, width: number, height: number): number[][] {
   const seen = new Uint8Array(mask.length)
   const out: number[][] = []
   const stack: number[] = []
@@ -383,13 +383,13 @@ export function open(mask: Uint8Array, width: number, height: number, r: number)
   return dilate(erode(mask, width, height, r), width, height, r)
 }
 
-export function erode(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
+function erode(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
   const inv = mask.map((v) => 1 - v)
   return dilate(inv, width, height, r).map((v) => 1 - v)
 }
 
 /** Dilation with a (2r+1)² square, separable (pixels beyond the image count as unset). */
-export function dilate(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
+function dilate(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
   const tmp = new Uint8Array(mask.length)
   const out = new Uint8Array(mask.length)
   for (let y = 0; y < height; y++) {
@@ -455,7 +455,7 @@ function frameOnly(mask: Uint8Array, width: number, height: number, ...box: numb
 }
 
 /** Lightness gradient magnitude (Sobel, per pixel). */
-export function gradientMagnitude(lab: LabImage): Float32Array {
+function gradientMagnitude(lab: LabImage): Float32Array {
   const { width, height, data } = lab
   const L = (x: number, y: number) =>
     data[(Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 3]
@@ -471,7 +471,7 @@ export function gradientMagnitude(lab: LabImage): Float32Array {
 }
 
 /** Local standard deviation of lightness, in a (2r+1)² window. */
-export function localStd(lab: LabImage, r: number): Float32Array {
+function localStd(lab: LabImage, r: number): Float32Array {
   const { width, height, data } = lab
   const L: LabImage = { width, height, data: new Float32Array(data.length) }
   for (let i = 0; i < width * height; i++) {
@@ -573,7 +573,7 @@ export function simplifyClosed(poly: Pt[], tolerance: number): Pt[] {
   return [...a.slice(0, -1), ...b.slice(0, -1)]
 }
 
-export function simplifyOpen(line: Pt[], tolerance: number): Pt[] {
+function simplifyOpen(line: Pt[], tolerance: number): Pt[] {
   if (line.length < 3) return line
   const keep = new Uint8Array(line.length)
   keep[0] = keep[line.length - 1] = 1
@@ -726,12 +726,6 @@ function dedupe(poly: Pt[]): Pt[] {
   return pts
 }
 
-/** A wall segment along grid lines, in grid units (corner coordinates). */
-export interface GridSegment {
-  a: Pt
-  b: Pt
-}
-
 /**
  * Wall lines drawn between floors (inside buildings, or on outdoor maps): edges whose stroke
  * stands out, kept by hysteresis like edge detection. Strong strokes seed a wall line; it
@@ -740,7 +734,7 @@ export interface GridSegment {
  *
  * `interior(edge)`: whether both sides of the edge are floor (not void).
  */
-export function strokeWalls(edges: Edge[], interior: (e: Edge) => boolean, log: (m: string) => void = () => {}): Edge[] {
+function strokeWalls(edges: Edge[], interior: (e: Edge) => boolean, log: (m: string) => void = () => {}): Edge[] {
   const candidates = edges.filter((e) => interior(e) && e.width <= 0.45)
   if (!candidates.length) return []
   const scores = candidates.map((e) => e.stroke).sort((a, b) => a - b)
@@ -771,7 +765,7 @@ export function strokeWalls(edges: Edge[], interior: (e: Edge) => boolean, log: 
 }
 
 /** Edge endpoints in grid-corner coordinates. */
-export function edgeEnds(e: Edge): [Pt, Pt] {
+function edgeEnds(e: Edge): [Pt, Pt] {
   return e.axis === 'v'
     ? [{ x: e.i, y: e.j }, { x: e.i, y: e.j + 1 }]
     : [{ x: e.j, y: e.i }, { x: e.j + 1, y: e.i }]
@@ -825,7 +819,7 @@ export interface DetectedWall {
   door?: boolean
 }
 
-export interface WallDetectOptions {
+interface WallDetectOptions {
   log?: (message: string) => void
 }
 
@@ -960,7 +954,7 @@ function mergeRuns(edges: Edge[]): Run[] {
 }
 
 /** A grid detection to refine (see refineGridByWalls); matches gridDetect's GridDetection. */
-export type GridGuess = Pick<GridDetection, 'period' | 'phaseX' | 'phaseY' | 'confidence' | 'polarity'>
+type GridGuess = Pick<GridDetection, 'period' | 'phaseX' | 'phaseY' | 'confidence' | 'polarity'>
 
 /** Maps exported for virtual tabletops are usually this many squares on their longer side. */
 const TYPICAL_SQUARES = { min: 15, max: 64 }

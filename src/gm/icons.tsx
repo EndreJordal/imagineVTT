@@ -1,5 +1,4 @@
 import {
-  Brush,
   BrickWall,
   ChevronDown,
   ChevronLeft,
@@ -17,9 +16,7 @@ import {
   FolderOpen,
   Grid3x3,
   Hand,
-  ImagePlus,
   Images,
-  Layers,
   Lightbulb,
   Lock,
   LockOpen,
@@ -39,7 +36,6 @@ import {
   ShieldCheck,
   Sun,
   Theater,
-  Trash2,
   Tv,
   Undo2,
   WandSparkles,
@@ -83,18 +79,14 @@ const ICONS = {
   animated: Film,
   add: Plus,
   more: Ellipsis,
-  floors: Layers,
   'chevron-down': ChevronDown,
   left: ChevronLeft,
   right: ChevronRight,
-  paint: Brush,
   'turn-left': RotateCcwSquare,
   hide: EyeOff,
   'turn-right': RotateCwSquare,
   curtain: Theater,
-  'add-image': ImagePlus,
   slideshow: Images,
-  remove: Trash2,
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONS

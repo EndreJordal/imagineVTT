@@ -40,10 +40,17 @@ export function withLinked(walls: Wall[], refs: WallPointRef[]): WallPointRef[] 
 
 /** Distinct positions of wall points (linked points drawn once). */
 export function uniquePositions(points: Point[]): Point[] {
-  const out: Point[] = []
-  for (const p of points) if (!out.some((q) => sameSpot(p, q))) out.push(p)
-  return out
+  const seen = new Set<string>()
+  return points.filter((p) => {
+    const key = spotKey(p)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
+
+/** A key that's the same for points at the same spot (as sameSpot judges them, near enough). */
+export const spotKey = (p: Point) => `${Math.round(p.x * 1e5)},${Math.round(p.y * 1e5)}`
 
 /** Move the given wall points by (dx, dy). */
 export function moveWallPoints(walls: Wall[], refs: WallPointRef[], dx: number, dy: number): Wall[] {
@@ -98,7 +105,7 @@ export function nearestOnSegment(p: Point, a: Point, b: Point): { point: Point; 
 const ON_LINE = 1e-3
 
 /** The wall segment (non-door wall, index i: points i → i+1) that both points lie on. */
-export function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; index: number } | null {
+function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; index: number } | null {
   for (const w of walls) {
     if (w.door) continue
     for (let i = 0; i + 1 < w.points.length; i++) {

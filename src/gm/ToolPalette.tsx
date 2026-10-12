@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { LIGHT_MENU, LIGHT_PRESETS, type LightKind } from '../shared/lights'
 import { useGm } from './store'
+import { SELECT } from './tools'
 import { useDropdown } from './useDropdown'
 import { Icon, LightKindIcon } from './icons'
 
@@ -13,11 +14,7 @@ const SNAPS = [
 
 /** Leave any tool: back to selecting and dragging. */
 function selectTool() {
-  const gm = useGm.getState()
-  gm.setBuildingWalls(false)
-  gm.setBuildingDoors(false)
-  gm.setPlacingLight(null)
-  gm.setHideTool(null)
+  useGm.getState().setTool(SELECT)
 }
 
 /**
@@ -25,10 +22,8 @@ function selectTool() {
  * hide areas. Keys: Esc select, W walls, D doors, L lights, H hide.
  */
 export function ToolPalette() {
-  const walls = useGm((s) => s.buildingWalls)
-  const doors = useGm((s) => s.buildingDoors)
-  const placing = useGm((s) => s.placingLight)
-  const hiding = useGm((s) => !!s.hideTool)
+  const kind = useGm((s) => s.tool.kind)
+  const placing = useGm((s) => (s.tool.kind === 'light' ? s.tool.light : null))
   const { open: lightsOpen, setOpen, root: lightsRoot } = useDropdown()
 
   useEffect(() => {
@@ -38,44 +33,44 @@ export function ToolPalette() {
       if (el instanceof Element && el.closest('input, textarea, select, [contenteditable]')) return
       const gm = useGm.getState()
       const key = e.key.toLowerCase()
-      if (key === 'w') gm.setBuildingWalls(!gm.buildingWalls)
-      else if (key === 'd') gm.setBuildingDoors(!gm.buildingDoors)
+      if (key === 'w') gm.toggleTool('walls')
+      else if (key === 'd') gm.toggleTool('doors')
       else if (key === 'l') setOpen((open) => !open)
-      else if (key === 'h') gm.toggleHideTool()
+      else if (key === 'h') gm.toggleTool('hide')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [setOpen])
 
   const pick = (kind: LightKind) => {
-    useGm.getState().setPlacingLight(kind)
+    useGm.getState().setTool({ kind: 'light', light: kind })
     setOpen(false)
   }
-  const idle = !walls && !doors && !placing && !hiding
+
 
   return (
     <nav className="tool-palette" aria-label="Tools">
-      <ToolButton icon={<Icon name="select" size={20} />} label="Select and move" keyName="Esc" active={idle} onClick={selectTool} />
+      <ToolButton icon={<Icon name="select" size={20} />} label="Select and move" keyName="Esc" active={kind === 'select'} onClick={selectTool} />
       <ToolButton
         icon={<Icon name="walls" size={20} />}
         label="Build walls"
         keyName="W"
-        active={walls}
-        onClick={() => useGm.getState().setBuildingWalls(!walls)}
+        active={kind === 'walls'}
+        onClick={() => useGm.getState().toggleTool('walls')}
       />
       <ToolButton
         icon={<Icon name="doors" size={20} />}
         label="Build doors"
         keyName="D"
-        active={doors}
-        onClick={() => useGm.getState().setBuildingDoors(!doors)}
+        active={kind === 'doors'}
+        onClick={() => useGm.getState().toggleTool('doors')}
       />
       <ToolButton
         icon={<Icon name="hide" size={20} />}
         label="Hide areas (local fog)"
         keyName="H"
-        active={hiding}
-        onClick={() => useGm.getState().toggleHideTool()}
+        active={kind === 'hide'}
+        onClick={() => useGm.getState().toggleTool('hide')}
       />
       <div className="menu" ref={lightsRoot}>
         <ToolButton

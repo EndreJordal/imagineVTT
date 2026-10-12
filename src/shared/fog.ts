@@ -40,18 +40,21 @@ export function turnFogMemory(memory: FogMemory, turns: number): FogMemory {
   return m
 }
 
-export function createFogMemory(bounds: Size): FogMemory {
+/** The memory grid's size over bounds of this shape. */
+export function fogGrid(bounds: Size): { cols: number; rows: number } {
   const k = FOG_RESOLUTION / Math.max(bounds.width, bounds.height)
-  const cols = Math.max(1, Math.round(bounds.width * k))
-  const rows = Math.max(1, Math.round(bounds.height * k))
+  return { cols: Math.max(1, Math.round(bounds.width * k)), rows: Math.max(1, Math.round(bounds.height * k)) }
+}
+
+export function createFogMemory(bounds: Size): FogMemory {
+  const { cols, rows } = fogGrid(bounds)
   return { cols, rows, data: new Uint8Array(cols * rows) }
 }
 
 /** Whether a memory grid was made for bounds of this shape (not for another map). */
 export function fitsBounds(memory: FogMemory, bounds: Size): boolean {
-  const k = FOG_RESOLUTION / Math.max(bounds.width, bounds.height)
-  return memory.cols === Math.max(1, Math.round(bounds.width * k)) &&
-    memory.rows === Math.max(1, Math.round(bounds.height * k))
+  const { cols, rows } = fogGrid(bounds)
+  return memory.cols === cols && memory.rows === rows
 }
 
 /**

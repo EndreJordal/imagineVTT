@@ -9,7 +9,9 @@ import { Icon } from './icons'
 /** Toolbar settings button: settings that rarely change (calibration, for now). */
 export function SettingsMenu() {
   const { open, setOpen, root } = useDropdown()
-  const s = useGm()
+  const calibrating = useGm((g) => g.calibrating)
+  const display = useGm((g) => g.display)
+  const s = { ...useGm.getState(), calibrating, display }
   return (
     <div className="menu" ref={root}>
       <button
@@ -53,7 +55,8 @@ export function SettingsMenu() {
 
 /** Measure the on-table square with a ruler and enter the result to correct the scale. */
 function Calibrate() {
-  const { display, setDisplay } = useGm()
+  const display = useGm((g) => g.display)
+  const { setDisplay } = useGm.getState()
   const applied = display.lastMeasuredMm
   // Shows the last applied measurement; a new one can be typed over it.
   const [measured, setMeasured] = useState(applied === undefined ? '' : String(applied))

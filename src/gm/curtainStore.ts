@@ -103,8 +103,14 @@ export async function scanCurtainFolder() {
     await walk(dir, '')
     if (dir !== folder) return // another folder chosen meanwhile
     found.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+    const before = useCurtain.getState().images
+    const same =
+      before.length === found.length &&
+      before.every(
+        (b, i) => b.id === found[i].id && b.file.size === found[i].file.size && b.file.lastModified === found[i].file.lastModified,
+      )
     useCurtain.setState((s) => ({
-      images: found,
+      images: same ? s.images : found,
       status: 'ready',
       // The first picture is the one shown, until another is picked.
       state:

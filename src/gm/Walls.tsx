@@ -1,6 +1,7 @@
 import { selectedSegment } from '../shared/walls'
 import { AutoWalls } from './AutoWalls'
 import { useGm } from './store'
+import { SELECT } from './tools'
 import { Icon } from './icons'
 
 /** Selection box for wall points: how many, and delete them. */
@@ -31,10 +32,10 @@ export function WallPointsPanel() {
 
 /** Floating help while building doors. */
 export function DoorToolbox() {
-  const building = useGm((s) => s.buildingDoors)
+  const building = useGm((s) => s.tool.kind === 'doors')
   const started = useGm((s) => !!s.doorDraft)
   if (!building) return null
-  const { cancelDoorDraft, setBuildingDoors } = useGm.getState()
+  const { cancelDoorDraft, setTool } = useGm.getState()
 
   return (
     <aside className="light-panel wall-toolbox" aria-label="Door building">
@@ -42,7 +43,7 @@ export function DoorToolbox() {
         <span className="light-panel-title">
           <Icon name="doors" /> Building doors
         </span>
-        <button className="icon-button" title="Stop building doors" onClick={() => setBuildingDoors(false)}>
+        <button className="icon-button" title="Stop building doors" onClick={() => setTool(SELECT)}>
           <Icon name="close" />
         </button>
       </header>
@@ -67,11 +68,11 @@ export function DoorToolbox() {
 
 /** Floating help and actions while building walls. */
 export function WallToolbox() {
-  const building = useGm((s) => s.buildingWalls)
+  const building = useGm((s) => s.tool.kind === 'walls')
   const points = useGm((s) => s.wallDraft.length)
   const total = useGm((s) => s.scene.walls.length)
   if (!building) return null
-  const { confirmWallDraft, cancelWallDraft, setBuildingWalls, clearWalls } = useGm.getState()
+  const { confirmWallDraft, cancelWallDraft, setTool, clearWalls } = useGm.getState()
 
   return (
     <aside className="light-panel wall-toolbox" aria-label="Wall building">
@@ -79,7 +80,7 @@ export function WallToolbox() {
         <span className="light-panel-title">
           <Icon name="walls" /> Building walls
         </span>
-        <button className="icon-button" title="Stop building walls" onClick={() => setBuildingWalls(false)}>
+        <button className="icon-button" title="Stop building walls" onClick={() => setTool(SELECT)}>
           <Icon name="close" />
         </button>
       </header>

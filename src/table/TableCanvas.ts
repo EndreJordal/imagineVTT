@@ -6,6 +6,7 @@ import type { CurtainState } from '../shared/curtain'
 import { CALIBRATION_MM, tableTransform } from '../shared/geometry'
 import type { FogMemory } from '../shared/fog'
 import type { AssetImages } from '../shared/mapObjects'
+import { reuse } from '../shared/reuse'
 import type { TableState } from '../shared/types'
 
 /** Display-only renderer for the table TV. Fixed physical scale, no input. */
@@ -35,7 +36,11 @@ export class TableCanvas extends PixiHost {
   }
 
   setState(state: TableState) {
-    this.state = state
+    // Each message is a fresh copy: keep what didn't change as it was, so the layers' caches
+    // (lights, sight, hidden areas) hold, and a message that changes nothing draws nothing.
+    const next = reuse(this.state, state)
+    if (next === this.state) return
+    this.state = next
     this.render()
   }
 

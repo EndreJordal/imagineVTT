@@ -1,4 +1,4 @@
-import type { HiddenAreas } from './hidden'
+import type { HiddenArea } from './hidden'
 import type { Light } from './lights'
 import type { MapObject } from './mapObjects'
 import type { GridSettings, MapInfo, Scene } from './types'
@@ -23,7 +23,7 @@ export interface Level {
   walls: Wall[]
   objects: MapObject[]
   /** Hidden areas ("local fog"); absent in floors saved before them. */
-  hidden?: HiddenAreas | null
+  hiddenAreas?: HiddenArea[]
 }
 
 /** A floor's part of a scene (the scene shows one floor; see applyLevel). */
@@ -38,7 +38,7 @@ export function extractLevel(scene: Scene, base: Pick<Level, 'id' | 'name'>): Le
     fogEnabled: scene.fog.enabled,
     walls: scene.walls,
     objects: scene.objects,
-    hidden: scene.hidden ?? null,
+    hiddenAreas: scene.hiddenAreas ?? [],
   }
 }
 
@@ -53,7 +53,7 @@ export function applyLevel(scene: Scene, level: Level): Scene {
     fog: { ...scene.fog, enabled: level.fogEnabled },
     walls: level.walls,
     objects: level.objects,
-    hidden: level.hidden ?? null,
+    hiddenAreas: level.hiddenAreas ?? [],
   }
 }
 
@@ -69,7 +69,7 @@ export function emptyLevel(id: string, name: string, like: Scene): Level {
     fogEnabled: like.fog.enabled,
     walls: [],
     objects: [],
-    hidden: null,
+    hiddenAreas: [],
   }
 }
 

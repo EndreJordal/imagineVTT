@@ -45,7 +45,7 @@ export function objectCorners(o: Pick<MapObject, 'x' | 'y' | 'width' | 'height' 
 }
 
 /** Point p in the object's own frame (unrotated, relative to its centre). */
-export function toObjectFrame(o: MapObject, p: Point): Point {
+function toObjectFrame(o: MapObject, p: Point): Point {
   const c = Math.cos(-o.rotation)
   const s = Math.sin(-o.rotation)
   const dx = p.x - o.x

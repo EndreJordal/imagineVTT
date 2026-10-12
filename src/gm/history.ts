@@ -49,8 +49,12 @@ let burstTimer: number | undefined
 let pressed = false
 let applying = false
 
+/** Tell the UI whether undo and redo are possible (only when that changes: every edit lands here). */
 function publish() {
-  useGm.setState({ history: { canUndo: past.length > 0, canRedo: future.length > 0 } })
+  const canUndo = past.length > 0
+  const canRedo = future.length > 0
+  const { history } = useGm.getState()
+  if (history.canUndo !== canUndo || history.canRedo !== canRedo) useGm.setState({ history: { canUndo, canRedo } })
 }
 
 function closeBurst() {

@@ -495,12 +495,6 @@ body,
   font-weight: 600;
 }
 
-.snap-arrow {
-  margin-left: 2px;
-  font-size: 9px;
-  color: var(--muted);
-}
-
 .snap-flyout {
   display: flex;
   min-width: 0;

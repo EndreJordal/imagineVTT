@@ -40,7 +40,7 @@ export class FogLayer {
       this.viewers.delete(id)
       this.dirty = true
     }
-    const segments = walls.length ? wallSegments(walls) : []
+    let segments: ReturnType<typeof wallSegments> | null = null
     for (const l of seeing) {
       let v = this.viewers.get(l.id)
       if (!v) {
@@ -61,7 +61,7 @@ export class FogLayer {
       v.key = key
       v.sight.position.set(l.x, l.y)
       v.sight.scale.set(range / (v.sight.texture.width / 2))
-      v.clip.clear().poly(visibilityPolygon(l, range, segments)).fill(0xffffff)
+      v.clip.clear().poly(visibilityPolygon(l, range, (segments ??= wallSegments(walls)))).fill(0xffffff)
       this.dirty = true
     }
   }
@@ -69,9 +69,12 @@ export class FogLayer {
   private walls: Wall[] = []
   private wallsVersion = 0
 
-  /** Show this memory grid (the same grid object is redrawn when its version changes). */
-  setMemory(memory: FogMemory | null) {
-    if (!memory) return
+  /**
+   * Show this memory grid (the same grid object is redrawn when its version changes).
+   * Returns a texture it replaced, for the caller to destroy once nothing is bound to it.
+   */
+  setMemory(memory: FogMemory | null): Texture | null {
+    if (!memory) return null
     // Uploaded as-is, one byte per cell (a single-channel texture: masks read the red
     // channel). The same grid object is updated in place, so re-upload its new contents.
     const source = this.memoryTexture?.source as BufferImageSource | undefined
@@ -80,18 +83,19 @@ export class FogLayer {
       const pixels = source.resource as Uint8Array
       if (pixels !== memory.data) pixels.set(memory.data)
       source.update()
-    } else {
-      this.memoryTexture?.destroy(true)
-      this.memoryTexture = new Texture({
-        source: new BufferImageSource({
-          resource: memory.data,
-          width: memory.cols,
-          height: memory.rows,
-          format: 'r8unorm',
-          scaleMode: 'linear',
-        }),
-      })
+      return null
     }
+    const old = this.memoryTexture
+    this.memoryTexture = new Texture({
+      source: new BufferImageSource({
+        resource: memory.data,
+        width: memory.cols,
+        height: memory.rows,
+        format: 'r8unorm',
+        scaleMode: 'linear',
+      }),
+    })
+    return old
   }
 
   /** What's in sight now (red channel), over the map's bounds. */

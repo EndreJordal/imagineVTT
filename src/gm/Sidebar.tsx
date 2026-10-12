@@ -6,6 +6,7 @@ import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
 import { PvbOrientation } from './PvbOrientation'
 import { finite, positive, round } from './numbers'
+import { useShallow } from 'zustand/react/shallow'
 import { MM_PER_INCH, useGm } from './store'
 import { openTableWindow } from './tableWindow'
 import { Field, Section, Slider } from './ui'
@@ -19,22 +20,34 @@ async function readImage(file: File) {
 }
 
 export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
-  const s = useGm()
-  const { grid, map } = s.scene
+  // Only what the sidebar shows: the store changes on every drag, the sidebar rarely.
+  const { grid, map, squareMm, viewZoom, tableScreen, tableConnected, display } = useGm(
+    useShallow((g) => ({
+      grid: g.scene.grid,
+      map: g.scene.map,
+      squareMm: g.scene.squareMm,
+      viewZoom: g.scene.viewZoom,
+      tableScreen: g.tableScreen,
+      tableConnected: g.tableConnected,
+      display: g.display,
+    })),
+  )
+  const s = useGm.getState()
+  const scale = tableScale({ grid, squareMm, viewZoom }, display)
 
   return (
     <aside className="sidebar">
       <Section title="Player View Box (PVB)">
         <button onClick={openTableWindow}>Open table window</button>
         <p className="hint">
-          {s.tableConnected
-            ? `Connected · ${s.tableScreen.width}×${s.tableScreen.height}`
+          {tableConnected
+            ? `Connected · ${tableScreen.width}×${tableScreen.height}`
             : 'Not connected. Open it, drag it to the TV, click it and press F11 for fullscreen.'}
         </p>
         <p className="hint">
-          Shows {(s.tableScreen.width / tableScale(s.scene, s.display) / grid.size).toFixed(1)} ×{' '}
-          {(s.tableScreen.height / tableScale(s.scene, s.display) / grid.size).toFixed(1)} squares
-          {!s.tableConnected && ` (last known ${s.tableScreen.width}×${s.tableScreen.height})`}
+          Shows {(tableScreen.width / scale / grid.size).toFixed(1)} ×{' '}
+          {(tableScreen.height / scale / grid.size).toFixed(1)} squares
+          {!tableConnected && ` (last known ${tableScreen.width}×${tableScreen.height})`}
         </p>
         <PvbOrientation />
         <button
@@ -183,13 +196,13 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
         <h3>Physical grid size</h3>
         <div className="row">
           <button
-            className={s.scene.squareMm === MM_PER_INCH ? 'active' : ''}
+            className={squareMm === MM_PER_INCH ? 'active' : ''}
             onClick={() => s.setSquareMm(MM_PER_INCH)}
           >
             1 inch
           </button>
           <button
-            className={s.scene.squareMm === 25 ? 'active' : ''}
+            className={squareMm === 25 ? 'active' : ''}
             onClick={() => s.setSquareMm(25)}
           >
             25 mm
@@ -200,7 +213,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
             type="number"
             step={0.1}
             min={5}
-            value={s.scene.squareMm}
+            value={squareMm}
             onChange={(e) => positive(e.target.valueAsNumber, s.setSquareMm)}
           />
         </Field>

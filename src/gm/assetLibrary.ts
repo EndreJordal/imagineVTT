@@ -183,19 +183,25 @@ async function assetFile(path: string): Promise<File> {
   return (await dir.getFileHandle(`${parts.at(-1)}.rwfile`)).getFile()
 }
 
-/** Images made this visit, by asset (previewing then placing an asset reuses it). */
+/**
+ * Images made this visit, by asset (previewing then placing an asset reuses it): the last
+ * few only, as animated ones are big. Placed ones live on in the scene's objectImages.
+ */
 const images = new Map<string, Promise<AssetImage>>()
+const KEEP_IMAGES = 12
 
 /** An asset's image, ready to show: from the scene if it's placed already, else made from its file. */
 export function assetImage(asset: LibraryAsset): Promise<AssetImage> {
   const placed = useGm.getState().objectImages[asset.path]
   if (placed) return Promise.resolve(placed)
   let p = images.get(asset.path)
-  if (!p) {
+  if (p) images.delete(asset.path) // most recently used last
+  else {
     p = makeImage(asset)
-    images.set(asset.path, p)
     p.catch(() => images.delete(asset.path))
   }
+  images.set(asset.path, p)
+  while (images.size > KEEP_IMAGES) images.delete(images.keys().next().value!)
   return p
 }
 

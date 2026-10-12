@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isParty } from '../shared/levels'
 import type { Point } from '../shared/types'
-import { GmCanvas } from './GmCanvas'
+import { GmCanvas, UI_KEYS } from './GmCanvas'
 import { LightPanel } from './LightPanel'
 import { ASSET_DRAG_TYPE, initAssetLibrary, placeAsset } from './assetLibrary'
 import { AssetPreview } from './Assets'
@@ -10,11 +10,12 @@ import { PlacementHint } from './PlacementHint'
 import { openDroppedScene, openScene, saveScene } from './sceneFiles'
 import { GmNotice } from './GmNotice'
 import { DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
-import { HideToolbox } from './Hide'
+import { HiddenAreaPanel, HideToolbox } from './Hide'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
 import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
-import { gmDarkness, hydrate, levelImage, useGm } from './store'
+import { gmDarkness, hydrate, levelImage, useGm, type GmStore } from './store'
+import { SELECT } from './tools'
 import { Floors } from './Floors'
 import { startGmSync } from './sync'
 import { redo, startHistory, undo } from './history'
@@ -26,16 +27,9 @@ import { ToolPalette } from './ToolPalette'
  */
 function confirmTool() {
   const gm = useGm.getState()
-  if (gm.buildingWalls) {
-    if (gm.wallDraft.length >= 2) gm.confirmWallDraft()
-    else gm.setBuildingWalls(false)
-  } else if (gm.buildingDoors) {
-    gm.setBuildingDoors(false)
-  } else if (gm.placingLight) {
-    gm.setPlacingLight(null)
-  } else if (gm.hideTool) {
-    gm.setHideTool(null)
-  }
+  // Building walls, a wall being drawn is finished first; the next time, the tool goes down.
+  if (gm.tool.kind === 'walls' && gm.wallDraft.length >= 2) gm.confirmWallDraft()
+  else gm.setTool(SELECT)
 }
 
 /** Hide-areas dropper: fill (or reveal) the space clicked, or say why it can't. */
@@ -90,7 +84,8 @@ export function GmApp() {
       onViewMove: (view, force) => useGm.getState().setView(view, !force),
       onViewZoom: (zoom) => useGm.getState().setViewZoom(zoom),
       onHideFill: hideFill,
-      onHidePaint: (from, to, erase) => useGm.getState().hidePaint(from, to, erase),
+      onHidePaint: (from, to, erase, stroke) => useGm.getState().hidePaint(from, to, erase, stroke),
+      onHiddenSelect: (id) => useGm.getState().selectHidden(id),
       onMapResize: (scale) => useGm.getState().setMapScale(scale),
       onMapMove: (position) => useGm.getState().setMapPosition(position),
       onLightMove: (id, to, force) => {
@@ -105,10 +100,10 @@ export function GmApp() {
       onLightSelect: (id) => useGm.getState().selectLight(id),
       onLightToggle: (id) => useGm.getState().toggleLightSelected(id),
       onPlaceLight: (at, keepPlacing) => {
-        const { placingLight, addLight, setPlacingLight } = useGm.getState()
-        if (!placingLight) return
-        addLight(placingLight, at)
-        if (!keepPlacing) setPlacingLight(null)
+        const { tool, addLight, setTool } = useGm.getState()
+        if (tool.kind !== 'light') return
+        addLight(tool.light, at)
+        if (!keepPlacing) setTool(SELECT)
       },
       onToolConfirm: confirmTool,
       onWallPoint: (p) => useGm.getState().addWallPoint(p),
@@ -131,6 +126,7 @@ export function GmApp() {
     if (import.meta.env.DEV) Object.assign(window, { gmCanvas: canvas, gmStore: useGm })
     let cameraVersion = -1
     let objectImages: unknown = null
+    let shownInputs: unknown[] | null = null
     const push = (s = useGm.getState()) => {
       if (s.objectImages !== objectImages) {
         objectImages = s.objectImages
@@ -141,6 +137,15 @@ export function GmApp() {
         cameraVersion = s.cameraVersion
         canvas.setCamera(s.gmCamera)
       }
+      // Only when something the canvas shows changed (not the camera it reported, history,
+      // notices and the like): an update redraws all the overlays.
+      const curtainDown = useCurtain.getState().state.down
+      const inputs = [
+        s.scene, s.levels, s.levelId, s.tableLevelId, s.levelImages, s.onionSkin, s.display, s.calibrating,
+        s.gmVision, s.fogMemory, s.fogVersion, s.mapImage, curtainDown, ...UI_KEYS.map((k) => s[k]),
+      ]
+      if (shownInputs && inputs.every((v, i) => v === shownInputs![i])) return
+      shownInputs = inputs
       canvas.setMapImage(s.mapImage)
       // The GM views their floor (which may not be the table's), with their own darkness
       // (GM vision); the table's state is untouched.
@@ -152,25 +157,8 @@ export function GmApp() {
       const state = { scene, display: s.display, calibrating: s.calibrating }
       const darkness = gmDarkness(s)
       const shown = darkness === state.scene.darkness ? state : { ...state, scene: { ...state.scene, darkness } }
-      canvas.update(shown, {
-        tableScreen: s.tableScreen,
-        tableConnected: s.tableConnected,
-        selectedLightIds: s.selectedLightIds,
-        placingLight: s.placingLight,
-        peeking: s.peeking,
-        buildingWalls: s.buildingWalls,
-        snap: s.snap,
-        wallDraft: s.wallDraft,
-        selectedWallPoints: s.selectedWallPoints,
-        selectedObjectIds: s.selectedObjectIds,
-        onion: onionOf(s),
-        buildingDoors: s.buildingDoors,
-        doorDraft: s.doorDraft,
-        curtainDown: useCurtain.getState().state.down,
-        ghostLightIds: party.map((l) => l.id),
-        hideTool: s.hideTool,
-        hideBrush: s.hideBrush,
-      })
+      const ui = Object.fromEntries(UI_KEYS.map((k) => [k, s[k]])) as Pick<GmStore, (typeof UI_KEYS)[number]>
+      canvas.update(shown, { ...ui, onion: onionOf(s), curtainDown, ghostLightIds: party.map((l) => l.id) })
       canvas.setFogMemory(s.fogMemory, s.fogVersion)
     }
     push()
@@ -184,11 +172,13 @@ export function GmApp() {
     }
   }, [hydrated])
 
-  // Keys (ignored while typing in a field):
-  // - building walls: Enter confirms, Esc cancels the points (or stops building), Backspace
-  //   takes back the last point
-  // - Esc cancels light placement; Delete / Backspace removes the selected lights
+  // Keys (all but Ctrl+S / Ctrl+O ignored while typing in a field):
+  // - Ctrl+S save (Shift: save as), Ctrl+O open, Ctrl+Z / Ctrl+Y undo and redo
+  // - with a tool: Enter (or right-click) confirms or puts it down, Esc cancels or puts it
+  //   down; building walls, Backspace takes back the last point
+  // - Delete / Backspace removes what's selected (lights, wall points, objects, a hidden area)
   // - hold V to peek at the players' view; C drops or raises the curtain
+  // (W, D, L and H pick up the tools: see ToolPalette)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Scene files: Ctrl+S save, Ctrl+Shift+S save as, Ctrl+O open (even while typing).
@@ -228,14 +218,14 @@ export function GmApp() {
         return
       }
       const gm = useGm.getState()
-      if (e.key === 'Enter' && !typing && (gm.buildingWalls || gm.buildingDoors || gm.placingLight || gm.hideTool)) {
+      if (e.key === 'Enter' && !typing && gm.tool.kind !== 'select') {
         confirmTool()
         return
       }
-      if (gm.buildingWalls && !typing) {
+      if (gm.tool.kind === 'walls' && !typing) {
         if (e.key === 'Escape') {
           if (gm.wallDraft.length) gm.cancelWallDraft()
-          else gm.setBuildingWalls(false)
+          else gm.setTool(SELECT)
           return
         }
         if (e.key === 'Backspace' || e.key === 'Delete') {
@@ -244,17 +234,13 @@ export function GmApp() {
           return
         }
       }
-      if (gm.buildingDoors && !typing && e.key === 'Escape') {
+      if (gm.tool.kind === 'doors' && !typing && e.key === 'Escape') {
         if (gm.doorDraft) gm.cancelDoorDraft()
-        else gm.setBuildingDoors(false)
+        else gm.setTool(SELECT)
         return
       }
-      if (e.key === 'Escape' && gm.hideTool && !typing) {
-        gm.setHideTool(null)
-        return
-      }
-      if (e.key === 'Escape' && useGm.getState().placingLight) {
-        useGm.getState().setPlacingLight(null)
+      if (e.key === 'Escape' && !typing && (gm.tool.kind === 'hide' || gm.tool.kind === 'light')) {
+        gm.setTool(SELECT)
         return
       }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
@@ -324,6 +310,7 @@ export function GmApp() {
             <WallPointsPanel />
             <LightPanel />
             <ObjectPanel />
+            <HiddenAreaPanel />
             <AssetPreview />
           </div>
           <PlacementHint />

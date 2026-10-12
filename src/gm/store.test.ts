@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createLight } from '../shared/lights'
 import { extractLevel } from '../shared/levels'
 import { allLevels, levelImage } from './store'
+import { migrateScene } from '../shared/migrate'
 import { gmDarkness, tableState, useGm } from './store'
+import { SELECT } from './tools'
 
 const lights = () => useGm.getState().scene.lights
 const byKind = (kind: string) => lights().find((l) => l.kind === kind)!
@@ -168,14 +170,14 @@ describe('walls', () => {
         lights: [],
         map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
       },
-      buildingWalls: false,
+      tool: SELECT,
       wallDraft: [],
     }))
   })
 
   it('draws a wall point by point, with undo, and confirms it', () => {
-    const { setBuildingWalls, addWallPoint, undoWallPoint, confirmWallDraft } = useGm.getState()
-    setBuildingWalls(true)
+    const { setTool, addWallPoint, undoWallPoint, confirmWallDraft } = useGm.getState()
+    setTool({ kind: 'walls' })
     addWallPoint({ x: 0, y: 0 })
     addWallPoint({ x: 0, y: 0 }) // a double click doesn't add a duplicate
     addWallPoint({ x: 100, y: 0 })
@@ -188,8 +190,8 @@ describe('walls', () => {
   })
 
   it('needs two points for a wall, and cancelling drops the points', () => {
-    const { setBuildingWalls, addWallPoint, confirmWallDraft, cancelWallDraft } = useGm.getState()
-    setBuildingWalls(true)
+    const { setTool, addWallPoint, confirmWallDraft, cancelWallDraft } = useGm.getState()
+    setTool({ kind: 'walls' })
     addWallPoint({ x: 0, y: 0 })
     confirmWallDraft()
     expect(useGm.getState().scene.walls).toEqual([])
@@ -201,8 +203,8 @@ describe('walls', () => {
   })
 
   it('moves and scales walls with the map', () => {
-    const { setBuildingWalls, addWallPoint, confirmWallDraft, setMapPosition, setMapScale } = useGm.getState()
-    setBuildingWalls(true)
+    const { setTool, addWallPoint, confirmWallDraft, setMapPosition, setMapScale } = useGm.getState()
+    setTool({ kind: 'walls' })
     addWallPoint({ x: 100, y: 200 })
     addWallPoint({ x: 300, y: 200 })
     confirmWallDraft()
@@ -213,12 +215,12 @@ describe('walls', () => {
 
   it('box-selects lights and wall points together, adds to it, and deletes it all', () => {
     const gm = () => useGm.getState()
-    gm().setBuildingWalls(true)
+    gm().setTool({ kind: 'walls' })
     gm().addWallPoint({ x: 0, y: 0 })
     gm().addWallPoint({ x: 100, y: 0 })
     gm().addWallPoint({ x: 200, y: 0 })
     gm().confirmWallDraft()
-    gm().setBuildingWalls(false)
+    gm().setTool(SELECT)
     gm().addLight('brazier', { x: 50, y: 50 })
     gm().addLight('candle', { x: 900, y: 900 })
     const wallId = gm().scene.walls[0].id
@@ -246,7 +248,7 @@ describe('walls', () => {
 
   it('closes a shape when the first point is clicked again, and treats that corner as one point', () => {
     const gm = () => useGm.getState()
-    gm().setBuildingWalls(true)
+    gm().setTool({ kind: 'walls' })
     for (const p of [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 0, y: 0 }]) {
       gm().addWallPoint(p)
     }
@@ -277,7 +279,7 @@ describe('doors', () => {
         walls: [{ id: 'r', points: [{ x: 0, y: 0 }, { x: 400, y: 0 }, { x: 400, y: 300 }] }],
         map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
       },
-      buildingDoors: false,
+      tool: SELECT,
       doorDraft: null,
       selectedWallPoints: [],
     }))
@@ -286,7 +288,7 @@ describe('doors', () => {
   const doors = () => gm().scene.walls.filter((w) => w.door)
 
   it('makes a door from two clicks on the same wall, and toggles it', () => {
-    gm().setBuildingDoors(true)
+    gm().setTool({ kind: 'doors' })
     gm().placeDoorPoint({ x: 100, y: 0 })
     expect(gm().doorDraft).toEqual({ x: 100, y: 0 })
     gm().placeDoorPoint({ x: 200, y: 0 })
@@ -297,7 +299,7 @@ describe('doors', () => {
   })
 
   it('starts over when the second click is on another stretch of wall', () => {
-    gm().setBuildingDoors(true)
+    gm().setTool({ kind: 'doors' })
     gm().placeDoorPoint({ x: 100, y: 0 })
     gm().placeDoorPoint({ x: 400, y: 100 })
     expect(doors()).toEqual([])
@@ -489,7 +491,7 @@ describe('opening a scene file', () => {
   it('replaces the scene, orientation, map, fog and camera, and resets the tools', () => {
     const gm = () => useGm.getState()
     gm().selectLight('something')
-    gm().setBuildingWalls(true)
+    gm().setTool({ kind: 'walls' })
     const before = gm().cameraVersion
     const image = new Blob(['img'], { type: 'image/png' })
     const old = { ...gm().scene, darkness: 0.3, lights: [], walls: [], fog: { enabled: true } } as const
@@ -518,7 +520,7 @@ describe('opening a scene file', () => {
     expect(gm().gmCamera).toEqual({ x: 1, y: 2, zoom: 0.5 })
     expect(gm().cameraVersion).toBe(before + 1)
     expect([gm().sceneName, gm().unsaved]).toEqual(['Goblin cave', false])
-    expect([gm().selectedLightIds, gm().buildingWalls]).toEqual([[], false])
+    expect([gm().selectedLightIds, gm().tool]).toEqual([[], SELECT])
   })
 })
 
@@ -576,6 +578,7 @@ describe('hidden areas', () => {
     { x: 400, y: 600 },
     { x: 400, y: 400 },
   ]
+  const areas = () => useGm.getState().scene.hiddenAreas ?? []
   beforeEach(() => {
     useGm.setState((s) => ({
       levelId: s.tableLevelId,
@@ -585,42 +588,136 @@ describe('hidden areas', () => {
         map: { x: 0, y: 0, width: 1000, height: 1000, naturalWidth: 1000, naturalHeight: 1000 },
         walls: [{ id: 'room', points: room }],
         lights: [],
-        hidden: null,
+        hiddenAreas: [],
         fog: { enabled: true, safety: true },
       },
       fogMemory: null,
+      selectedHiddenId: null,
     }))
   })
 
-  it('fills an enclosed room, refuses an open space, and reveals on a second click', () => {
+  it('fills an enclosed room as an area, refuses an open space, and selects an area clicked again', () => {
     const { hideFill } = useGm.getState()
     expect(hideFill({ x: 100, y: 100 })).toBe('open')
-    expect(useGm.getState().scene.hidden).toBeNull()
+    expect(areas()).toHaveLength(0)
     expect(hideFill({ x: 500, y: 500 })).toBe('filled')
-    expect(useGm.getState().scene.hidden).not.toBeNull()
-    expect(hideFill({ x: 500, y: 500 })).toBe('revealed')
-    expect(useGm.getState().scene.hidden).toBeNull()
+    expect(areas()).toHaveLength(1)
+    expect(areas()[0]).toMatchObject({ softness: 0.3, revealWithVision: true })
+    expect(hideFill({ x: 500, y: 500 })).toBe('selected')
+    expect(useGm.getState().selectedHiddenId).toBe(areas()[0].id)
+    expect(areas()).toHaveLength(1)
   })
 
-  it('paints and erases with the brush, and reveals all', () => {
-    const { hidePaint, revealAll } = useGm.getState()
-    hidePaint({ x: 100, y: 100 }, { x: 300, y: 100 }, false)
-    expect(useGm.getState().scene.hidden).not.toBeNull()
-    hidePaint({ x: 100, y: 100 }, { x: 300, y: 100 }, true)
-    expect(useGm.getState().scene.hidden).toBeNull()
-    hidePaint({ x: 100, y: 100 }, { x: 100, y: 100 }, false)
-    revealAll()
-    expect(useGm.getState().scene.hidden).toBeNull()
+  it('makes an area per brush stroke, adds to the area a stroke starts on, and erases', () => {
+    const { hidePaint } = useGm.getState()
+    hidePaint({ x: 100, y: 100 }, { x: 300, y: 100 }, false, 'one')
+    hidePaint({ x: 100, y: 800 }, { x: 300, y: 800 }, false, 'two')
+    expect(areas()).toHaveLength(2)
+    hidePaint({ x: 200, y: 100 }, { x: 200, y: 300 }, false, 'three') // starts on the first
+    expect(areas()).toHaveLength(2)
+    hidePaint({ x: 100, y: 800 }, { x: 300, y: 800 }, true, 'four')
+    expect(areas()).toHaveLength(1)
   })
 
-  it("doesn't remember what's under a hidden area as explored", () => {
-    const { hideFill, addLight, stampFog } = useGm.getState()
+  it('removes an area, and sets one up', () => {
+    const { hideFill, updateHidden, removeHidden } = useGm.getState()
     hideFill({ x: 500, y: 500 })
-    addLight('vision', { x: 500, y: 500 })
+    const id = areas()[0].id
+    updateHidden(id, { softness: 1, revealWithVision: false })
+    expect(areas()[0]).toMatchObject({ softness: 1, revealWithVision: false })
+    removeHidden(id)
+    expect(areas()).toHaveLength(0)
+  })
+
+  it('reveals an area when a vision token walks into it, unless set not to', () => {
+    const { hideFill, addLight, updateLight, revealEntered, updateHidden } = useGm.getState()
+    hideFill({ x: 500, y: 500 })
+    addLight('vision', { x: 100, y: 100 })
+    const id = useGm.getState().scene.lights.at(-1)!.id
+    updateLight(id, { vision: true }) // vision tokens are placed not seeing yet
+
+    updateHidden(areas()[0].id, { revealWithVision: false })
+    let before = useGm.getState().scene.lights
+    updateLight(id, { x: 500, y: 500 })
+    revealEntered(before)
+    expect(areas()).toHaveLength(1)
+
+    updateHidden(areas()[0].id, { revealWithVision: true })
+    updateLight(id, { x: 100, y: 100 })
+    before = useGm.getState().scene.lights
+    updateLight(id, { x: 500, y: 500 })
+    revealEntered(before)
+    expect(areas()).toHaveLength(0)
+
+    // Painted over where the token already stands: stays hidden while it moves about inside.
+    hideFill({ x: 500, y: 500 })
+    before = useGm.getState().scene.lights
+    updateLight(id, { x: 520, y: 520 })
+    revealEntered(before)
+    expect(areas()).toHaveLength(1)
+  })
+
+  it("doesn't remember what's under a hidden area as explored, but sees past it", () => {
+    useGm.setState((s) => ({ scene: { ...s.scene, walls: [] } }))
+    const { hidePaint, addLight, updateLight, stampFog } = useGm.getState()
+    hidePaint({ x: 500, y: 500 }, { x: 500, y: 500 }, false, 'patch') // one square across
+    addLight('vision', { x: 300, y: 500 })
+    updateLight(useGm.getState().scene.lights.at(-1)!.id, { vision: true, visionRange: 5 })
     stampFog()
     const memory = useGm.getState().fogMemory!
     const at = (x: number, y: number) =>
       memory.data[Math.floor((y / 1000) * memory.rows) * memory.cols + Math.floor((x / 1000) * memory.cols)]
     expect(at(500, 500)).toBe(0)
+    expect(at(300, 500)).toBeGreaterThan(0)
+    expect(at(700, 500)).toBeGreaterThan(0) // beyond the hidden patch
+  })
+
+  it('turns areas with the map', () => {
+    const { hideFill, turnMap } = useGm.getState()
+    hideFill({ x: 500, y: 500 })
+    const before = areas()[0].cells
+    turnMap(1)
+    expect(areas()[0].cells).not.toBe(before)
+    expect(areas()).toHaveLength(1)
+  })
+
+  it('reads hidden areas saved as one mask', () => {
+    const legacy = {
+      ...useGm.getState().scene,
+      hiddenAreas: undefined,
+      hidden: { cols: 4, rows: 1, runs: [0, 1, 2, 1] },
+      hiddenSoftness: 0.8,
+    }
+    const scene = migrateScene(legacy)
+    expect(scene.hiddenAreas).toHaveLength(2)
+    expect(scene.hiddenAreas![0].softness).toBe(0.8)
+    expect('hidden' in scene).toBe(false)
+  })
+})
+
+describe('tools', () => {
+  beforeEach(() => useGm.getState().setTool(SELECT))
+
+  it('one at a time: picking one up puts the others, drafts and the selection away', () => {
+    const gm = () => useGm.getState()
+    gm().setTool({ kind: 'walls' })
+    gm().addWallPoint({ x: 0, y: 0 })
+    useGm.setState({ selectedLightIds: ['x'], selectedHiddenId: 'h' })
+    gm().setTool({ kind: 'light', light: 'torch' })
+    expect(gm()).toMatchObject({ tool: { kind: 'light', light: 'torch' }, wallDraft: [], selectedLightIds: [], selectedHiddenId: null })
+    gm().setTool(SELECT)
+    expect(gm().tool).toEqual(SELECT)
+  })
+
+  it('toggles with the keys, the hide tool coming back in its last mode', () => {
+    const gm = () => useGm.getState()
+    gm().toggleTool('doors')
+    expect(gm().tool.kind).toBe('doors')
+    gm().toggleTool('doors')
+    expect(gm().tool).toEqual(SELECT)
+    gm().setTool({ kind: 'hide', mode: 'brush' })
+    gm().toggleTool('hide')
+    gm().toggleTool('hide')
+    expect(gm().tool).toEqual({ kind: 'hide', mode: 'brush' })
   })
 })

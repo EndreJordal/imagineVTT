@@ -1,7 +1,7 @@
 import { BufferImageSource, Container, ImageSource, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import { mapNatural, sceneBounds } from '../shared/geometry'
-import { DEFAULT_HIDDEN_SOFTNESS, hiddenGrid, hiddenMask, softenHidden } from '../shared/hidden'
+import { areaMask, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
 import { MEMORY_BRIGHTNESS, NIGHT_DESATURATION, NIGHT_DIMMING } from '../shared/night'
 import type { AssetImages } from '../shared/mapObjects'
 import type { Scene } from '../shared/types'
@@ -106,9 +106,10 @@ export class SceneLayer extends Container {
 
   /** Fog memory from the GM (the same grid object is redrawn when its version changes). */
   setFogMemory(memory: FogMemory | null) {
-    this.fog.setMemory(memory)
+    const replaced = this.fog.setMemory(memory)
     this.map.setTexture('uMemory', this.fog.memorySource)
     this.objects.setShared('uMemory', this.fog.memorySource)
+    replaced?.destroy(true) // only now that nothing is bound to it
   }
 
   async setMapImage(image: Blob | null) {
@@ -150,34 +151,58 @@ export class SceneLayer extends Container {
 
   /** Hidden areas, soft-edged, as drawn: rebuilt when they (or their softness) change. */
   private hiddenTexture: Texture | null = null
-  private hiddenDrawn: { hidden: Scene['hidden']; softness: number; cellsPerSquare: number } | null = null
+  private hiddenDrawn: { areas: HiddenArea[] | undefined; cellsPerSquare: number } | null = null
+  /** Each area softened, kept while it's unchanged (most edits change one area). */
+  private softened = new WeakMap<HiddenArea, { cellsPerSquare: number; region: SoftRegion | null }>()
 
   /** Whether any hidden areas are shown (and their texture is up to date). */
   private syncHidden(scene: Scene): boolean {
+    const areas = scene.hiddenAreas
     const bounds = sceneBounds(scene)
-    const mask = hiddenMask(scene.hidden, bounds)
-    if (!mask) return false
     const { cols, rows } = hiddenGrid(bounds)
-    const softness = scene.hiddenSoftness ?? DEFAULT_HIDDEN_SOFTNESS
     const cellsPerSquare = (cols / bounds.width) * scene.grid.size
     const drawn = this.hiddenDrawn
-    if (drawn && drawn.hidden === scene.hidden && drawn.softness === softness && drawn.cellsPerSquare === cellsPerSquare) {
-      return true
+    if (drawn && drawn.areas === areas && drawn.cellsPerSquare === cellsPerSquare) return !!this.hiddenTexture
+    this.hiddenDrawn = { areas, cellsPerSquare }
+    // Each area with its own soft edges, where they overlap the darker winning, drawn into
+    // the texture's own pixels (made anew only when the grid changes size).
+    let source = this.hiddenTexture?.source as BufferImageSource | undefined
+    const reusable = source && source.width === cols && source.height === rows
+    const pixels = reusable ? (source!.resource as Uint8Array) : new Uint8Array(cols * rows)
+    pixels.fill(0)
+    let any = false
+    for (const area of areas ?? []) {
+      const mask = areaMask(area, bounds)
+      if (!mask) continue
+      let soft = this.softened.get(area)
+      if (!soft || soft.cellsPerSquare !== cellsPerSquare) {
+        soft = { cellsPerSquare, region: softenHidden(mask, cols, rows, area.softness * cellsPerSquare) }
+        this.softened.set(area, soft)
+      }
+      const r = soft.region
+      if (!r) continue
+      for (let j = 0; j < r.height; j++) {
+        const row = (r.y + j) * cols + r.x
+        for (let i = 0; i < r.width; i++) {
+          const v = r.pixels[j * r.width + i]
+          if (v > pixels[row + i]) pixels[row + i] = v
+        }
+      }
+      any = true
     }
-    this.hiddenDrawn = { hidden: scene.hidden, softness, cellsPerSquare }
-    const pixels = softenHidden(mask, cols, rows, softness * cellsPerSquare)
-    const source = this.hiddenTexture?.source as BufferImageSource | undefined
-    if (source && source.width === cols && source.height === rows) {
-      ;(source.resource as Uint8Array).set(pixels)
-      source.update()
+    if (!any) {
+      this.releaseHidden()
+      return false
+    }
+    if (reusable) {
+      source!.update()
       return true
     }
     this.releaseHidden()
-    this.hiddenTexture = new Texture({
-      source: new BufferImageSource({ resource: pixels, width: cols, height: rows, format: 'r8unorm', scaleMode: 'linear' }),
-    })
-    this.map.setTexture('uHidden', this.hiddenTexture.source)
-    this.objects.setShared('uHidden', this.hiddenTexture.source)
+    source = new BufferImageSource({ resource: pixels, width: cols, height: rows, format: 'r8unorm', scaleMode: 'linear' })
+    this.hiddenTexture = new Texture({ source })
+    this.map.setTexture('uHidden', source)
+    this.objects.setShared('uHidden', source)
     return true
   }
 

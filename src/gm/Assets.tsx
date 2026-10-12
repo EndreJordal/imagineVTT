@@ -16,16 +16,17 @@ import { Icon } from './icons'
 /** How many results to show at first (more on request): the grid stays quick. */
 const PAGE = 60
 
-/** Object URLs for thumbnails, made once per asset. */
-const thumbUrls = new Map<string, string>()
+/** Object URLs for thumbnails, made once per asset (and let go when a rescan replaces one). */
+const thumbUrls = new Map<string, { thumb: Blob; url: string }>()
 function thumbUrl(asset: LibraryAsset): string | undefined {
   if (!asset.thumb) return undefined
-  let url = thumbUrls.get(asset.path)
-  if (!url) {
-    url = URL.createObjectURL(asset.thumb)
-    thumbUrls.set(asset.path, url)
+  let entry = thumbUrls.get(asset.path)
+  if (entry?.thumb !== asset.thumb) {
+    if (entry) URL.revokeObjectURL(entry.url)
+    entry = { thumb: asset.thumb, url: URL.createObjectURL(asset.thumb) }
+    thumbUrls.set(asset.path, entry)
   }
-  return url
+  return entry.url
 }
 
 const startDrag = (asset: LibraryAsset) => (e: DragEvent) => {
