@@ -67,6 +67,12 @@ This describes what the app does now. "Planned" marks what isn't built.
 - All tokens can be turned together in quarter turns (border, portrait and text), to face the players on any side of the table.
 - Dragged or moved with the arrow keys (a square at a time when snapping). Moves **slide** (0.5 s by default; one time for all tokens in the sidebar, or each token's own).
 
+### 6b. Combat link (campaign bible → imagineVTT → V:tM combat tracker)
+- An encounter link from the campaign bible opens imagineVTT with a banner: open or create the encounter's scene in the **scenes folder**, and start the fight in the combat tracker (its own window), or resume the one saved in the scene.
+- The **Combat** section lists the combatants in order of initiative as coins: drag one onto the map to place its token (hidden until shown). Tokens follow their combatants (name; greyed when out of the fight).
+- The players see the order of initiative along the table's edge(s), whoever is acting glowing (on the map too); not reinforcements waiting to join, nor enemies out of their sight.
+- The tracker's whole fight is saved in the scene, so a fight can be resumed next week. See `docs/combat-link.md`.
+
 ### 7. Showing things to the players
 - **Curtain** (C): a picture from a folder replaces the map on the table, with cut, fade, dissolve, wipe or iris transitions, a fit (fill or whole picture) and a slideshow of ticked pictures.
 - **Show to players**: a picture from a folder, framed over the map and the curtain: its own size (or smaller to fit), or filling the screen to a 50 px margin; turned in quarter turns (remembered per picture). The PVB outlines it.
@@ -76,7 +82,8 @@ This describes what the app does now. "Planned" marks what isn't built.
 
 ### 9. Persistence
 - Everything is saved in IndexedDB (Dexie) as you go, and restored on the next visit. Folders are remembered (the browser asks permission again each visit).
-- Scenes save to an `.ivtt` file (a zip): the scene, every floor, the maps, explored areas, object images, portraits and sounds used. Open, save, and drop a file on the window to open it.
+- Scenes save to an `.ivtt` file (a zip): the scene, every floor, the maps, explored areas, object images, portraits, sounds used and the linked fight. Open, save, and drop a file on the window to open it.
+- A **scenes folder** (Settings) keeps scenes by name: combat links open theirs from it, and a scene from it saves straight back (Ctrl+S) and autosaves every few minutes while it has changes.
 - The curtain, Show to players, map and portrait folders, and the sound output are the GM's own settings, kept across scenes.
 
 ## Planned

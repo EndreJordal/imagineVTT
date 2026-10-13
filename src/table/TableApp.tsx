@@ -52,6 +52,9 @@ export function TableApp() {
         case 'handout':
           canvas.setHandout(msg.handout)
           break
+        case 'order':
+          canvas.setOrder(msg.strip)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break

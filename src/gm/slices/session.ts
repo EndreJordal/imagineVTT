@@ -6,29 +6,31 @@ import type { SceneFile } from '../../shared/sceneFile'
 import type { TableState } from '../../shared/types'
 import { sameRef, type WallPointRef } from '../../shared/walls'
 import type { GmStore } from '../store'
-import { defaultScene, FIRST_LEVEL, firstLevel, TOOLS_OFF } from './shared'
+import { defaultScene, FIRST_LEVEL, firstLevel, TOOLS_OFF, selectOnly, SINGLES_OFF } from './shared'
 
 export interface SessionSlice {
   /** Name of the open scene file, if it came from or was saved to one. */
   sceneName: string | null
+  /** Its file in the scenes folder, if it lives there (saving writes back to it). */
+  sceneFile: string | null
   /** Changes since the scene was last saved to or opened from a file. */
   unsaved: boolean
   /** Replace the scene with one from a file. */
-  loadScene(file: SceneFile, name: string): void
+  loadScene(file: SceneFile, name: string, folderFile?: string | null): void
   /** Start over with an empty scene (calibration and the table stay as they are). */
   newScene(): void
   /** Whether there's anything to undo or redo (kept up to date by history.ts). */
   history: { canUndo: boolean; canRedo: boolean }
   /** Bumped when a different scene replaces this one, so its undo history is dropped. */
   historyEpoch: number
-  /** The scene was just saved under this name. */
-  markSaved(name: string): void
+  /** The scene was just saved under this name (and, given, to this file in the scenes folder). */
+  markSaved(name: string, sceneFile?: string | null): void
   markUnsaved(): void
   /** A brief message over the GM's map (id changes with each one, to show it afresh). */
   notice: { text: string; id: number } | null
   notify(text: string): void
   /** Box selection: these lights and wall points (added to the selection if `add`). */
-  selectMany(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean): void
+  selectMany(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean, characterIds?: string[]): void
   /** Delete everything selected: lights, wall points and objects. */
   deleteSelection(): void
 }
@@ -36,8 +38,9 @@ export interface SessionSlice {
 export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<TableState, 'scene'>> = (set, get) => ({
   scene: defaultScene,
   sceneName: null,
+  sceneFile: null,
   unsaved: false,
-  loadScene: (file, name) => {
+  loadScene: (file, name, folderFile = null) => {
     set((s) => {
       const shared = migrateScene(file.scene)
       const levels = file.levels.map((l) => migrateLevel(l, shared))
@@ -59,12 +62,13 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
         cameraVersion: s.cameraVersion + 1,
         objectImages: file.objectImages,
         soundClips: file.soundClips,
+        combat: file.combat ?? null,
         // A fresh start for the GM's tools.
         ...TOOLS_OFF,
       }
     })
     // After the scene change, which marks unsaved (see sync).
-    set({ sceneName: name, unsaved: false })
+    set({ sceneName: name, sceneFile: folderFile, unsaved: false })
   },
   newScene: () => {
     set((s) => ({
@@ -82,26 +86,39 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
       historyEpoch: s.historyEpoch + 1,
       objectImages: {},
       soundClips: {},
+      combat: null,
       ...TOOLS_OFF,
     }))
     // After the scene change, which marks unsaved (see sync).
-    set({ sceneName: null, unsaved: false })
+    set({ sceneName: null, sceneFile: null, unsaved: false })
   },
   history: { canUndo: false, canRedo: false },
   historyEpoch: 0,
-  markSaved: (sceneName) => set({ sceneName, unsaved: false }),
+  markSaved: (sceneName, sceneFile) =>
+    set((s) => ({ sceneName, unsaved: false, sceneFile: sceneFile === undefined ? s.sceneFile : sceneFile })),
   markUnsaved: () => set({ unsaved: true }),
   notice: null,
   notify: (text) => set((s) => ({ notice: { text, id: (s.notice?.id ?? 0) + 1 } })),
-  selectMany: (lightIds, wallPoints, objectIds, add) =>
-    set((s) => ({
-      selectedObjectIds: add ? [...new Set([...s.selectedObjectIds, ...objectIds])] : objectIds,
-      selectedHiddenId: add ? s.selectedHiddenId : null,
-      selectedLightIds: add ? [...new Set([...s.selectedLightIds, ...lightIds])] : lightIds,
-      selectedWallPoints: add
-        ? [...s.selectedWallPoints, ...wallPoints.filter((p) => !s.selectedWallPoints.some((r) => sameRef(r, p)))]
-        : wallPoints,
-    })),
+  selectMany: (lightIds, wallPoints, objectIds, add, characterIds = []) =>
+    set((s) =>
+      add
+        ? {
+            selectedCharacterIds: [...new Set([...s.selectedCharacterIds, ...characterIds])],
+            selectedObjectIds: [...new Set([...s.selectedObjectIds, ...objectIds])],
+            selectedLightIds: [...new Set([...s.selectedLightIds, ...lightIds])],
+            selectedWallPoints: [
+              ...s.selectedWallPoints,
+              ...wallPoints.filter((p) => !s.selectedWallPoints.some((r) => sameRef(r, p))),
+            ],
+            ...SINGLES_OFF,
+          }
+        : selectOnly({
+            selectedCharacterIds: characterIds,
+            selectedObjectIds: objectIds,
+            selectedLightIds: lightIds,
+            selectedWallPoints: wallPoints,
+          }),
+    ),
   deleteSelection: () => {
     const { selectedLightIds, selectedWallPoints, selectedObjectIds, selectedHiddenId, removeHidden } = get()
     const { removeLights, deleteWallPoints, removeObjects } = get()
@@ -109,7 +126,7 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
     if (selectedWallPoints.length) deleteWallPoints(selectedWallPoints)
     if (selectedLightIds.length) removeLights(selectedLightIds)
     if (selectedObjectIds.length) removeObjects(selectedObjectIds)
-    const { selectedCharacterId, removeCharacter } = get()
-    if (selectedCharacterId) removeCharacter(selectedCharacterId)
+    const { selectedCharacterIds, removeCharacters } = get()
+    if (selectedCharacterIds.length) removeCharacters(selectedCharacterIds)
   },
 })

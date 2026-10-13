@@ -9,11 +9,13 @@ import type { AssetImages } from '../shared/mapObjects'
 import { migrateLevel, migrateScene } from '../shared/migrate'
 import { load } from '../shared/persist'
 import type { GmCamera } from '../shared/sceneFile'
+import type { CombatSave } from '../shared/combat'
 import type { SoundClips } from '../shared/sound'
 import type { Display, Scene, Size, TableState } from '../shared/types'
 import { type FloorsSlice, floorsSlice } from './slices/floors'
 import { audioSlice, type AudioSlice } from './slices/audio'
 import { charactersSlice, type CharactersSlice } from './slices/characters'
+import { combatSlice, type CombatSlice } from './slices/combat'
 import { fogSlice, type FogSlice } from './slices/fog'
 import { groupsSlice, type GroupsSlice } from './slices/groups'
 import { type HiddenSlice, hiddenSlice } from './slices/hidden'
@@ -48,7 +50,8 @@ export interface GmStore
     SessionSlice,
     GroupsSlice,
     AudioSlice,
-    CharactersSlice {}
+    CharactersSlice,
+    CombatSlice {}
 
 export const useGm = create<GmStore>()((...a) => ({
   ...floorsSlice(...a),
@@ -64,6 +67,7 @@ export const useGm = create<GmStore>()((...a) => ({
   ...groupsSlice(...a),
   ...audioSlice(...a),
   ...charactersSlice(...a),
+  ...combatSlice(...a),
 }))
 
 /** What the table shows: its floor, with the shared parts of the scene. */
@@ -83,7 +87,7 @@ export interface SavedFloors {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound] =
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound, combat] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
@@ -92,10 +96,11 @@ export async function hydrate() {
       load<number>('gmVision'),
       load<FogMemory>('fogMemory'),
       load<GmCamera>('gmCamera'),
-      load<{ name: string | null; unsaved: boolean }>('sceneName'),
+      load<{ name: string | null; unsaved: boolean; file?: string | null }>('sceneName'),
       load<AssetImages>('objectImages'),
       load<SavedFloors>('floors'),
       load<{ clips: SoundClips; master: number; output: string }>('sound'),
+      load<CombatSave | null>('combat'),
     ])
   const restored = scene ? migrateScene(scene) : defaultScene
   // Sessions from before floors: the scene is the one floor.
@@ -122,6 +127,8 @@ export async function hydrate() {
     audioOutput: sound?.output ?? '',
     cameraVersion: s.cameraVersion + 1,
     sceneName: sceneName?.name ?? null,
+    sceneFile: sceneName?.file ?? null,
     unsaved: sceneName?.unsaved ?? false,
+    combat: combat ?? null,
   }))
 }

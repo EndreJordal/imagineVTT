@@ -8,18 +8,20 @@ export interface DirHandle {
   name: string
   values(): AsyncIterable<DirHandle | FileHandle>
   getDirectoryHandle(name: string): Promise<DirHandle>
-  getFileHandle(name: string): Promise<FileHandle>
-  queryPermission(o: { mode: 'read' }): Promise<PermissionState>
-  requestPermission(o: { mode: 'read' }): Promise<PermissionState>
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FileHandle>
+  queryPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
+  requestPermission(o: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
 }
 
 export interface FileHandle {
   kind: 'file'
   name: string
   getFile(): Promise<File>
+  /** Writing (folders opened 'readwrite' only). */
+  createWritable?(): Promise<{ write(data: Blob): Promise<void>; close(): Promise<void> }>
 }
 
-type Picker = (o: { id?: string; mode?: 'read' }) => Promise<DirHandle>
+type Picker = (o: { id?: string; mode?: 'read' | 'readwrite'; startIn?: string }) => Promise<DirHandle>
 
 /** The folder picker, if the browser has one. */
 export const folderPicker = () => (window as unknown as { showDirectoryPicker?: Picker }).showDirectoryPicker

@@ -63,7 +63,9 @@ export function CharactersSection() {
 
 /** Floating panel for the selected character token. */
 export function CharacterPanel() {
-  const token = useGm((s) => s.scene.characters?.find((t) => t.id === s.selectedCharacterId))
+  const token = useGm((s) =>
+    s.selectedCharacterIds.length === 1 ? s.scene.characters?.find((t) => t.id === s.selectedCharacterIds[0]) : undefined,
+  )
   const sceneSlide = useGm((s) => s.scene.characterSlide ?? DEFAULT_SLIDE)
   const scene = useGm((s) => s.scene)
   // What decides whether the players see it (not every scene change: drags are many).
@@ -87,6 +89,8 @@ export function CharacterPanel() {
           className="panel-name"
           aria-label="Name"
           value={token.name}
+          readOnly={!!token.ref}
+          title={token.ref ? 'The name comes from the combat tracker: rename it there' : undefined}
           onChange={(e) => set({ name: e.target.value })}
         />
         <button className="icon-button" title="Close" onClick={() => selectCharacter(null)}>
@@ -202,7 +206,77 @@ export function CharacterPanel() {
   )
 }
 
-function SizePicker({ value, onChange }: { value: 1 | 2; onChange(size: 1 | 2): void }) {
+/** The one value all have, or undefined when they differ. */
+function shared<T>(values: T[]): T | undefined {
+  return values.every((v) => v === values[0]) ? values[0] : undefined
+}
+
+/** Floating panel for several selected tokens: what they share, changed for all at once. */
+export function CharactersPanel() {
+  const ids = useGm((s) => s.selectedCharacterIds)
+  const all = useGm((s) => s.scene.characters)
+  if (ids.length < 2) return null
+  const tokens = (all ?? []).filter((t) => ids.includes(t.id))
+  const { updateCharacters, removeCharacters, selectCharacter } = useGm.getState()
+  const set = (patch: Partial<CharacterToken>) => updateCharacters(ids, patch)
+  const visible = shared(tokens.map((t) => t.visible))
+  const snap = shared(tokens.map((t) => t.snap))
+  const size = shared(tokens.map((t) => t.size))
+  const label = shared(tokens.map((t) => t.label ?? 'none'))
+
+  return (
+    <aside className="light-panel character-panel" aria-label="Character tokens">
+      <header>
+        <span className="light-panel-title">
+          <Icon name="character" /> {tokens.length} tokens selected
+        </span>
+        <button className="icon-button" title="Close" onClick={() => selectCharacter(null)}>
+          <Icon name="close" />
+        </button>
+      </header>
+      <Switch
+        left="Hidden"
+        right="Visible"
+        on={visible === true}
+        title={visible === undefined ? 'Some are shown, some hidden: switch to show (or hide) them all' : undefined}
+        onChange={(on) => set({ visible: on })}
+      />
+      {visible === undefined && <p className="hint">Some are shown to the players, some hidden.</p>}
+      <span className="slider-label">Size{size === undefined ? ' (mixed)' : ''}</span>
+      <SizePicker value={size ?? 0} onChange={(n) => set({ size: n })} />
+      <span className="slider-label">Display{label === undefined ? ' (mixed)' : ''}</span>
+      <div className="segmented" role="radiogroup" aria-label="Display">
+        {LABELS.map((l) => (
+          <button
+            key={l.value}
+            role="radio"
+            aria-checked={label === l.value}
+            className={label === l.value ? 'active' : ''}
+            title={l.title}
+            onClick={() => set({ label: l.value })}
+          >
+            {l.text}
+          </button>
+        ))}
+      </div>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={snap === true}
+          ref={(el) => {
+            if (el) el.indeterminate = snap === undefined
+          }}
+          onChange={(e) => set({ snap: e.target.checked })}
+        />
+        Snap to grid
+      </label>
+      <p className="hint">Drag one to move them all (the arrow keys move them too). Group them with the bar below.</p>
+      <button onClick={() => removeCharacters(ids)}>Remove {tokens.length} tokens</button>
+    </aside>
+  )
+}
+
+function SizePicker({ value, onChange }: { value: 0 | 1 | 2; onChange(size: 1 | 2): void }) {
   return (
     <div className="segmented" role="radiogroup" aria-label="Size">
       {([1, 2] as const).map((n) => (

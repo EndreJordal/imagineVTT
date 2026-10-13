@@ -42,15 +42,64 @@ export const FIRST_LEVEL = 'floor-1'
 
 export const firstLevel = (scene: Scene, id = FIRST_LEVEL): Level => extractLevel(scene, { id, name: 'Floor 1' })
 
-/** Changing floor (or scene), or picking up a tool, starts the GM's tools afresh. */
-export const TOOLS_OFF = {
+/**
+ * What the GM has selected. Several lights, objects, tokens and wall points can be selected
+ * together; a hidden area, a door or a sound only on its own. All selecting goes through
+ * selectOnly / SINGLES_OFF, so a new kind of thing is added here and nowhere else.
+ */
+export type Selection = Pick<
+  GmStore,
+  | 'selectedLightIds'
+  | 'selectedObjectIds'
+  | 'selectedWallPoints'
+  | 'selectedCharacterIds'
+  | 'selectedHiddenId'
+  | 'selectedDoorId'
+  | 'selectedSoundId'
+>
+
+export const NOTHING_SELECTED: Selection = {
   selectedLightIds: [],
-  selectedWallPoints: [],
   selectedObjectIds: [],
+  selectedWallPoints: [],
+  selectedCharacterIds: [],
   selectedHiddenId: null,
   selectedDoorId: null,
   selectedSoundId: null,
-  selectedCharacterId: null,
+}
+
+/** Select just these: everything else is unselected. */
+export const selectOnly = (patch: Partial<Selection>): Selection => ({ ...NOTHING_SELECTED, ...patch })
+
+/** Adding to a multiple selection puts away what's only ever selected alone. */
+export const SINGLES_OFF = { selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null } satisfies Partial<Selection>
+
+/** The selection without what's no longer in the scene (after undo, say). Wall points are renumbered: dropped. */
+export function selectionIn(s: Selection, scene: Scene): Selection {
+  const has = <T extends { id: string }>(list: T[] | undefined) => {
+    const ids = new Set((list ?? []).map((x) => x.id))
+    return (id: string | null) => !!id && ids.has(id)
+  }
+  const light = has(scene.lights)
+  const object = has(scene.objects)
+  const token = has(scene.characters)
+  const hidden = has(scene.hiddenAreas)
+  const door = has(scene.walls)
+  const sound = has(scene.sounds)
+  return {
+    selectedLightIds: s.selectedLightIds.filter(light),
+    selectedObjectIds: s.selectedObjectIds.filter(object),
+    selectedCharacterIds: s.selectedCharacterIds.filter(token),
+    selectedWallPoints: [],
+    selectedHiddenId: hidden(s.selectedHiddenId) ? s.selectedHiddenId : null,
+    selectedDoorId: door(s.selectedDoorId) ? s.selectedDoorId : null,
+    selectedSoundId: sound(s.selectedSoundId) ? s.selectedSoundId : null,
+  }
+}
+
+/** Changing floor (or scene), or picking up a tool, starts the GM's tools afresh. */
+export const TOOLS_OFF = {
+  ...NOTHING_SELECTED,
   tool: SELECT,
   wallDraft: [],
   doorDraft: null,

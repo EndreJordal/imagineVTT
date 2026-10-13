@@ -3,6 +3,7 @@ import { activeAreas } from '../shared/hidden'
 import { save } from '../shared/persist'
 import { curtainImageMap, useCurtain } from './curtainStore'
 import { tableHandout, useHandouts } from './handoutStore'
+import { tableOrder } from './tableOrder'
 import { levelFogMemory, levelImage, tableState, useGm, type SavedFloors } from './store'
 
 const SAVE_DELAY_MS = 300
@@ -31,6 +32,7 @@ export function startGmSync(): () => void {
         channel.post({ type: 'map', image: tableImage(useGm.getState()) })
         channel.post({ type: 'fog', memory: tableFog(useGm.getState()) })
         channel.post({ type: 'assets', images: useGm.getState().objectImages })
+        sendOrder(useGm.getState(), true)
         break
       case 'screen':
         useGm.getState().setTableScreen(msg.screen)
@@ -52,6 +54,16 @@ export function startGmSync(): () => void {
       fogSendTimer = undefined
       channel.post({ type: 'fog', memory: tableFog(useGm.getState()) })
     }, FOG_SEND_MS)
+  }
+
+  /** The players' order of initiative: sent when what they'd see of it changes. */
+  let lastOrder = ''
+  const sendOrder = (s: ReturnType<typeof useGm.getState>, force = false) => {
+    const strip = tableOrder(s)
+    const json = JSON.stringify(strip)
+    if (!force && json === lastOrder) return
+    lastOrder = json
+    channel.post({ type: 'order', strip })
   }
 
   let cameraSaveTimer: number | undefined
@@ -97,9 +109,12 @@ export function startGmSync(): () => void {
       s.display.orientation !== prev.display.orientation ||
       (s.levelId === prev.levelId &&
         (s.scene !== prev.scene || s.mapImage !== prev.mapImage || s.fogVersion !== prev.fogVersion || floorsChanged))
-    if (sceneChanged && !s.unsaved) useGm.getState().markUnsaved()
-    if (s.sceneName !== prev.sceneName || s.unsaved !== prev.unsaved) {
-      void save('sceneName', { name: s.sceneName, unsaved: s.unsaved })
+    // The linked fight is part of the scene: its progress is a change to save.
+    const combatChanged = s.combat !== prev.combat
+    if ((sceneChanged || combatChanged) && !s.unsaved) useGm.getState().markUnsaved()
+    if (combatChanged) void save('combat', s.combat)
+    if (s.sceneName !== prev.sceneName || s.unsaved !== prev.unsaved || s.sceneFile !== prev.sceneFile) {
+      void save('sceneName', { name: s.sceneName, unsaved: s.unsaved, file: s.sceneFile })
     }
     if (s.gmCamera !== prev.gmCamera) {
       clearTimeout(cameraSaveTimer)
@@ -161,6 +176,7 @@ export function startGmSync(): () => void {
       channel.post({ type: 'assets', images: s.objectImages })
       void save('objectImages', s.objectImages)
     }
+    sendOrder(s)
   })
 
   // The picture shown to the players: when it, or its turn, changes.

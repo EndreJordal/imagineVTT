@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { DEFAULT_CURTAIN, type CurtainState } from '../shared/curtain'
 import { load, save } from '../shared/persist'
-import { folderPicker, listPictures, samePictures, type DirHandle, type Picture as CurtainPicture } from './folderAccess'
+import type { Picture as CurtainPicture } from './folderAccess'
+import { pictureFolder, type FolderStatus } from './pictureFolder'
 
 /**
  * The curtain's pictures and settings. The GM's own, kept across scenes (not part of scene
@@ -14,17 +15,11 @@ import { folderPicker, listPictures, samePictures, type DirHandle, type Picture 
 
 export type { Picture as CurtainPicture } from './folderAccess'
 
-export type CurtainFolderStatus =
-  | 'none' // no folder chosen yet
-  | 'unsupported' // the browser can't open folders (Firefox, Safari)
-  | 'reconnect' // a folder is remembered, but the browser wants permission again
-  | 'scanning'
-  | 'ready'
 
 interface CurtainStore {
   state: CurtainState
   folderName: string | null
-  status: CurtainFolderStatus
+  status: FolderStatus
   images: CurtainPicture[]
   setCurtain(patch: Partial<CurtainState>): void
   setSlideshow(patch: Partial<CurtainState['slideshow']>): void
@@ -48,59 +43,16 @@ export const useCurtain = create<CurtainStore>()((set, get) => ({
   },
 }))
 
-let folder: DirHandle | null = null
+const folder = pictureFolder(useCurtain, 'curtain', (s, found) => ({
+  // The first picture is the one shown, until another is picked.
+  state: s.state.imageId && found.some((f) => f.id === s.state.imageId) ? s.state : { ...s.state, imageId: found[0]?.id ?? null },
+}))
 
 /** Ask for the curtain folder, and list its pictures. */
-export async function chooseCurtainFolder() {
-  const pick = folderPicker()
-  if (!pick) return
-  let handle: DirHandle
-  try {
-    handle = await pick({ id: 'imaginevtt-curtain', mode: 'read' })
-  } catch {
-    return // cancelled
-  }
-  folder = handle
-  await save('curtainFolder', handle).catch(() => {})
-  useCurtain.setState({ folderName: handle.name })
-  await scanCurtainFolder()
-}
-
-/** Permission to read the remembered folder again (needs a click or key press). */
-async function reconnect(): Promise<boolean> {
-  if (!folder) return false
-  const permission = await folder.requestPermission({ mode: 'read' }).catch(() => 'denied' as const)
-  if (permission !== 'granted') return false
-  await scanCurtainFolder()
-  return true
-}
-
-export const reconnectCurtainFolder = () => void reconnect()
-
+export const chooseCurtainFolder = () => folder.choose()
+export const reconnectCurtainFolder = () => void folder.reconnect()
 /** List the folder's pictures (subfolders too), sorted by path. */
-export async function scanCurtainFolder() {
-  if (!folder) return
-  const dir = folder
-  useCurtain.setState({ status: 'scanning' })
-  try {
-    const found = await listPictures(dir)
-    if (dir !== folder) return // another folder chosen meanwhile
-    const same = samePictures(useCurtain.getState().images, found)
-    useCurtain.setState((s) => ({
-      images: same ? s.images : found,
-      status: 'ready',
-      // The first picture is the one shown, until another is picked.
-      state:
-        s.state.imageId && found.some((f) => f.id === s.state.imageId)
-          ? s.state
-          : { ...s.state, imageId: found[0]?.id ?? null },
-    }))
-  } catch (e) {
-    // Moved or deleted, or permission taken back.
-    console.warn('Could not read the curtain folder', e)
-    useCurtain.setState({ status: 'reconnect' })
-  }
-}
+export const scanCurtainFolder = () => folder.scan()
 
 /**
  * Drop or raise the curtain (button, C key). Dropping it with the folder not yet reconnected
@@ -108,7 +60,7 @@ export async function scanCurtainFolder() {
  */
 export async function toggleCurtain() {
   const { state, status } = useCurtain.getState()
-  if (!state.down && status === 'reconnect' && !(await reconnect())) return
+  if (!state.down && status === 'reconnect' && !(await folder.reconnect())) return
   if (!state.down && !useCurtain.getState().images.length) return
   useCurtain.getState().setCurtain({ down: !state.down })
 }
@@ -120,18 +72,11 @@ export function curtainImageMap(images: CurtainPicture[]): Record<string, Blob> 
 
 /** Restore the curtain from IndexedDB, and save its settings on every change from then on. */
 export async function hydrateCurtain(): Promise<() => void> {
-  const [state, handle] = await Promise.all([load<CurtainState>('curtain'), load<DirHandle>('curtainFolder')])
+  const state = await load<CurtainState>('curtain')
   useCurtain.setState({
     state: { ...DEFAULT_CURTAIN, ...state, slideshow: { ...DEFAULT_CURTAIN.slideshow, ...state?.slideshow } },
   })
-  if (!folderPicker()) useCurtain.setState({ status: 'unsupported' })
-  else if (handle) {
-    folder = handle
-    useCurtain.setState({ folderName: handle.name })
-    const permission = await handle.queryPermission({ mode: 'read' }).catch(() => 'prompt' as const)
-    if (permission === 'granted') void scanCurtainFolder()
-    else useCurtain.setState({ status: 'reconnect' })
-  }
+  await folder.restore()
   return useCurtain.subscribe((s, prev) => {
     if (s.state !== prev.state) void save('curtain', s.state)
   })

@@ -9,6 +9,7 @@ import {
 } from '../../shared/sound'
 import type { Point } from '../../shared/types'
 import type { GmStore } from '../store'
+import { selectOnly } from './shared'
 
 export interface AudioSlice {
   /** The audio of the sounds used, by clip key; kept with the scene. */
@@ -41,16 +42,7 @@ export const audioSlice: StateCreator<GmStore, [], [], AudioSlice> = (set) => ({
   soundClips: {},
   addSoundClips: (clips) => set((s) => ({ soundClips: { ...s.soundClips, ...clips } })),
   selectedSoundId: null,
-  selectSound: (selectedSoundId) =>
-    set({
-      selectedSoundId,
-      selectedLightIds: [],
-      selectedObjectIds: [],
-      selectedWallPoints: [],
-      selectedHiddenId: null,
-      selectedDoorId: null,
-      selectedCharacterId: null,
-    }),
+  selectSound: (selectedSoundId) => set(selectOnly({ selectedSoundId })),
   addSound: (clip, name, at) =>
     set((s) => {
       const sounds = s.scene.sounds ?? []
@@ -69,10 +61,7 @@ export const audioSlice: StateCreator<GmStore, [], [], AudioSlice> = (set) => ({
       }
       return {
         scene: { ...s.scene, sounds: [...sounds, sound] },
-        selectedSoundId: sound.id,
-        selectedLightIds: [],
-        selectedObjectIds: [],
-        selectedHiddenId: null,
+        ...selectOnly({ selectedSoundId: sound.id }),
       }
     }),
   updateSound: (id, patch) =>

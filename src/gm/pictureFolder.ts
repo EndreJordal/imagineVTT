@@ -24,39 +24,56 @@ export interface FolderFields {
 
 export const FOLDER_DEFAULTS: FolderFields = { folderName: null, status: 'none', images: [], selectedId: null }
 
-interface FolderStore {
-  getState(): FolderFields
-  setState(patch: Partial<FolderFields> | ((s: FolderFields) => Partial<FolderFields>)): void
+/** What every folder's store has (the picked picture may be kept elsewhere, as the curtain's is). */
+type FolderBase = Pick<FolderFields, 'folderName' | 'status' | 'images'>
+
+interface FolderStore<S extends FolderBase> {
+  getState(): S
+  setState(patch: Partial<S> | ((s: S) => Partial<S>)): void
 }
 
 export interface PictureFolder {
   choose(): Promise<void>
-  reconnect(): Promise<void>
+  /** Permission to read the remembered folder again (needs a click or key press); false if refused. */
+  reconnect(): Promise<boolean>
   scan(): Promise<void>
   /** Restore the remembered folder (reading it if the browser still allows). */
   restore(): Promise<void>
 }
 
-/** A folder for a store: `key` names it in storage (and the picker's remembered place). */
-export function pictureFolder(store: FolderStore, key: string): PictureFolder {
+/** The picked picture, kept if it's still there (else the first). */
+function keepSelected(s: FolderBase, found: Picture[]): Partial<FolderFields> {
+  const id = (s as Partial<FolderFields>).selectedId
+  return { selectedId: id && found.some((f) => f.id === id) ? id : (found[0]?.id ?? null) }
+}
+
+/**
+ * A folder for a store: `key` names it in storage (and the picker's remembered place).
+ * `picked`: what a fresh listing changes besides the pictures (by default, the picked one).
+ */
+export function pictureFolder<S extends FolderBase>(
+  store: FolderStore<S>,
+  key: string,
+  picked: (s: S, found: Picture[]) => Partial<S> = keepSelected as (s: S, found: Picture[]) => Partial<S>,
+): PictureFolder {
   let folder: DirHandle | null = null
 
   const scan = async () => {
     if (!folder) return
     const dir = folder
-    store.setState({ status: 'scanning' })
+    store.setState({ status: 'scanning' } as Partial<S>)
     try {
       const found = await listPictures(dir)
       if (dir !== folder) return // another folder chosen meanwhile
       store.setState((s) => ({
+        ...picked(s, found),
         images: samePictures(s.images, found) ? s.images : found,
         status: 'ready',
-        selectedId: s.selectedId && found.some((f) => f.id === s.selectedId) ? s.selectedId : (found[0]?.id ?? null),
       }))
     } catch (e) {
       // Moved or deleted, or permission taken back.
       console.warn(`Could not read the ${key} folder`, e)
-      store.setState({ status: 'reconnect' })
+      store.setState({ status: 'reconnect' } as Partial<S>)
     }
   }
 
@@ -73,23 +90,25 @@ export function pictureFolder(store: FolderStore, key: string): PictureFolder {
       }
       folder = handle
       await save(`${key}Folder`, handle).catch(() => {})
-      store.setState({ folderName: handle.name, selectedId: null })
+      store.setState({ folderName: handle.name, ...('selectedId' in store.getState() ? { selectedId: null } : {}) } as Partial<S>)
       await scan()
     },
     async reconnect() {
-      if (!folder) return
+      if (!folder) return false
       const permission = await folder.requestPermission({ mode: 'read' }).catch(() => 'denied' as const)
-      if (permission === 'granted') await scan()
+      if (permission !== 'granted') return false
+      await scan()
+      return true
     },
     async restore() {
-      if (!folderPicker()) return store.setState({ status: 'unsupported' })
+      if (!folderPicker()) return store.setState({ status: 'unsupported' } as Partial<S>)
       const handle = await load<DirHandle>(`${key}Folder`)
       if (!handle) return
       folder = handle
-      store.setState({ folderName: handle.name })
+      store.setState({ folderName: handle.name } as Partial<S>)
       const permission = await handle.queryPermission({ mode: 'read' }).catch(() => 'prompt' as const)
       if (permission === 'granted') void scan()
-      else store.setState({ status: 'reconnect' })
+      else store.setState({ status: 'reconnect' } as Partial<S>)
     },
   }
 }

@@ -1,6 +1,6 @@
 import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 import { PixiHost } from '../render/PixiHost'
-import { iconTexture, loadCanvasIcons } from './canvasIcons'
+import { loadCanvasIcons } from './canvasIcons'
 import { SceneLayer } from '../render/SceneLayer'
 import {
   mapScaleForCorner,
@@ -9,280 +9,47 @@ import {
   tableViewCorners,
   upMarker,
 } from '../shared/geometry'
-import { emitsLight, isDirectional, LIGHT_PRESETS, type Light } from '../shared/lights'
 import type { FogMemory } from '../shared/fog'
-import { hitsObject, objectCorners, type AssetImages, type MapObject } from '../shared/mapObjects'
-import { snapToken, tokenDiameter, type CharacterToken } from '../shared/characters'
+import { hitsObject, type AssetImages, type MapObject } from '../shared/mapObjects'
+import { snapToken, tokenDiameter } from '../shared/characters'
 import type { GmCamera } from '../shared/sceneFile'
 import {
   inRect,
   rectBetween,
   sameRef,
-  spotKey,
-  uniquePositions,
   wallPointsIn,
   withLinked,
-  type WallPointRef,
 } from '../shared/walls'
-import type { MapInfo, Point, Size, TableState } from '../shared/types'
-import { handoutBox, type Turn } from '../shared/handout'
+import type { Point, Scene, TableState } from '../shared/types'
+import { handoutBox } from '../shared/handout'
 import { createTool, wallPointAt, type CanvasTool, type ToolCanvas } from './canvasTools'
-import {
-  DOOR_COLOR,
-  HIDDEN_COLOR,
-  SLACK_PX,
-  TOKEN_PX,
-  WALL_COLOR,
-  WALL_DOT_PX,
-  WALL_PX,
-} from './canvasStyle'
-import type { GmStore } from './store'
+import { SLACK_PX } from './canvasStyle'
 import { SELECT } from './tools'
-import { doorMiddle } from '../shared/doors'
-import { activeAreas, areaCentre } from '../shared/hidden'
+import { NOTHING_SELECTED } from './slices/shared'
+import { CURSORS, type Drag, type GmUi, type Handlers, type Target } from './canvasTypes'
+import { MapHandle } from './canvasMap'
+import { LightTokens } from './canvasLights'
+import { HiddenTokens, SoundTokens } from './canvasTokens'
+import { WallsLayer } from './canvasWalls'
+import { ObjectHandles } from './canvasObjects'
 
 const MIN_ZOOM = 0.05
 const MAX_ZOOM = 8
 const VIEW_COLOR = 0xffb020
 /** The outline of the picture shown to the players. */
 const HANDOUT_COLOR = 0xd8c9a3
-/** Sounds' tokens and ranges. */
-const SOUND_COLOR = 0x4dd2c0
-/** A sound's play button: its radius, and how far right of the token it sits (GM screen px). */
-const PLAY_PX = 8
-const PLAY_OFFSET_PX = 24
 /** Half the size of the table view's corner handles, in GM screen px. */
 const VIEW_CORNER_PX = 5
 /** The table view's outline while the curtain is down (the players see a picture, not the map). */
 const CURTAIN_COLOR = 0xd94dff
-const HANDLE_COLOR = 0x4da3ff
-const LOCKED_COLOR = 0x8a8a94
-/** The padlock button beside the map's resize square: its half size (screen px) and locked colour. */
-const LOCK_BUTTON_PX = 8
-const LOCK_ON_COLOR = 0xffb020
-
-/** Where the map's padlock button is: left of the resize square, on the map's bottom edge. */
-function mapLockSpot(map: { x: number; y: number; width: number; height: number; lockToGrid?: boolean }, px: number) {
-  const handle = map.lockToGrid ? LOCKED_HANDLE_PX : HANDLE_PX
-  return { x: map.x + map.width - (handle + LOCK_BUTTON_PX + 4) * px, y: map.y + map.height }
-}
-/** Map resize handle half-size, in GM screen pixels (larger when locked, to fit a padlock). */
-const HANDLE_PX = 7
-const LOCKED_HANDLE_PX = 10
 /** Table-view "up" marker size (the drag handle for the view), in GM screen pixels. */
 const MARKER_PX = 20
 /** Smallest map scale the resize handle allows. */
 const MIN_MAP_SCALE = 0.05
-/** How far out a directional light's aim handle sits, in GM screen px. */
-const AIM_PX = 44
-const AIM_HANDLE_PX = 6
 /** Pointer travel (screen px) below which a press counts as a click, not a drag. */
 const CLICK_PX = 4
 
-export interface Handlers {
-  /**
-   * The GM dragged the table view's marker; view is its new centre. `force` (Alt held)
-   * skips vision safety. Returning false refuses the move and drops the drag.
-   */
-  onViewMove(view: Point, force: boolean): boolean
-  /** The GM dragged a corner of the table view: zoom it (1 = true scale). */
-  onViewZoom(zoom: number): void
-  /** Hide-areas dropper: a click at p. */
-  onHideFill(p: Point): void
-  /**
-   * Hide-areas brush: a stroke from `from` to `to`, hiding or (erase) revealing. `stroke`
-   * is the same for every segment of one press and drag.
-   */
-  onHidePaint(from: Point, to: Point, erase: boolean, stroke: string): void
-  /** The GM right-clicked a door's button: its settings. */
-  onDoorSettings(id: string): void
-  /** The GM clicked a hidden area's token (null: nothing). */
-  onHiddenSelect(id: string | null): void
-  /** The GM dragged the map's corner handle; scale is relative to the image's natural size. */
-  onMapResize(scale: number): void
-  /** The GM dragged the map; position is its new top-left corner. */
-  onMapMove(position: Point): void
-  /** The GM dragged a light token to position (like onViewMove for `force` and refusing). */
-  onLightMove(id: string, position: Point, force: boolean): boolean
-  /** The GM dragged a directional light's aim handle; angle in radians. */
-  onLightAim(id: string, angle: number): void
-  /** Select just this light, or none (null). */
-  onLightSelect(id: string | null): void
-  /** Ctrl/Cmd-click: add the light to the selection, or take it out. */
-  onLightToggle(id: string): void
-  /** In placement mode, the GM clicked the map here. Shift keeps placing more. */
-  onPlaceLight(at: Point, keepPlacing: boolean): void
-  /** Right-click while using a tool: the same as Enter (confirm / done). */
-  onToolConfirm(): void
-  /** In wall building mode, the GM clicked: add this (already snapped) wall point. */
-  onWallPoint(p: Point): void
-  /** Select just this wall point. */
-  onWallPointSelect(ref: WallPointRef): void
-  /** Ctrl/Cmd-click: add the wall point to the selection, or take it out. */
-  onWallPointToggle(ref: WallPointRef): void
-  /**
-   * The GM dragged a wall point: move `refs` (the points moving together) so that `anchor`,
-   * the one under the pointer, ends up at `to` (already snapped).
-   */
-  onWallPointDrag(refs: WallPointRef[], anchor: WallPointRef, to: Point): void
-  /** In door building mode, the GM clicked a valid door point (on a wall line). */
-  onDoorPoint(p: Point): void
-  /** The GM clicked a door's open/close button. */
-  onDoorToggle(id: string): void
-  /** Select just this object. */
-  onObjectSelect(id: string): void
-  /** The GM moved, resized or rotated an object. */
-  /** Ctrl+click with one object selected: a copy of it, centred at p. */
-  onObjectCopy(p: Point): void
-  onObjectChange(id: string, patch: Partial<Pick<MapObject, 'x' | 'y' | 'width' | 'height' | 'rotation'>>): void
-  /** Shift-drag box selection; `add` keeps what was already selected (Ctrl/Cmd). */
-  onBoxSelect(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean): void
-  /** Shift+click on an object or light: in or out of the selection. */
-  onObjectToggle(id: string): void
-  /** A sound's token clicked (null: nothing). */
-  onSoundSelect(id: string | null): void
-  /** A sound's token dragged to p. */
-  onSoundMove(id: string, p: Point): void
-  /** A sound's play button. */
-  onSoundPlay(id: string): void
-  /** The padlock beside the map's resize square clicked (locks or unlocks the map). */
-  onMapLockToggle(): void
-  /** A character token clicked (null: nothing). */
-  onCharacterSelect(id: string | null): void
-  /** A character token dropped at p (it slides there). */
-  onCharacterMove(id: string, p: Point): void
-  /** A grouped light or object clicked: select its group. */
-  onGroupSelect(id: string): void
-  /** Several selected objects dragged together. */
-  onObjectsMove(ids: string[], dx: number, dy: number): void
-  /** The GM panned or zoomed (or the view was fitted). */
-  onCameraChange(camera: GmCamera): void
-}
-
-/** The GM's state the canvas shows (GM-only), as it is in the store. */
-export const UI_KEYS = [
-  'tableScreen',
-  'tableConnected',
-  'selectedLightIds',
-  'tool',
-  'peeking',
-  'snap',
-  'wallDraft',
-  'selectedWallPoints',
-  'selectedObjectIds',
-  'doorDraft',
-  'hideBrush',
-  'selectedHiddenId',
-  'selectedSoundId',
-  'selectedCharacterId',
-] as const satisfies readonly (keyof GmStore)[]
-
-/** What the canvas shows besides the scene: the store's UI_KEYS, and what's worked out from it. */
-export type GmUi = Pick<GmStore, (typeof UI_KEYS)[number]> & {
-  /** Another floor's map shown faintly over this one, to line them up (onion skin). */
-  onion: { image: Blob; map: MapInfo } | null
-  /** The curtain is down: the table shows a picture instead of the map. */
-  curtainDown: boolean
-  /** The picture shown to the players (its size and turn), outlined in the table view. */
-  handout: { size: Size; turn: Turn; fill: boolean } | null
-  /**
-   * Lights in the scene that are only visiting: the party (on the table's floor) shown on a
-   * floor being prepared, to line them up with it. Drawn faintly; they can't be picked up.
-   */
-  ghostLightIds: string[]
-}
-
-type Drag =
-  | { mode: 'pan'; last: Point }
-  // grab = offset from the pointer to the thing being dragged, in scene space
-  | { mode: 'view'; grab: Point }
-  // base: the pointer's distance from the view's centre that means true scale (zoom 1).
-  | { mode: 'viewZoom'; base: number }
-  | { mode: 'sound'; id: string; grab: Point }
-  /** Dragging a character token: a ghost shows where it'll go; it slides there on release. */
-  | { mode: 'character'; id: string; grab: Point; to: Point | null }
-  | { mode: 'map'; grab: Point }
-  | { mode: 'resize'; grab: Point }
-  // wasSelected: the light was already selected when pressed, so a click (no drag) narrows
-  // a multi-selection down to it, while a drag moves the whole selection.
-  | { mode: 'light'; id: string; grab: Point; wasSelected: boolean }
-  | { mode: 'aim'; id: string }
-  // refs: the points moving together, fixed when the drag starts (so passing over another
-  // point doesn't pick it up). Alt drags just the one point, pulling linked points apart.
-  | { mode: 'wallPoint'; ref: WallPointRef; refs: WallPointRef[]; wasSelected: boolean }
-  // Shift-drag selection box, in scene coordinates.
-  | { mode: 'box'; start: Point; end: Point }
-  // group: the objects moving together (the selection, if this one's in it); last: the
-  // pointer's last scene position, for moving the group by the difference.
-  | { mode: 'object'; id: string; grab: Point; group: string[]; last: Point; wasSelected: boolean }
-  // Resizing scales about the centre, keeping the shape: by the pointer's distance from it.
-  | { mode: 'objectResize'; id: string; startDist: number; startW: number; startH: number; cursor: string }
-  | { mode: 'objectRotate'; id: string }
-
-/**
- * What the pointer is over, in priority order of grabbing. 'locked' is the resize handle of
- * a map locked to the grid.
- */
-type Target =
-  | {
-      kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'character' | 'object' | 'objectRotate'
-      id: string
-    }
-  /** A selected object's corner handle, with the resize cursor for its direction. */
-  | { kind: 'objectResize'; id: string; cursor: string }
-  | { kind: 'wallPoint'; ref: WallPointRef }
-  | { kind: 'view' | 'viewZoom' | 'map' | 'resize' | 'locked' | 'mapLock' }
-  | null
-
-/** The resize cursor for a handle in direction (dx, dy) from the middle (screen y down). */
-function resizeCursor(dx: number, dy: number) {
-  const a = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 180
-  if (a < 22.5 || a >= 157.5) return 'ew-resize'
-  if (a < 67.5) return 'nwse-resize'
-  if (a < 112.5) return 'ns-resize'
-  return 'nesw-resize'
-}
-
-const CURSORS: Record<Drag['mode'] | 'locked' | 'door' | 'hidden' | 'soundPlay' | 'mapLock', string> = {
-  mapLock: 'pointer',
-  hidden: 'pointer',
-  soundPlay: 'pointer',
-  sound: 'move',
-  character: 'grab',
-  pan: 'grab',
-  view: 'move',
-  viewZoom: 'nwse-resize',
-  map: 'move',
-  resize: 'nwse-resize',
-  locked: 'not-allowed',
-  light: 'move',
-  aim: 'crosshair',
-  wallPoint: 'move',
-  box: 'crosshair',
-  door: 'pointer',
-  object: 'move',
-  objectResize: 'nwse-resize',
-  objectRotate: 'grab',
-}
-
-
-interface Token {
-  root: Container
-  ring: Graphics
-  icon: Sprite
-}
-
-const OBJECT_COLOR = 0x4da3ff
-/** Selected object's corner handles (half-size) and rotation handle (radius, distance out), GM px. */
-const OBJECT_HANDLE_PX = 5
-const ROTATE_HANDLE_PX = 6
-const ROTATE_OUT_PX = 26
-/** A door's open/close button (in its middle), radius in GM screen px. */
-const DOOR_BUTTON_PX = 10
-
-/** Size of a light token's icon, in GM screen px. */
-const ICON_PX = 18
-
+export { UI_KEYS, type GmUi, type Handlers } from './canvasTypes'
 
 /**
  * GM's interactive map view. Left-drag moves the map image, its corner handle resizes it,
@@ -294,30 +61,20 @@ export class GmCanvas extends PixiHost {
   private camera = new Container()
   private sceneLayer = new SceneLayer()
   private viewOverlay = new Graphics()
-  private mapHandle = new Graphics()
+  private mapHandle = new MapHandle()
   /** Drawn separately so the drag handle stays fully opaque while the view is dimmed. */
   private viewMarker = new Graphics()
-  private lightTokens = new Container()
-  /** Hidden areas' tokens (GM-only), at each area's middle. */
-  private hiddenTokens = new Container()
-  private hiddenTokenMap = new Map<string, Token>()
-  /** Sounds' tokens (GM-only), each with a play button, and the selected one's range. */
-  private soundTokens = new Container()
-  private soundTokenMap = new Map<string, Token & { play: Graphics }>()
-  private soundRange = new Graphics()
-  private tokens = new Map<string, Token>()
-  private aimHandle = new Graphics()
-  /** Faint rings showing how far the selected vision tokens see. */
-  private visionRings = new Graphics()
-  /** Walls (GM-only: players only see their effect on sight). */
-  private wallsLayer = new Graphics()
+  private lights = new LightTokens()
+  private hidden = new HiddenTokens()
+  private sounds = new SoundTokens()
+  private walls = new WallsLayer()
   /** Onion skin: another floor's map, faint, to line this one up with it. */
   private onionSprite = new Sprite({ alpha: 0.3 })
   private onionImage: Blob | null = null
   private onion: GmUi['onion'] = null
   private onionToken = 0
   /** Outline and handles of the selected objects. */
-  private objectHandles = new Graphics()
+  private objectHandles = new ObjectHandles()
   private selectedObjectIds = new Set<string>()
   /** What the tool in hand draws: the wall or door being drawn, snap markers, the brush. */
   private toolLayer = new Graphics()
@@ -325,22 +82,16 @@ export class GmCanvas extends PixiHost {
   private selectionBox = new Graphics()
   /** Where a dragged character token will go. */
   private characterGhost = new Graphics()
-  private wallsDrawn: { walls: unknown; px: number; selected: WallPointRef[] } | null = null
   private ui: GmUi = {
     tableScreen: { width: 1920, height: 1080 },
     tableConnected: false,
-    selectedLightIds: [],
+    ...NOTHING_SELECTED,
     tool: SELECT,
     peeking: false,
     snap: 1,
     wallDraft: [],
-    selectedWallPoints: [],
-    selectedObjectIds: [],
     doorDraft: null,
     hideBrush: 1,
-    selectedHiddenId: null,
-    selectedSoundId: null,
-    selectedCharacterId: null,
     onion: null,
     curtainDown: false,
     handout: null,
@@ -361,6 +112,8 @@ export class GmCanvas extends PixiHost {
   private fogVersion = -1
   /** Where the current press started (canvas px), to tell clicks from drags. */
   private pressedAt: Point | null = null
+  /** Where the drag started, in scene units (a mixed selection's tokens move by the whole drag). */
+  private dragFrom: Point = { x: 0, y: 0 }
   private state: TableState | null = null
   private image: Blob | null = null
   private marker: Point[] | null = null
@@ -399,16 +152,16 @@ export class GmCanvas extends PixiHost {
       this.sceneLayer,
       this.onionSprite,
       this.viewOverlay,
-      this.mapHandle,
+      this.mapHandle.g,
       this.viewMarker,
-      this.objectHandles,
-      this.wallsLayer,
-      this.visionRings,
-      this.hiddenTokens,
-      this.soundRange,
-      this.soundTokens,
-      this.lightTokens,
-      this.aimHandle,
+      this.objectHandles.g,
+      this.walls.g,
+      this.lights.rings,
+      this.hidden.layer,
+      this.sounds.range,
+      this.sounds.layer,
+      this.lights.layer,
+      this.lights.aim,
       this.selectionBox,
       this.characterGhost,
       this.toolLayer,
@@ -489,6 +242,12 @@ export class GmCanvas extends PixiHost {
   /** Images of the assets objects show. */
   setObjectImages(images: AssetImages) {
     this.sceneLayer.setObjectImages(images)
+    this.requestRender()
+  }
+
+  /** The combatant acting in the linked fight: its token glows (null: none). */
+  setActiveCombatant(ref: string | null) {
+    this.sceneLayer.characters.setActive(ref)
     this.requestRender()
   }
 
@@ -600,13 +359,8 @@ export class GmCanvas extends PixiHost {
 
   private drawOverlay() {
     this.requestRender()
-    this.drawMapHandle()
-    this.drawLights()
-    this.drawHiddenTokens()
-    this.drawSoundTokens()
-    this.drawWalls()
-    this.drawObjectHandles()
-    this.sceneLayer.characters.select(this.ui.selectedCharacterId, this.px)
+    this.drawKinds()
+    this.sceneLayer.characters.select(this.ui.selectedCharacterIds, this.px)
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -665,254 +419,21 @@ export class GmCanvas extends PixiHost {
     }
   }
 
-  private drawMapHandle() {
-    const g = this.mapHandle.clear()
-    const map = this.state?.scene.map
-    if (!map) return
+  private drawKinds() {
+    if (!this.state) return
+    const scene = this.state.scene
     const px = this.px
-    const locked = !!map.lockToGrid
-    // Locked in place or to the grid: the resize square is greyed out (it does nothing).
-    const color = locked || map.locked ? LOCKED_COLOR : HANDLE_COLOR
-    const r = (locked ? LOCKED_HANDLE_PX : HANDLE_PX) * px
-    const cx = map.x + map.width
-    const cy = map.y + map.height
-    g.rect(map.x, map.y, map.width, map.height).stroke({ width: 1.5 * px, color, alpha: 0.6 })
-    g.rect(cx - r, cy - r, 2 * r, 2 * r)
-      .fill(color)
-      .stroke({ width: 1.5 * px, color: 0x000000 })
-    // The padlock beside it: click to lock the map's position, or unlock it.
-    const lock = mapLockSpot(map, px)
-    const lr = LOCK_BUTTON_PX * px
-    const held = !!map.locked
-    g.roundRect(lock.x - lr, lock.y - lr, 2 * lr, 2 * lr, 2 * px)
-      .fill(held ? LOCK_ON_COLOR : LOCKED_COLOR)
-      .stroke({ width: 1.5 * px, color: 0x000000 })
-    {
-      const ink = 0x1d1d22
-      // Shut: the shackle sits down on the body; open: lifted and swung to one side.
-      const sx = held ? lock.x : lock.x + 2.4 * px
-      const sy = lock.y - (held ? 0.5 : 2.2) * px
-      g.moveTo(sx - 2.8 * px, sy)
-        .arc(sx, sy, 2.8 * px, Math.PI, 0)
-        .stroke({ width: 1.5 * px, color: ink })
-      if (held) g.moveTo(sx - 2.8 * px, sy).lineTo(sx - 2.8 * px, lock.y + 0.5 * px).moveTo(sx + 2.8 * px, sy).lineTo(sx + 2.8 * px, lock.y + 0.5 * px).stroke({ width: 1.5 * px, color: ink })
-      else g.moveTo(sx - 2.8 * px, sy).lineTo(sx - 2.8 * px, lock.y + 0.5 * px).stroke({ width: 1.5 * px, color: ink })
-      g.roundRect(lock.x - 4.5 * px, lock.y - 0.5 * px, 9 * px, 6 * px, 1.1 * px).fill(ink)
-    }
-    if (locked) {
-      // Padlock: shackle arc over a body, in dark ink on the grey square.
-      const ink = 0x1d1d22
-      // moveTo first: arc() otherwise joins from the pen's last point (the map's corner).
-      const shackle = 3.2 * px
-      g.moveTo(cx - shackle, cy - 1 * px)
-        .arc(cx, cy - 1 * px, shackle, Math.PI, 0)
-        .stroke({ width: 1.6 * px, color: ink })
-      g.roundRect(cx - 5 * px, cy - 1 * px, 10 * px, 7 * px, 1.2 * px).fill(ink)
-    }
-  }
-
-  /** Hidden areas' tokens: the crossed-out eye, at each area's middle. GM-only. */
-  private drawHiddenTokens() {
-    const scene = this.state?.scene
-    const areas = scene?.hiddenAreas ?? []
-    const ids = new Set(areas.map((a) => a.id))
-    for (const [id, t] of this.hiddenTokenMap) {
-      if (ids.has(id)) continue
-      t.root.destroy({ children: true })
-      this.hiddenTokenMap.delete(id)
-    }
-    if (!scene) return
-    const bounds = sceneBounds(scene)
-    const active = new Set(activeAreas(scene))
-    for (const area of areas) {
-      let t = this.hiddenTokenMap.get(area.id)
-      if (!t) {
-        const ring = new Graphics()
-        const icon = new Sprite({ anchor: 0.5 })
-        t = { root: new Container(), ring, icon }
-        t.root.addChild(ring, icon)
-        this.hiddenTokens.addChild(t.root)
-        this.hiddenTokenMap.set(area.id, t)
-      }
-      const c = areaCentre(area, bounds)
-      t.root.position.set(c.x, c.y)
-      t.root.scale.set(this.px)
-      t.root.alpha = active.has(area) ? 1 : 0.4 // switched off: kept, not drawn
-      t.icon.texture = iconTexture('hide')
-      t.icon.setSize(ICON_PX)
-      t.ring.clear().circle(0, 0, TOKEN_PX).fill({ color: 0x1d1d22, alpha: 0.85 }).stroke({ width: 2.5, color: HIDDEN_COLOR })
-      if (area.id === this.ui.selectedHiddenId) t.ring.circle(0, 0, TOKEN_PX + 3.5).stroke({ width: 2, color: 0xffffff })
-    }
-  }
-
-  /** Sounds' tokens: a speaker, and a play button beside it. GM-only. */
-  private drawSoundTokens() {
-    const sounds = this.state?.scene.sounds ?? []
-    const ids = new Set(sounds.map((x) => x.id))
-    for (const [id, t] of this.soundTokenMap) {
-      if (ids.has(id)) continue
-      t.root.destroy({ children: true })
-      this.soundTokenMap.delete(id)
-    }
-    const range = this.soundRange.clear()
-    const grid = this.state?.scene.grid.size ?? 100
-    for (const sound of sounds) {
-      let t = this.soundTokenMap.get(sound.id)
-      if (!t) {
-        const ring = new Graphics()
-        const icon = new Sprite({ anchor: 0.5 })
-        const play = new Graphics()
-        t = { root: new Container(), ring, icon, play }
-        t.root.addChild(ring, icon, play)
-        this.soundTokens.addChild(t.root)
-        this.soundTokenMap.set(sound.id, t)
-      }
-      t.root.position.set(sound.x, sound.y)
-      t.root.scale.set(this.px)
-      t.root.alpha = sound.enabled ? 1 : 0.45
-      t.icon.texture = iconTexture('sound')
-      t.icon.setSize(ICON_PX)
-      t.ring.clear().circle(0, 0, TOKEN_PX).fill({ color: 0x1d1d22, alpha: 0.85 }).stroke({ width: 2.5, color: SOUND_COLOR })
-      const selected = sound.id === this.ui.selectedSoundId
-      if (selected) {
-        t.ring.circle(0, 0, TOKEN_PX + 3.5).stroke({ width: 2, color: 0xffffff })
-        range.circle(sound.x, sound.y, sound.range * grid).stroke({ width: 1.5 * this.px, color: SOUND_COLOR, alpha: 0.6 })
-      }
-      // The play button: a loop's switches it on and off (a square while it plays).
-      const b = PLAY_OFFSET_PX
-      t.play.clear().circle(b, 0, PLAY_PX).fill({ color: SOUND_COLOR }).stroke({ width: 1.5, color: 0x000000, alpha: 0.6 })
-      if (sound.loop && sound.enabled) t.play.rect(b - 3, -3, 6, 6).fill(0x1d1d22)
-      else t.play.poly([b - 2.5, -4, b + 4, 0, b - 2.5, 4]).fill(0x1d1d22)
-    }
-  }
-
-  /** Light tokens: constant size on screen, ringed in the light's colour. GM-only. */
-  private drawLights() {
-    const lights = this.state?.scene.lights ?? []
-    const ids = new Set(lights.map((l) => l.id))
-    for (const [id, t] of this.tokens) {
-      if (ids.has(id)) continue
-      t.root.destroy({ children: true })
-      this.tokens.delete(id)
-    }
-    for (const light of lights) {
-      let t = this.tokens.get(light.id)
-      if (!t) {
-        const ring = new Graphics()
-        const icon = new Sprite({ anchor: 0.5 })
-        t = { root: new Container(), ring, icon }
-        t.root.addChild(ring, icon)
-        this.lightTokens.addChild(t.root)
-        this.tokens.set(light.id, t)
-      }
-      const selected = this.selectedLightIds.has(light.id)
-      t.root.position.set(light.x, light.y)
-      t.root.scale.set(this.px)
-      // Dimmed when switched off: lights by being unlit, vision tokens by not seeing; faint
-      // when only visiting (the party, on a floor being prepared).
-      const lit = emitsLight(light) ? light.on : light.vision
-      t.root.alpha = (lit ? 1 : 0.55) * (this.ghostLightIds.has(light.id) ? 0.5 : 1)
-      t.icon.texture = iconTexture(LIGHT_PRESETS[light.kind].icon)
-      t.icon.setSize(ICON_PX)
-      t.ring
-        .clear()
-        .circle(0, 0, TOKEN_PX)
-        .fill({ color: 0x1d1d22, alpha: 0.85 })
-        .stroke({ width: 2.5, color: light.color })
-      if (selected) t.ring.circle(0, 0, TOKEN_PX + 3.5).stroke({ width: 2, color: 0xffffff })
-    }
-
-    const rings = this.visionRings.clear()
-    const gridSize = this.state?.scene.grid.size ?? 100
-    for (const light of lights) {
-      if (!light.vision || !this.selectedLightIds.has(light.id)) continue
-      rings
-        .circle(light.x, light.y, light.visionRange * gridSize)
-        .stroke({ width: 1.5 * this.px, color: 0x9ad0ff, alpha: 0.5 })
-    }
-
-    // Aim handle for the selected directional light (when it's the only one selected).
-    const g = this.aimHandle.clear()
-    const selected = this.soleSelected()
-    if (selected && isDirectional(selected)) {
-      const px = this.px
-      const a = this.aimPoint(selected)
-      const r = TOKEN_PX * px
-      g.moveTo(selected.x + Math.cos(selected.angle) * r, selected.y + Math.sin(selected.angle) * r)
-        .lineTo(a.x, a.y)
-        .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.8 })
-      g.circle(a.x, a.y, AIM_HANDLE_PX * px).fill(0xffffff).stroke({ width: 1.5 * px, color: 0x000000 })
-    }
-  }
-
-  /**
-   * Walls as red lines with dots at their points, doors in green (faded when open) with an
-   * open/close button in the middle; the wall or door being drawn, while building.
-   */
-  private drawWalls() {
-    const px = this.px
-    const walls = this.state?.scene.walls ?? []
-    // Redrawn only when the walls, the zoom or the selection changed (maps can have thousands).
-    const d = this.wallsDrawn
-    if (d && d.walls === walls && d.px === px && d.selected === this.ui.selectedWallPoints) {
-      this.drawTool()
-      return
-    }
-    this.wallsDrawn = { walls, px, selected: this.ui.selectedWallPoints }
-    const g = this.wallsLayer.clear()
-    for (const wall of walls) {
-      const color = wall.door ? DOOR_COLOR : WALL_COLOR
-      const alpha = wall.door?.open ? 0.4 : 1
-      g.poly(wall.points, false).stroke({ width: WALL_PX * px, color, alpha, join: 'round', cap: 'round' })
-    }
-    // Linked points (same spot) are one point: one dot, one ring. Green where a door ends.
-    const doorEnds = new Set(walls.filter((w) => w.door).flatMap((w) => w.points.map(spotKey)))
-    for (const p of uniquePositions(walls.flatMap((w) => w.points))) {
-      const isDoor = doorEnds.has(spotKey(p))
-      g.circle(p.x, p.y, WALL_DOT_PX * px).fill(isDoor ? DOOR_COLOR : WALL_COLOR)
-    }
-    for (const wall of walls) {
-      if (!wall.door) continue
-      const c = doorMiddle(wall.points)
-      const r = DOOR_BUTTON_PX * px
-      g.circle(c.x, c.y, r).fill({ color: 0x1d1d22, alpha: 0.9 }).stroke({ width: 2 * px, color: DOOR_COLOR })
-      // A door leaf: solid when closed, an outline when open.
-      const leaf = g.roundRect(c.x - 3.5 * px, c.y - 5.5 * px, 7 * px, 11 * px, 1 * px)
-      if (wall.door.open) leaf.stroke({ width: 1.5 * px, color: DOOR_COLOR })
-      else leaf.fill(DOOR_COLOR)
-    }
-    const selected = this.ui.selectedWallPoints.map((r) => this.wallPoint(r)).filter((p) => !!p)
-    for (const p of uniquePositions(selected)) {
-      g.circle(p.x, p.y, (WALL_DOT_PX + 3) * px).stroke({ width: 2 * px, color: 0xffffff })
-    }
+    this.mapHandle.draw(scene.map, px)
+    this.lights.draw(scene, this.selectedLightIds, this.ghostLightIds, px)
+    this.hidden.draw({ scene, ui: this.ui, px })
+    this.sounds.draw({ scene, ui: this.ui, px })
+    this.walls.draw(scene.walls, px, this.ui.selectedWallPoints)
     this.drawTool()
-  }
-
-  /** Selected objects: an outline, corner handles to resize, a handle above to rotate. */
-  private drawObjectHandles() {
-    const g = this.objectHandles.clear()
-    const px = this.px
-    for (const o of this.selectedObjects()) {
-      const corners = objectCorners(o)
-      g.poly(corners).stroke({ width: 3 * px, color: 0x000000, alpha: 0.5 })
-      g.poly(corners).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
-      const r = OBJECT_HANDLE_PX * px
-      for (const c of corners) g.rect(c.x - r, c.y - r, 2 * r, 2 * r).fill(0xffffff).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
-      const top = { x: (corners[0].x + corners[1].x) / 2, y: (corners[0].y + corners[1].y) / 2 }
-      const h = this.rotateHandle(o)
-      g.moveTo(top.x, top.y).lineTo(h.x, h.y).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
-      g.circle(h.x, h.y, ROTATE_HANDLE_PX * px).fill(0xffffff).stroke({ width: 1.5 * px, color: OBJECT_COLOR })
-    }
+    this.objectHandles.draw(this.selectedObjects(), px)
   }
 
   private selectedObjects(): MapObject[] {
     return (this.state?.scene.objects ?? []).filter((o) => this.selectedObjectIds.has(o.id))
-  }
-
-  /** Where an object's rotation handle is: above its top edge, turning with it. */
-  private rotateHandle(o: MapObject): Point {
-    const d = o.height / 2 + ROTATE_OUT_PX * this.px
-    return { x: o.x + Math.sin(o.rotation) * d, y: o.y - Math.cos(o.rotation) * d }
   }
 
   /** The tool in hand's previews. */
@@ -922,23 +443,24 @@ export class GmCanvas extends PixiHost {
     this.active?.draw(this.toolView, g)
   }
 
-  private wallPoint(ref: WallPointRef): Point | undefined {
-    return this.state?.scene.walls.find((w) => w.id === ref.wallId)?.points[ref.index]
-  }
-
-  /** A faint token where the dragged one will go, and the way there. */
-  private drawCharacterGhost(t: CharacterToken, to: Point) {
+  /** Faint tokens where the dragged ones will go (moved by dx, dy), and the way there. */
+  private drawCharacterGhosts(ids: string[], dx: number, dy: number) {
     if (!this.state) return
-    const r = tokenDiameter(t, this.state.scene) / 2
+    const scene = this.state.scene
     const px = this.px
-    this.characterGhost
-      .clear()
-      .moveTo(t.x, t.y)
-      .lineTo(to.x, to.y)
-      .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.5 })
-      .circle(to.x, to.y, r)
-      .fill({ color: 0xffffff, alpha: 0.15 })
-      .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.9 })
+    const g = this.characterGhost.clear()
+    for (const id of ids) {
+      const t = scene.characters?.find((x) => x.id === id)
+      if (!t) continue
+      const r = tokenDiameter(t, scene) / 2
+      const to = t.snap ? snapToken({ x: t.x + dx, y: t.y + dy }, t.size, scene.grid) : { x: t.x + dx, y: t.y + dy }
+      g.moveTo(t.x, t.y)
+        .lineTo(to.x, to.y)
+        .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.5 })
+        .circle(to.x, to.y, r)
+        .fill({ color: 0xffffff, alpha: 0.15 })
+        .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.9 })
+    }
     this.requestRender()
   }
 
@@ -952,93 +474,30 @@ export class GmCanvas extends PixiHost {
       .stroke({ width: 1.5 * this.px, color: 0x4da3ff })
   }
 
-  /** The selected light, if exactly one is selected. */
-  private soleSelected(): Light | undefined {
-    if (this.selectedLightIds.size !== 1) return undefined
-    const [id] = this.selectedLightIds
-    return this.state?.scene.lights.find((l) => l.id === id)
-  }
-
-  private aimPoint(light: Light): Point {
-    const d = AIM_PX * this.px
-    return { x: light.x + Math.cos(light.angle) * d, y: light.y + Math.sin(light.angle) * d }
-  }
-
   /** What a left-drag starting at p would grab, in priority order. */
   private targetAt(p: Point): Target {
     const state = this.state
     if (!state) return null
     const px = this.px
-    const map = state.scene.map
-    const lights = state.scene.lights
+    const scene = state.scene
+    const map = scene.map
 
-    // Door buttons sit on top of everything.
-    for (const w of state.scene.walls) {
-      if (!w.door) continue
-      const c = doorMiddle(w.points)
-      if (Math.hypot(p.x - c.x, p.y - c.y) <= (DOOR_BUTTON_PX + 2) * px) return { kind: 'door', id: w.id }
-    }
-    const selected = this.soleSelected()
-    if (selected && isDirectional(selected)) {
-      const a = this.aimPoint(selected)
-      if (Math.hypot(p.x - a.x, p.y - a.y) <= (AIM_HANDLE_PX + SLACK_PX) * px) {
-        return { kind: 'aim', id: selected.id }
-      }
-    }
-    // Topmost (last drawn) token first.
-    for (let i = lights.length - 1; i >= 0; i--) {
-      const l = lights[i]
-      if (this.ghostLightIds.has(l.id)) continue
-      if (Math.hypot(p.x - l.x, p.y - l.y) <= (TOKEN_PX + 2) * px) return { kind: 'light', id: l.id }
-    }
-    for (const t of [...(state.scene.characters ?? [])].reverse()) {
-      if (Math.hypot(p.x - t.x, p.y - t.y) <= tokenDiameter(t, state.scene) / 2) return { kind: 'character', id: t.id }
-    }
-    for (const sound of [...(state.scene.sounds ?? [])].reverse()) {
-      const play = { x: sound.x + PLAY_OFFSET_PX * px, y: sound.y }
-      if (Math.hypot(p.x - play.x, p.y - play.y) <= (PLAY_PX + 2) * px) return { kind: 'soundPlay', id: sound.id }
-      if (Math.hypot(p.x - sound.x, p.y - sound.y) <= (TOKEN_PX + 2) * px) return { kind: 'sound', id: sound.id }
-    }
-    const bounds = sceneBounds(state.scene)
-    for (const area of [...(state.scene.hiddenAreas ?? [])].reverse()) {
-      const c = areaCentre(area, bounds)
-      if (Math.hypot(p.x - c.x, p.y - c.y) <= (TOKEN_PX + 2) * px) return { kind: 'hidden', id: area.id }
-    }
-    for (const w of state.scene.walls) {
-      for (let index = w.points.length - 1; index >= 0; index--) {
-        const q = w.points[index]
-        if (Math.hypot(p.x - q.x, p.y - q.y) <= (WALL_DOT_PX + SLACK_PX) * px) {
-          return { kind: 'wallPoint', ref: { wallId: w.id, index } }
-        }
-      }
-    }
+    // Door buttons sit on top of everything, then the selected light's aim handle, then
+    // tokens (topmost, last drawn, first), wall points, and the selected objects' handles.
+    const hit =
+      this.walls.doorAt(p, scene.walls, px) ??
+      this.lights.hit(p, scene.lights, this.selectedLightIds, this.ghostLightIds, px) ??
+      characterAt(p, scene) ??
+      this.sounds.hit(p, scene.sounds ?? [], px) ??
+      this.hidden.hit(p, scene, px) ??
+      this.walls.pointAt(p, scene.walls, px) ??
+      this.objectHandles.hit(p, this.selectedObjects(), px)
+    if (hit) return hit
+    const object = scene.objects.findLast((o) => hitsObject(o, p))
+    if (object) return { kind: 'object', id: object.id }
 
-    // Objects: the selected ones' handles, then any object (topmost first).
-    for (const o of this.selectedObjects()) {
-      const h = this.rotateHandle(o)
-      if (Math.hypot(p.x - h.x, p.y - h.y) <= (ROTATE_HANDLE_PX + SLACK_PX) * px) return { kind: 'objectRotate', id: o.id }
-      for (const c of objectCorners(o)) {
-        if (Math.hypot(p.x - c.x, p.y - c.y) <= (OBJECT_HANDLE_PX + SLACK_PX) * px) {
-          return { kind: 'objectResize', id: o.id, cursor: resizeCursor(c.x - o.x, c.y - o.y) }
-        }
-      }
-    }
-    const objects = state.scene.objects
-    for (let i = objects.length - 1; i >= 0; i--) {
-      if (hitsObject(objects[i], p)) return { kind: 'object', id: objects[i].id }
-    }
-
-    if (map) {
-      const r = ((map.lockToGrid ? LOCKED_HANDLE_PX : HANDLE_PX) + SLACK_PX) * px
-      const cx = map.x + map.width
-      const cy = map.y + map.height
-      if (Math.abs(p.x - cx) <= r && Math.abs(p.y - cy) <= r) {
-        return { kind: map.lockToGrid || map.locked ? 'locked' : 'resize' }
-      }
-      const lock = mapLockSpot(map, px)
-      const rl = (LOCK_BUTTON_PX + SLACK_PX) * px
-      if (Math.abs(p.x - lock.x) <= rl && Math.abs(p.y - lock.y) <= rl) return { kind: 'mapLock' }
-    }
+    const handle = map && this.mapHandle.hit(p, map, px)
+    if (handle) return handle
     if (this.viewCorners) {
       const r = (VIEW_CORNER_PX + SLACK_PX) * px
       if (this.viewCorners.some((c) => Math.abs(p.x - c.x) <= r && Math.abs(p.y - c.y) <= r)) return { kind: 'viewZoom' }
@@ -1063,9 +522,10 @@ export class GmCanvas extends PixiHost {
   }
 
   /** The group a light or object is in, if any. */
-  private groupOf(id: string, kind: 'light' | 'object') {
+  private groupOf(id: string, kind: 'light' | 'object' | 'character') {
     const scene = this.state?.scene
-    return (kind === 'light' ? scene?.lights : scene?.objects)?.find((x) => x.id === id)?.group
+    const list = kind === 'light' ? scene?.lights : kind === 'object' ? scene?.objects : scene?.characters
+    return list?.find((x) => x.id === id)?.group
   }
 
   /**
@@ -1122,6 +582,7 @@ export class GmCanvas extends PixiHost {
       return
     }
     this.pressedAt = this.toCanvas(e)
+    this.dragFrom = p
 
     if (e.button === 0 && e.shiftKey && target?.kind !== 'objectResize') {
       // Shift-drag draws a selection box, whatever is under the pointer.
@@ -1162,8 +623,15 @@ export class GmCanvas extends PixiHost {
     } else if (target?.kind === 'character') {
       const t = scene?.characters?.find((x) => x.id === target.id)
       if (!t) return
-      this.handlers.onCharacterSelect(t.id)
-      this.drag = { mode: 'character', id: t.id, grab: { x: t.x - p.x, y: t.y - p.y }, to: null }
+      // Clicking a grouped token selects its group (Alt: just it); a selected one keeps the selection.
+      const wasSelected = this.ui.selectedCharacterIds.includes(t.id)
+      if (!wasSelected) {
+        if (t.group && !e.altKey) this.handlers.onGroupSelect(t.group)
+        else this.handlers.onCharacterSelect(t.id)
+      }
+      // The selection now (handlers update the canvas at once): all of it moves together.
+      const ids = this.ui.selectedCharacterIds.includes(t.id) ? [...this.ui.selectedCharacterIds] : [t.id]
+      this.drag = { mode: 'character', id: t.id, grab: { x: t.x - p.x, y: t.y - p.y }, to: null, ids, wasSelected }
     } else if (target?.kind === 'soundPlay') {
       this.handlers.onSoundPlay(target.id)
       this.pressedAt = null
@@ -1242,6 +710,10 @@ export class GmCanvas extends PixiHost {
       this.handlers.onWallPointDrag(drag.refs, drag.ref, wallPointAt(this.toolView, p, drag.refs))
       return
     }
+    // Objects and lights move as they're dragged; selected tokens show where they'll slide to.
+    if ((drag.mode === 'object' || drag.mode === 'light') && this.ui.selectedCharacterIds.length) {
+      this.drawCharacterGhosts(this.ui.selectedCharacterIds, p.x - this.dragFrom.x, p.y - this.dragFrom.y)
+    }
     if (drag.mode === 'object' || drag.mode === 'objectResize' || drag.mode === 'objectRotate') {
       const o = this.state?.scene.objects.find((x) => x.id === drag.id)
       if (!o) return
@@ -1288,7 +760,7 @@ export class GmCanvas extends PixiHost {
       const t = this.state?.scene.characters?.find((x) => x.id === drag.id)
       if (!t || !this.state) return
       drag.to = t.snap ? snapToken(to, t.size, this.state.scene.grid) : to
-      this.drawCharacterGhost(t, drag.to)
+      this.drawCharacterGhosts(drag.ids, drag.to.x - t.x, drag.to.y - t.y)
     } else if (drag.mode === 'sound') {
       this.handlers.onSoundMove(drag.id, to)
     } else if (drag.mode === 'light') {
@@ -1324,13 +796,15 @@ export class GmCanvas extends PixiHost {
       const on = clicked ? this.targetAt(drag.start) : null
       if (on?.kind === 'object') this.handlers.onObjectToggle(on.id)
       else if (on?.kind === 'light') this.handlers.onLightToggle(on.id)
+      else if (on?.kind === 'character') this.handlers.onCharacterToggle(on.id)
       else {
         const r = rectBetween(drag.start, drag.end)
         const scene = this.state?.scene
         const lights = (scene?.lights ?? []).filter((l) => inRect(l, r) && !this.ghostLightIds.has(l.id)).map((l) => l.id)
         const points = wallPointsIn(scene?.walls ?? [], r)
         const objects = (scene?.objects ?? []).filter((o) => inRect(o, r)).map((o) => o.id)
-        this.handlers.onBoxSelect(lights, points, objects, e.ctrlKey || e.metaKey)
+        const characters = (scene?.characters ?? []).filter((t) => inRect(t, r)).map((t) => t.id)
+        this.handlers.onBoxSelect(lights, points, objects, e.ctrlKey || e.metaKey, characters)
       }
       this.drag = null
       this.drawSelectionBox()
@@ -1339,14 +813,31 @@ export class GmCanvas extends PixiHost {
       if (!this.groupOf(drag.id, 'object') || e.altKey) this.handlers.onObjectSelect(drag.id)
     } else if (clicked && drag?.mode === 'light' && drag.wasSelected) {
       if (!this.groupOf(drag.id, 'light') || e.altKey) this.handlers.onLightSelect(drag.id)
+    } else if (clicked && drag?.mode === 'character' && drag.wasSelected && drag.ids.length > 1) {
+      // A click on one of several selected tokens: just that one (a grouped one keeps its group, but Alt).
+      if (!this.groupOf(drag.id, 'character') || e.altKey) this.handlers.onCharacterSelect(drag.id)
     } else if (clicked && drag?.mode === 'wallPoint' && drag.wasSelected) {
       this.handlers.onWallPointSelect(drag.ref)
     } else if (clicked && drag && !onSomething && !e.ctrlKey && !e.metaKey) {
       this.handlers.onLightSelect(null) // clears the whole selection
     }
+    // A mixed selection moves together: tokens slide in when the drag ends, objects and
+    // lights moved with the drag (or, dragged by a token, by its move).
     if (drag?.mode === 'character') {
       this.characterGhost.clear()
-      if (drag.to && !clicked) this.handlers.onCharacterMove(drag.id, drag.to)
+      const leader = this.state?.scene.characters?.find((t) => t.id === drag.id)
+      if (drag.to && leader && !clicked) {
+        const dx = drag.to.x - leader.x
+        const dy = drag.to.y - leader.y
+        this.handlers.onCharactersMove(drag.ids, dx, dy)
+        if (drag.wasSelected && (this.ui.selectedObjectIds.length || this.ui.selectedLightIds.length)) {
+          this.handlers.onObjectsMove(this.ui.selectedObjectIds, dx, dy)
+        }
+      }
+    } else if ((drag?.mode === 'object' || drag?.mode === 'light') && this.ui.selectedCharacterIds.length) {
+      this.characterGhost.clear()
+      const up = this.toScene(e)
+      if (!clicked) this.handlers.onCharactersMove(this.ui.selectedCharacterIds, up.x - this.dragFrom.x, up.y - this.dragFrom.y)
     }
     if (drag?.mode === 'pan') this.reportCamera()
     this.pressedAt = null
@@ -1378,6 +869,12 @@ export class GmCanvas extends PixiHost {
     this.drawOverlay()
     this.reportCamera()
   }
+}
+
+/** The topmost character token at p. */
+function characterAt(p: Point, scene: Scene): Target {
+  const t = (scene.characters ?? []).findLast((t) => Math.hypot(p.x - t.x, p.y - t.y) <= tokenDiameter(t, scene) / 2)
+  return t ? { kind: 'character', id: t.id } : null
 }
 
 function centroid(points: Point[]): Point {

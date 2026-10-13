@@ -14,6 +14,5 @@ export type Tool =
   | { kind: 'light'; light: LightKind }
   | { kind: 'hide'; mode: HideTool }
 
-export type ToolKind = Tool['kind']
 
 export const SELECT: Tool = { kind: 'select' }

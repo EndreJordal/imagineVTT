@@ -1,11 +1,13 @@
 import {
   readSceneFile,
+  type SceneFile,
   SCENE_FILE_EXTENSION,
   SceneFileError,
   sceneNameFromFile,
   writeSceneFile,
 } from '../shared/sceneFile'
 import { allLevels, levelFogMemory, levelImage, useGm } from './store'
+import { writeScene } from './scenesFolder'
 
 /**
  * Saving and opening scene files. Where the browser can write files (Chrome, Edge), the
@@ -38,10 +40,10 @@ const TYPES = [{ description: 'imagineVTT scene', accept: { 'application/zip': [
 /** The file the open scene lives in (this page session only). */
 let handle: FileHandle | null = null
 
-/** Save the scene: back to its file, or to a new one (`saveAs`, or the first save). */
-export async function saveScene(saveAs = false) {
+/** The open scene as a scene file. */
+function sceneBlob() {
   const s = useGm.getState()
-  const blob = await writeSceneFile({
+  return writeSceneFile({
     scene: s.scene,
     orientation: s.display.orientation,
     camera: s.gmCamera,
@@ -52,7 +54,30 @@ export async function saveScene(saveAs = false) {
     fogMemories: Object.fromEntries(s.levels.map((l) => [l.id, levelFogMemory(s, l.id)])),
     objectImages: s.objectImages,
     soundClips: s.soundClips,
+    combat: s.combat,
   })
+}
+
+/** Save the open scene into the scenes folder under `name`; false if the folder isn't usable. */
+export async function saveToFolder(name: string, ask = true): Promise<boolean> {
+  try {
+    const file = await writeScene(name, await sceneBlob(), ask)
+    if (!file) return false
+    useGm.getState().markSaved(name, file)
+    handle = null
+    return true
+  } catch (err) {
+    alert(`Could not save the scene: ${String(err)}`)
+    return false
+  }
+}
+
+/** Save the scene: back to its file, or to a new one (`saveAs`, or the first save). */
+export async function saveScene(saveAs = false) {
+  const s = useGm.getState()
+  // A scene from the scenes folder goes straight back there.
+  if (!saveAs && s.sceneFile && s.sceneName && (await saveToFolder(s.sceneName))) return
+  const blob = await sceneBlob()
   const suggestedName = `${s.sceneName ?? 'Untitled scene'}${SCENE_FILE_EXTENSION}`
 
   if (fsa.showSaveFilePicker) {
@@ -61,7 +86,7 @@ export async function saveScene(saveAs = false) {
       const writable = await handle.createWritable()
       await writable.write(blob)
       await writable.close()
-      s.markSaved(sceneNameFromFile(handle.name))
+      s.markSaved(sceneNameFromFile(handle.name), null)
     } catch (err) {
       if (!isCancel(err)) alert(`Could not save the scene: ${String(err)}`)
     }
@@ -75,7 +100,43 @@ export async function saveScene(saveAs = false) {
   a.download = suggestedName
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
-  s.markSaved(sceneNameFromFile(suggestedName))
+  s.markSaved(sceneNameFromFile(suggestedName), null)
+}
+
+/** Read a scene file from the scenes folder (null, with a message, if it can't be read). */
+export async function readFromFolder(file: File): Promise<SceneFile | null> {
+  try {
+    return await readSceneFile(file)
+  } catch (err) {
+    alert(err instanceof SceneFileError ? err.message : `Could not open the scene: ${String(err)}`)
+    return null
+  }
+}
+
+/** Make a scene read from the scenes folder the open one (no questions asked: the caller asks). */
+export function openFromFolder(scene: SceneFile, fileName: string) {
+  useGm.getState().loadScene(scene, sceneNameFromFile(fileName), fileName)
+  handle = null
+}
+
+/** Start a blank scene called `name`, saved into the scenes folder straight away. */
+export async function createInFolder(name: string): Promise<boolean> {
+  useGm.getState().newScene()
+  handle = null
+  useGm.setState({ sceneName: name })
+  return saveToFolder(name)
+}
+
+/** How often a scene from the scenes folder is saved back while it has changes. */
+const AUTOSAVE_MS = 3 * 60_000
+
+/** Save scenes from the scenes folder now and then, quietly (only when the browser allows it). */
+export function startAutosave(): () => void {
+  const timer = window.setInterval(() => {
+    const s = useGm.getState()
+    if (s.unsaved && s.sceneFile && s.sceneName) void saveToFolder(s.sceneName, false)
+  }, AUTOSAVE_MS)
+  return () => clearInterval(timer)
 }
 
 /** Ask for a scene file and open it. */

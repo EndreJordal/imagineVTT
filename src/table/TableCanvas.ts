@@ -1,6 +1,8 @@
 import { Container, Graphics, Text } from 'pixi.js'
 import { CurtainLayer } from '../render/CurtainLayer'
 import { HandoutLayer } from '../render/HandoutLayer'
+import { InitiativeLayer } from '../render/InitiativeLayer'
+import type { OrderStrip } from '../shared/combat'
 import { DoorRevealLayer } from '../render/DoorRevealLayer'
 import { PixiHost } from '../render/PixiHost'
 import { SceneLayer } from '../render/SceneLayer'
@@ -19,6 +21,9 @@ export class TableCanvas extends PixiHost {
   private calibration = new Container()
   private curtain = new CurtainLayer()
   private handout = new HandoutLayer()
+  /** The order of initiative of the linked fight, along the edge (under the curtain). */
+  private initiative = new InitiativeLayer()
+  private order: OrderStrip | null = null
   private handoutShown: Parameters<HandoutLayer['set']>[0] = null
   /** Whether the table has drawn yet (a picture showing as it opens appears at once). */
   private drawn = false
@@ -35,7 +40,9 @@ export class TableCanvas extends PixiHost {
   }
 
   protected setup() {
-    this.app.stage.addChild(this.sceneLayer, this.doorReveal, this.curtain, this.handout, this.calibration)
+    this.app.stage.addChild(this.sceneLayer, this.doorReveal, this.initiative, this.curtain, this.handout, this.calibration)
+    this.initiative.onChange = () => this.requestRender()
+    this.initiative.setStrip(this.order)
     this.handout.onChange = () => this.requestRender()
     this.handout.set(this.handoutShown, true)
     this.drawn = true
@@ -87,7 +94,16 @@ export class TableCanvas extends PixiHost {
   }
 
   /** Images of the assets objects show. */
+  /** The players' order of initiative (null: none), and a glow on whoever is acting. */
+  setOrder(strip: OrderStrip | null) {
+    this.order = strip
+    this.sceneLayer.characters.setActive(strip?.entries.find((e) => e.active)?.id ?? null)
+    if (this.ready) this.initiative.setStrip(strip)
+    this.requestRender()
+  }
+
   setObjectImages(images: AssetImages) {
+    this.initiative.setImages(images)
     this.sceneLayer.setObjectImages(images)
     this.requestRender()
   }
@@ -120,7 +136,13 @@ export class TableCanvas extends PixiHost {
   }
 
   protected override isAnimating() {
-    return this.sceneLayer.isAnimating() || this.curtain.animated || this.doorReveal.animated || this.handout.animated
+    return (
+      this.sceneLayer.isAnimating() ||
+      this.curtain.animated ||
+      this.doorReveal.animated ||
+      this.handout.animated ||
+      this.initiative.animated
+    )
   }
 
   protected override beforeRender(seconds: number) {
@@ -128,6 +150,7 @@ export class TableCanvas extends PixiHost {
     this.curtain.animate(seconds)
     this.handout.animate(seconds)
     this.doorReveal.animate(seconds)
+    this.initiative.animate(seconds)
   }
 
   private render() {
@@ -137,6 +160,7 @@ export class TableCanvas extends PixiHost {
     const screen = this.app.screen
     this.curtain.resize(screen.width, screen.height)
     this.handout.resize(screen.width, screen.height)
+    this.initiative.resize(screen.width, screen.height, display.pxPerMm)
     this.doorReveal.resize(screen.width, screen.height)
 
     this.sceneLayer.visible = !calibrating

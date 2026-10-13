@@ -10,6 +10,7 @@ import {
 } from '../shared/characters'
 import type { AssetImages } from '../shared/mapObjects'
 import type { Point, Scene } from '../shared/types'
+import { fixedTexture, PictureTextures } from './pictureTextures'
 
 /**
  * Character tokens: a border around a portrait, sliding to where they're moved. The players
@@ -27,18 +28,32 @@ interface Shown {
   ring: Sprite
   plain: Graphics
   highlight: Graphics
+  /** The glow round whoever is acting in the linked fight. */
+  glow: Graphics
   /** Where it's drawn, and the slide it's on (start set on the next frame). */
   at: Point
   slide: { from: Point; to: Point; start: number | null; duration: number } | null
+  /** What it was last drawn from: drawn again only when any of it changes. */
+  drawn: Drawn | null
+  greyed: boolean
   portraitKey?: string
 }
 
 /** Decoded portraits, by image key, shared by the tokens showing them. */
-interface Loaded {
-  image: Blob
-  texture: Texture | null
-  bitmap: ImageBitmap | null
+interface Drawn {
+  t: CharacterToken
+  grid: number
+  squareMm: number
+  turn: number
+  selected: boolean
+  px: number
+  active: boolean
+  version: number
 }
+
+const sameDrawn = (a: Drawn | null, b: Drawn) =>
+  !!a && (Object.keys(b) as (keyof Drawn)[]).every((k) => a[k] === b[k])
+
 
 /** Label colours: the name white, the type gold; both outlined in black. */
 const NAME_COLOR = 0xffffff
@@ -131,34 +146,28 @@ function labelText(fill: number): Label {
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
-/** Border pictures, loaded once (null while loading). */
-const borderTextures = new Map<string, Texture | null>()
-
-function borderTexture(id: string, loaded: () => void): Texture | null {
-  if (borderTextures.has(id)) return borderTextures.get(id)!
-  borderTextures.set(id, null)
-  void fetch(`${import.meta.env.BASE_URL}borders/${id}.png`)
-    .then((r) => r.blob())
-    .then((b) => createImageBitmap(b))
-    .then((bitmap) => {
-      borderTextures.set(id, Texture.from(bitmap))
-      loaded()
-    })
-    .catch(() => borderTextures.delete(id))
-  return null
-}
-
 export class CharacterLayer extends Container {
   private shown = new Map<string, Shown>()
-  private images: AssetImages = {}
-  private loaded = new Map<string, Loaded>()
+  private pictures = new PictureTextures(
+    () => this.redraw(),
+    // Tokens stop showing a portrait before it's freed.
+    (key) => {
+      for (const s of this.shown.values()) if (s.portraitKey === key) s.portrait.texture = Texture.EMPTY
+    },
+  )
   private grey = new ColorMatrixFilter()
   /** The GM's selected token, ringed. */
-  private selectedId: string | null = null
+  /** The GM's selected tokens, ringed (a key of their ids, to see a change). */
+  private selected = new Set<string>()
+  private selectedKey = ''
+  /** The combatant acting in the linked fight: its token glows. */
+  private activeRef: string | null = null
   /** One GM screen pixel in scene units, for the selection ring's width. */
   private px = 1
   /** The last sync's scene, to redraw when a border picture comes in. */
   private last: { scene: Scene; seen: Set<string>; players: boolean } | null = null
+  /** Goes up when pictures come in or change, so the tokens showing them are drawn again. */
+  private version = 0
   onChange: () => void = () => {}
 
   constructor() {
@@ -167,15 +176,21 @@ export class CharacterLayer extends Container {
   }
 
   get animated() {
-    for (const s of this.shown.values()) if (s.slide) return true
+    for (const s of this.shown.values()) if (s.slide || s.glow.visible) return true
     return false
   }
 
   setImages(images: AssetImages) {
-    this.images = images
-    for (const [key, l] of this.loaded) {
-      if (images[key]?.image !== l.image) this.unload(key)
-    }
+    this.pictures.setImages(images)
+    // Portraits that came in after the tokens were drawn (a reload, a fetched portrait).
+    this.redraw()
+  }
+
+  /** Draw the tokens again: pictures came in or changed. */
+  private redraw() {
+    this.version++
+    if (this.last) this.sync(this.last.scene, this.last.seen, this.last.players)
+    this.onChange()
   }
 
   /**
@@ -202,15 +217,32 @@ export class CharacterLayer extends Container {
       }
       const visible = seen.has(t.id)
       s.root.visible = !players || visible
-      s.root.alpha = players || visible ? 1 : 0.55
-      s.root.filters = players || visible ? null : [this.grey]
+      // Greyed: out of the fight (dead, in torpor…); and, for the GM, what the players can't see.
+      const greyed = !!t.down || (!players && !visible)
+      s.root.alpha = (players || visible ? 1 : 0.55) * (t.down ? 0.7 : 1)
+      if (greyed !== s.greyed) s.root.filters = greyed ? [this.grey] : null
+      s.greyed = greyed
+      const selected = this.selected.has(t.id)
+      const drawn: Drawn = {
+        t,
+        grid: scene.grid.size,
+        squareMm: scene.squareMm,
+        turn: scene.characterTurn ?? 0,
+        selected,
+        px: selected ? this.px : 0,
+        active: !!t.ref && t.ref === this.activeRef,
+        version: this.version,
+      }
+      if (sameDrawn(s.drawn, drawn)) continue
+      s.drawn = drawn
       this.draw(s, t, scene)
     }
-    this.cleanUnused()
+    this.pictures.keepOnly(new Set([...this.shown.values()].map((s) => s.portraitKey)))
   }
 
   animate(seconds: number) {
     for (const s of this.shown.values()) {
+      if (s.glow.visible) s.glow.alpha = 0.55 + 0.45 * Math.sin(seconds * 4)
       const slide = s.slide
       if (!slide) continue
       slide.start ??= seconds
@@ -222,10 +254,20 @@ export class CharacterLayer extends Container {
     }
   }
 
-  /** Ring the GM's selected token (null: none); `px` is a screen pixel in scene units. */
-  select(id: string | null, px: number) {
-    if (id === this.selectedId && px === this.px) return
-    this.selectedId = id
+  /** Glow round the token of whoever is acting in the linked fight (the combatant's id; null: none). */
+  setActive(ref: string | null) {
+    if (ref === this.activeRef) return
+    this.activeRef = ref
+    if (this.last) this.sync(this.last.scene, this.last.seen, this.last.players)
+    this.onChange()
+  }
+
+  /** Ring the GM's selected tokens; `px` is a screen pixel in scene units. */
+  select(ids: string[], px: number) {
+    const key = ids.join(',')
+    if (key === this.selectedKey && px === this.px) return
+    this.selectedKey = key
+    this.selected = new Set(ids)
     this.px = px
     if (this.last) this.sync(this.last.scene, this.last.seen, this.last.players)
   }
@@ -245,13 +287,15 @@ export class CharacterLayer extends Container {
     const plain = new Graphics()
     const ring = new Sprite({ anchor: 0.5 })
     const highlight = new Graphics()
+    const glow = new Graphics()
+    glow.visible = false
     const labels = { name: labelText(NAME_COLOR), type: labelText(TYPE_COLOR) }
     portrait.mask = mask
     // All the outlines, then all the lettering.
-    root.addChild(fill, initial, portrait, mask, plain, ring, highlight)
+    root.addChild(glow, fill, initial, portrait, mask, plain, ring, highlight)
     root.addChild(labels.name.back, labels.type.back, labels.name.front, labels.type.front)
     this.addChild(root)
-    const s: Shown = { root, portrait, mask, fill, initial, labels, ring, plain, highlight, at: { x: t.x, y: t.y }, slide: null }
+    const s: Shown = { root, portrait, mask, fill, initial, labels, ring, plain, highlight, glow, at: { x: t.x, y: t.y }, slide: null, drawn: null, greyed: false }
     this.shown.set(t.id, s)
     return s
   }
@@ -260,11 +304,21 @@ export class CharacterLayer extends Container {
     const r = tokenDiameter(t, scene) / 2
     if (!s.slide) s.at = { x: t.x, y: t.y }
     s.root.position.set(s.at.x, s.at.y)
+    // Whoever is acting: a warm glow round the token (pulsing; see animate).
+    s.glow.clear()
+    s.glow.visible = !!t.ref && t.ref === this.activeRef
+    if (s.glow.visible) {
+      s.glow
+        .circle(0, 0, r * 1.16)
+        .stroke({ width: r * 0.16, color: 0xffc04d, alpha: 0.35 })
+        .circle(0, 0, r * 1.06)
+        .stroke({ width: r * 0.08, color: 0xffd98a, alpha: 0.95 })
+    }
     // The whole token turns: border, portrait and text, to face whoever it's for.
     s.root.rotation = ((scene.characterTurn ?? 0) * Math.PI) / 2
     const inner = r * portraitRadius(t.border)
     s.highlight.clear()
-    if (t.id === this.selectedId) {
+    if (this.selected.has(t.id)) {
       s.highlight.circle(0, 0, r + 3 * this.px).stroke({ width: 2.5 * this.px, color: 0xffffff })
       s.highlight.circle(0, 0, r + 5.5 * this.px).stroke({ width: 1.5 * this.px, color: 0x000000, alpha: 0.6 })
     }
@@ -272,11 +326,10 @@ export class CharacterLayer extends Container {
     s.mask.clear().circle(0, 0, inner).fill(0xffffff)
 
     // The portrait, covering the frame's inside (zoomed and moved as set).
-    const key = t.portrait && this.images[t.portrait] ? t.portrait : undefined
+    const key = this.pictures.has(t.portrait) ? t.portrait : undefined
     s.portraitKey = key
-    const loaded = key ? this.load(key) : null
-    if (loaded?.texture) {
-      const tex = loaded.texture
+    const tex = key ? this.pictures.get(key) : null
+    if (tex) {
       s.portrait.texture = tex
       s.portrait.visible = true
       const scale = ((2 * inner) / Math.min(tex.width, tex.height)) * Math.max(0.1, t.zoom)
@@ -296,10 +349,8 @@ export class CharacterLayer extends Container {
     const picture = BORDERS.some((b) => b.id === t.border)
     s.plain.clear()
     if (picture) {
-      const tex = borderTexture(t.border, () => {
-        if (this.destroyed || !this.last) return
-        this.sync(this.last.scene, this.last.seen, this.last.players)
-        this.onChange()
+      const tex = fixedTexture(`borders/${t.border}.png`, () => {
+        if (!this.destroyed) this.redraw()
       })
       s.ring.visible = !!tex
       if (tex) {
@@ -345,43 +396,8 @@ export class CharacterLayer extends Container {
       })
   }
 
-  private load(key: string): Loaded {
-    let l = this.loaded.get(key)
-    if (l) return l
-    const image = this.images[key].image
-    const entry: Loaded = { image, texture: null, bitmap: null }
-    this.loaded.set(key, entry)
-    void createImageBitmap(image).then(
-      (bitmap) => {
-        if (this.loaded.get(key) !== entry) return bitmap.close()
-        entry.bitmap = bitmap
-        entry.texture = Texture.from(bitmap)
-        this.onChange()
-      },
-      () => {},
-    )
-    return entry
-  }
-
-  private unload(key: string) {
-    const l = this.loaded.get(key)
-    if (!l) return
-    this.loaded.delete(key)
-    for (const s of this.shown.values()) {
-      if (s.portraitKey === key) s.portrait.texture = Texture.EMPTY
-    }
-    l.texture?.destroy(true)
-    l.bitmap?.close()
-  }
-
-  /** Portraits no token shows any more. */
-  private cleanUnused() {
-    const used = new Set([...this.shown.values()].map((s) => s.portraitKey))
-    for (const key of [...this.loaded.keys()]) if (!used.has(key)) this.unload(key)
-  }
-
   override destroy(options?: Parameters<Container['destroy']>[0]) {
-    for (const key of [...this.loaded.keys()]) this.unload(key)
+    this.pictures.destroy()
     super.destroy(options)
   }
 }

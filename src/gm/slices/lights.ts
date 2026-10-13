@@ -6,6 +6,7 @@ import { moveCrossesWall, wallSegments } from '../../shared/visibility'
 import { LIGHT_PRESETS } from '../../shared/lights'
 import { nextName } from '../../shared/names'
 import type { GmStore } from '../store'
+import { selectOnly, SINGLES_OFF } from './shared'
 
 export interface LightsSlice {
   /** Lights whose tokens are selected in the GM view (GM-only, not sent to the table). */
@@ -35,8 +36,7 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
       light.name = nextName(LIGHT_PRESETS[kind].label, s.scene.lights.map((l) => l.name))
       return {
         scene: { ...s.scene, lights: [...s.scene.lights, light] },
-        selectedLightIds: [light.id],
-        selectedWallPoints: [],
+        ...selectOnly({ selectedLightIds: [light.id] }),
       }
     }),
   updateLight: (id, patch) =>
@@ -77,11 +77,12 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
       }
     }),
   selectLight: (id) =>
-    set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null, selectedCharacterId: null }),
+    set(selectOnly({ selectedLightIds: id ? [id] : [] })),
   toggleLightSelected: (id) =>
     set((s) => ({
       selectedLightIds: s.selectedLightIds.includes(id)
         ? s.selectedLightIds.filter((x) => x !== id)
         : [...s.selectedLightIds, id],
+      ...SINGLES_OFF,
     })),
 })

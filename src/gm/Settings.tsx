@@ -5,6 +5,7 @@ import { Field } from './ui'
 import { SoundOutput } from './Sound'
 import { useGm } from './store'
 import { useDropdown } from './useDropdown'
+import { chooseScenesFolder, reconnectScenesFolder, useScenesFolder } from './scenesFolder'
 import { Icon } from './icons'
 
 /** Toolbar settings button: settings that rarely change (calibration, for now). */
@@ -26,6 +27,8 @@ export function SettingsMenu() {
       </button>
       {open && (
         <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Settings">
+          <h2>Scenes folder</h2>
+          <ScenesFolderSetting />
           <h2>Sound output</h2>
           <SoundOutput />
           <h2>Table calibration</h2>
@@ -53,6 +56,27 @@ export function SettingsMenu() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Where scenes are kept by name: combat links open theirs, and saving writes straight back. */
+function ScenesFolderSetting() {
+  const { name, status } = useScenesFolder()
+  if (status === 'unsupported') return <p className="hint">This browser can’t keep a scenes folder (it needs Chrome or Edge).</p>
+  return (
+    <>
+      {name && (
+        <p className="hint">
+          <Icon name="folder" size={14} /> {name}
+          {status === 'reconnect' && ' (the browser asks again on each visit)'}
+        </p>
+      )}
+      <div className="row">
+        {status === 'reconnect' && <button onClick={() => void reconnectScenesFolder()}>Allow it again</button>}
+        <button onClick={() => void chooseScenesFolder()}>{name ? 'Change…' : 'Choose scenes folder…'}</button>
+      </div>
+      <p className="hint">Combat links open their scene from here; scenes from it save straight back (Ctrl+S).</p>
+    </>
   )
 }
 

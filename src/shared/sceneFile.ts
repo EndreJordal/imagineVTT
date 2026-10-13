@@ -2,6 +2,7 @@ import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate'
 import type { FogMemory } from './fog'
 import { extractLevel, type Level } from './levels'
 import type { AssetImage, AssetImages } from './mapObjects'
+import type { CombatSave } from './combat'
 import type { SoundClip, SoundClips } from './sound'
 import type { Orientation, Scene } from './types'
 import { usedClips } from './soundUse'
@@ -45,6 +46,8 @@ export interface SceneFile {
   objectImages: AssetImages
   /** Audio of the sounds the scene uses. */
   soundClips: SoundClips
+  /** The fight linked to the scene (from the combat tracker), to resume it. */
+  combat?: CombatSave | null
 }
 
 interface SceneJson {
@@ -66,6 +69,8 @@ interface SceneJson {
   assets?: Record<string, Omit<AssetImage, 'image'> & { file: string; type: string }>
   /** Clip key -> its takes' files in the zip, and its other details. */
   sounds?: Record<string, Omit<SoundClip, 'takes'> & { files: string[] }>
+  /** The linked fight, with the tracker's full state. */
+  combat?: CombatSave | null
 }
 
 const EXTENSIONS: Record<string, string> = {
@@ -141,6 +146,7 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     fogs,
     assets,
     sounds,
+    combat: s.combat ?? null,
   }
   files['scene.json'] = strToU8(JSON.stringify(json, null, 2))
   return new Blob([zipSync(files)], { type: 'application/zip' })
@@ -217,6 +223,7 @@ export async function readSceneFile(file: Blob): Promise<SceneFile> {
     camera: json.camera ?? null,
     objectImages,
     soundClips,
+    combat: json.combat ?? null,
   }
 }
 

@@ -18,7 +18,7 @@ npm run dev
 
 ## Scripts
 
-- `npm run dev`: start the dev server
+- `npm run dev`: start the dev server (it also serves the V:tM combat tracker at `/vtm-combat-tracker/`, from `../vtm-combat_tracker`, for the combat link: see `docs/combat-link.md`)
 - `npm test`: run the unit tests (Vitest)
 - `npm run test:maps`: run the tests against real battlemaps (`test-maps/`, not committed)
 - `npm run build`: typecheck and build

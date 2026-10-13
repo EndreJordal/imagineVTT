@@ -3,6 +3,7 @@ import { areaCentre } from '../shared/hidden'
 import { sceneBounds } from '../shared/geometry'
 import { isParty } from '../shared/levels'
 import { LIGHT_PRESETS, lightName, type Light } from '../shared/lights'
+import type { CharacterToken } from '../shared/characters'
 import type { Point } from '../shared/types'
 import type { GmCanvas } from './GmCanvas'
 import { Icon, LightKindIcon } from './icons'
@@ -31,7 +32,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const selectedObjects = useGm((s) => s.selectedObjectIds)
   const selectedHidden = useGm((s) => s.selectedHiddenId)
   const selectedSound = useGm((s) => s.selectedSoundId)
-  const selectedCharacter = useGm((s) => s.selectedCharacterId)
+  const selectedCharacters = useGm((s) => s.selectedCharacterIds)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const toggleCollapsed = () => {
     setCollapsed(!collapsed)
@@ -77,6 +78,20 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
     />
   )
 
+  const characterRow = (t: CharacterToken) => (
+    <Row
+      key={t.id}
+      icon={<Icon name="character" size={14} />}
+      name={t.name}
+      selected={selectedCharacters.includes(t.id)}
+      dim={!t.visible}
+      note={t.visible ? t.type : 'hidden'}
+      onSelect={() => gm.selectCharacter(t.id)}
+      onGo={() => goTo(t)}
+      onRename={(name) => gm.updateCharacter(t.id, { name })}
+    />
+  )
+
   return (
     <aside className="scene-panel" aria-label="Scene">
       <header>
@@ -90,11 +105,12 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           <List title="Groups">
             {groups.map((g) => {
               const m = groupMembers(scene, g.id)
-              const count = m.lights.length + m.objects.length + m.hidden.length
+              const count = m.lights.length + m.objects.length + m.hidden.length + m.characters.length
               const selected =
-                (m.lights.length || m.objects.length) > 0 &&
+                (m.lights.length || m.objects.length || m.characters.length) > 0 &&
                 m.lights.every((l) => selectedLights.includes(l.id)) &&
-                m.objects.every((o) => selectedObjects.includes(o.id))
+                m.objects.every((o) => selectedObjects.includes(o.id)) &&
+                m.characters.every((t) => selectedCharacters.includes(t.id))
               return (
                 <li key={g.id}>
                   <Row
@@ -116,7 +132,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                     selected={selected}
                     onSelect={() => gm.selectGroup(g.id)}
                     onGo={() => {
-                      const first = m.objects[0] ?? m.lights[0]
+                      const first = m.objects[0] ?? m.lights[0] ?? m.characters[0]
                       if (first) goTo(first)
                     }}
                     onRename={(name) => gm.renameGroup(g.id, name)}
@@ -136,6 +152,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                         />
                       ))}
                       {m.lights.map(lightRow)}
+                      {m.characters.map(characterRow)}
                       {m.hidden.map((a) => (
                         <Row
                           key={a.id}
@@ -187,20 +204,13 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
             />
           ))}
         </List>
-        <List title="Characters" empty="Add character tokens from the sidebar (Character tokens).">
-          {[...(scene.characters ?? [])].sort(byName).map((t) => (
-            <Row
-              key={t.id}
-              icon={<Icon name="character" size={14} />}
-              name={t.name}
-              selected={selectedCharacter === t.id}
-              dim={!t.visible}
-              note={t.visible ? t.type : 'hidden'}
-              onSelect={() => gm.selectCharacter(t.id)}
-              onGo={() => goTo(t)}
-              onRename={(name) => gm.updateCharacter(t.id, { name })}
-            />
-          ))}
+        <List
+          title="Characters"
+          empty="Add character tokens from the sidebar (Character tokens)."
+          onTitleClick={() => gm.selectCharacters((scene.characters ?? []).map((t) => t.id))}
+          titleHint="Select all the character tokens on this floor"
+        >
+          {[...(scene.characters ?? [])].sort(byName).map(characterRow)}
         </List>
         <List title="Sounds" empty="Drag sounds onto the map from the library (Assets, Audio).">
           {[...(scene.sounds ?? [])].sort(byName).map((x) => (
@@ -224,12 +234,30 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
 
 const groupName = (groups: { id: string; name: string }[], id: string) => groups.find((g) => g.id === id)?.name
 
-function List(props: { title: string; empty?: string; children: ReactNode[] | ReactNode }) {
+function List(props: {
+  title: string
+  empty?: string
+  /** Clicking the heading (selects everything in the list). */
+  onTitleClick?: () => void
+  titleHint?: string
+  children: ReactNode[] | ReactNode
+}) {
   const items = Array.isArray(props.children) ? props.children : [props.children]
+  const heading = (
+    <>
+      {props.title} <span className="scene-count">{items.length}</span>
+    </>
+  )
   return (
     <section className="scene-section">
       <h3>
-        {props.title} <span className="scene-count">{items.length}</span>
+        {props.onTitleClick && items.length ? (
+          <button className="scene-heading" title={props.titleHint} onClick={props.onTitleClick}>
+            {heading}
+          </button>
+        ) : (
+          heading
+        )}
       </h3>
       {items.length ? <ul>{props.children}</ul> : props.empty && <p className="hint">{props.empty}</p>}
     </section>
@@ -313,7 +341,9 @@ export function GroupBar() {
   const lights = useGm((s) => s.selectedLightIds)
   const objects = useGm((s) => s.selectedObjectIds)
   const hidden = useGm((s) => s.selectedHiddenId)
+  const characters = useGm((s) => s.selectedCharacterIds)
   const groupable =
+    characters.length +
     lights.filter((id) => {
       const l = scene.lights.find((x) => x.id === id)
       return l && !isParty(l)
@@ -323,6 +353,7 @@ export function GroupBar() {
   const picked = [
     ...scene.lights.filter((l) => lights.includes(l.id)),
     ...scene.objects.filter((o) => objects.includes(o.id)),
+    ...(scene.characters ?? []).filter((t) => characters.includes(t.id)),
   ]
   const group = picked.length && picked.every((x) => x.group && x.group === picked[0].group) ? picked[0].group : null
   const groupInfo = group ? (scene.groups ?? []).find((g) => g.id === group) : null

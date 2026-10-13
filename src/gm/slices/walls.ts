@@ -6,6 +6,7 @@ import type { Wall } from '../../shared/visibility'
 import { deleteWallPoints, makeDoor, moveWallPoints, sameRef, sameSpot, selectedSegment, type WallPointRef, withLinked } from '../../shared/walls'
 import type { DoorReveal } from '../../shared/doors'
 import type { GmStore } from '../store'
+import { selectOnly, SINGLES_OFF } from './shared'
 
 export interface WallsSlice {
   /** The door whose settings are open (right-click on its button; GM-only). */
@@ -50,7 +51,7 @@ export interface WallsSlice {
 export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
   selectedDoorId: null,
   selectDoor: (selectedDoorId) =>
-    set({ selectedDoorId, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedCharacterId: null }),
+    set(selectOnly({ selectedDoorId })),
   setDoorOwnReveal: (id, reveal) =>
     set((s) => ({
       scene: {
@@ -129,12 +130,7 @@ export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
       return { scene: { ...s.scene, walls }, selectedWallPoints: [] }
     }),
   selectWallPoint: (ref) =>
-    set((s) => ({
-      selectedWallPoints: withLinked(s.scene.walls, [ref]),
-      selectedLightIds: [],
-      selectedObjectIds: [],
-      selectedHiddenId: null,
-    })),
+    set((s) => selectOnly({ selectedWallPoints: withLinked(s.scene.walls, [ref]) })),
   toggleWallPointSelected: (ref) =>
     set((s) => {
       const group = withLinked(s.scene.walls, [ref])
@@ -143,6 +139,7 @@ export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
         selectedWallPoints: selected
           ? s.selectedWallPoints.filter((r) => !group.some((g) => sameRef(g, r)))
           : [...s.selectedWallPoints, ...group.filter((g) => !s.selectedWallPoints.some((r) => sameRef(r, g)))],
+        ...SINGLES_OFF,
       }
     }),
   moveWallPoints: (refs, dx, dy) =>

@@ -84,3 +84,20 @@ describe('scene files', () => {
     await expect(readSceneFile(future)).rejects.toThrow(/newer version/)
   })
 })
+
+describe('the linked fight in scene files', () => {
+  it('comes back as it was saved, so it can be resumed', async () => {
+    const combat = {
+      linkId: 'link-1',
+      encounter: 'The Record Shop',
+      payload: { name: 'The Record Shop', combatants: [{ preset: 'neonate' }] },
+      summary: { name: 'The Record Shop', round: 3, phase: 'act', activeId: 'a', order: ['a'], combatants: [] },
+      snapshot: { combat: { name: 'The Record Shop', round: 3, combatants: [{ id: 'a', dmg: { a: 0, l: 2, b: 1 } }] }, weapons: [] },
+      showOrder: true,
+      edges: 'both' as const,
+    }
+    const back = await readSceneFile(await writeSceneFile({ ...sample(), combat }))
+    expect(back.combat).toEqual(combat)
+    expect((await readSceneFile(await writeSceneFile(sample()))).combat).toBeNull()
+  })
+})

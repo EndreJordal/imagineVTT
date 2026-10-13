@@ -2,6 +2,7 @@ import { turnFogMemory } from '../shared/fog'
 import type { Level } from '../shared/levels'
 import type { Scene } from '../shared/types'
 import { useGm } from './store'
+import { selectionIn } from './slices/shared'
 
 /**
  * Undo/redo of scene edits (walls, doors, lights, map, grid, PVB, night…). A snapshot is the
@@ -154,8 +155,7 @@ function apply(snapshot: Snapshot) {
       ...snapshot,
       ...(fogChanged && { fogMemory, levelFog, fogVersion: s.fogVersion + 1 }),
       // Selections may point at things that are gone (or wall points that were renumbered).
-      selectedLightIds: s.selectedLightIds.filter((id) => snapshot.scene.lights.some((l) => l.id === id)),
-      selectedWallPoints: [],
+      ...selectionIn(s, snapshot.scene),
       wallDraft: [],
       doorDraft: null,
     }

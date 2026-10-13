@@ -39,6 +39,10 @@ export interface CharacterToken {
   /** Seconds a move takes; the scene's (characterSlide) if absent. */
   slide?: number
   group?: string
+  /** The combatant it stands for in the linked fight (the combat tracker's id). */
+  ref?: string
+  /** Out of the fight (dead, in torpor…), as the tracker says: drawn greyed. */
+  down?: boolean
 }
 
 /**

@@ -6,7 +6,7 @@ import { objectCorners, type AssetImage, type AssetImages, type MapObject } from
 import { baseName, nextName } from '../../shared/names'
 import type { Point } from '../../shared/types'
 import type { GmStore } from '../store'
-import { seersOf } from './shared'
+import { seersOf, selectOnly, SINGLES_OFF } from './shared'
 
 export interface ObjectsSlice {
   /** Selected objects (GM-only). */
@@ -49,9 +49,7 @@ export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) =
       const placed: MapObject = { ...object, name, id: crypto.randomUUID() }
       return {
         scene: { ...s.scene, objects: [...s.scene.objects, placed] },
-        selectedObjectIds: [placed.id],
-        selectedLightIds: [],
-        selectedWallPoints: [],
+        ...selectOnly({ selectedObjectIds: [placed.id] }),
       }
     }),
   updateObject: (id, patch) =>
@@ -77,8 +75,7 @@ export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) =
       selectedObjectIds: s.selectedObjectIds.includes(id)
         ? s.selectedObjectIds.filter((x) => x !== id)
         : [...s.selectedObjectIds, id],
-      selectedHiddenId: null,
-      selectedDoorId: null,
+      ...SINGLES_OFF,
     })),
   removeObjects: (ids) =>
     set((s) => {
@@ -88,15 +85,7 @@ export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) =
         selectedObjectIds: s.selectedObjectIds.filter((id) => !gone.has(id)),
       }
     }),
-  selectObject: (id) =>
-    set({
-      selectedObjectIds: id ? [id] : [],
-      selectedLightIds: [],
-      selectedWallPoints: [],
-      selectedHiddenId: null,
-      selectedSoundId: null,
-      selectedCharacterId: null,
-    }),
+  selectObject: (id) => set(selectOnly({ selectedObjectIds: id ? [id] : [] })),
   noticeObjects: () =>
     set((s) => {
       const { scene } = s

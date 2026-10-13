@@ -7,7 +7,7 @@ import type { Point } from '../../shared/types'
 import { nextName } from '../../shared/names'
 import type { GmStore } from '../store'
 import type { HideTool } from '../tools'
-import { seersOf, stamped } from './shared'
+import { seersOf, selectOnly, stamped } from './shared'
 
 /** The brush stroke being painted (by the id the canvas gives it) and the area it paints. */
 const strokes = new Map<string, string>()
@@ -131,7 +131,7 @@ export const hiddenSlice: StateCreator<GmStore, [], [], HiddenSlice> = (set, get
     }),
   selectedHiddenId: null,
   selectHidden: (id) =>
-    set({ selectedHiddenId: id, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedCharacterId: null }),
+    set(selectOnly({ selectedHiddenId: id })),
   updateHidden: (id, patch) =>
     set((s) => ({
       scene: { ...s.scene, hiddenAreas: (s.scene.hiddenAreas ?? []).map((a) => (a.id === id ? { ...a, ...patch } : a)) },

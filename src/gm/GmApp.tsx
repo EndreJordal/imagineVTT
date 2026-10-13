@@ -13,7 +13,7 @@ import { DoorPanel, DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
 import { HiddenAreaPanel, HideToolbox } from './Hide'
 import { GroupBar, ScenePanel } from './ScenePanel'
 import { SoundPanel } from './Sound'
-import { CharacterPanel } from './Characters'
+import { CharacterPanel, CharactersPanel } from './Characters'
 import { portraitFolder } from './portraits'
 import { playMapSound, startSoundController } from './soundController'
 import { Sidebar } from './Sidebar'
@@ -21,6 +21,14 @@ import { Toolbar } from './Toolbar'
 import { hydrateCurtain, toggleCurtain, useCurtain } from './curtainStore'
 import { hydrateHandouts, useHandouts } from './handoutStore'
 import { mapFolder } from './mapFolder'
+import { CombatBanner } from './CombatBanner'
+import { startCombatLink } from './combatLink'
+import { COMBATANT_DRAG_TYPE, PLACE_ALL, placeAllAt, placeCombatantAt } from './combatTokens'
+import { handLinkOver, otherGmWindow, serveAsGm } from './gmGuard'
+import { takeLink } from './linkStore'
+import { startAutosave } from './sceneFiles'
+import { restoreScenesFolder } from './scenesFolder'
+import { readCombatLink } from '../shared/combat'
 import { gmDarkness, hydrate, levelImage, useGm, type GmStore } from './store'
 import { SELECT } from './tools'
 import { Floors } from './Floors'
@@ -61,6 +69,8 @@ function onionOf(s: ReturnType<typeof useGm.getState>) {
 
 export function GmApp() {
   const [hydrated, setHydrated] = useState(false)
+  /** Another GM window is open: this one stands down (`handed`: with the combat link it was given). */
+  const [duplicate, setDuplicate] = useState<{ handed: boolean } | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<GmCanvas | null>(null)
 
@@ -70,21 +80,47 @@ export function GmApp() {
     let stopHistory: (() => void) | undefined
     let stopCurtain: (() => void) | undefined
     let stopSound: (() => void) | undefined
-    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts(), mapFolder.restore(), portraitFolder.restore()]).then(([, saveCurtain, saveHandouts]) => {
+    let stopCombat: (() => void) | undefined
+    const onHash = () => takeLink(location.hash, true)
+    void (async () => {
+      // Two GM windows would fight over the saved scene: hand a combat link to the open one.
+      if (await otherGmWindow()) {
+        const handed = !!readCombatLink(location.hash)
+        if (handed) handLinkOver(location.hash)
+        if (!cancelled) setDuplicate({ handed })
+        return
+      }
+      const [, saveCurtain, saveHandouts] = await Promise.all([
+        hydrate(),
+        hydrateCurtain(),
+        hydrateHandouts(),
+        mapFolder.restore(),
+        portraitFolder.restore(),
+        restoreScenesFolder(),
+      ])
       if (cancelled) return (saveCurtain(), saveHandouts())
       stopCurtain = () => (saveCurtain(), saveHandouts())
       stop = startGmSync()
       stopHistory = startHistory()
       stopSound = startSoundController()
+      const stopLink = startCombatLink()
+      const stopGuard = serveAsGm((hash) => takeLink(hash, false))
+      const stopAutosave = startAutosave()
+      stopCombat = () => (stopLink(), stopGuard(), stopAutosave())
+      // Opened from a combat link (or given one later, in the same tab).
+      takeLink(location.hash, true)
+      window.addEventListener('hashchange', onHash)
       void initAssetLibrary()
       setHydrated(true)
-    })
+    })()
     return () => {
       cancelled = true
       stop?.()
       stopHistory?.()
       stopCurtain?.()
       stopSound?.()
+      stopCombat?.()
+      window.removeEventListener('hashchange', onHash)
     }
   }, [])
 
@@ -140,7 +176,8 @@ export function GmApp() {
         if (selectedObjectIds.length === 1) copyObject(selectedObjectIds[0], p)
       },
       onObjectChange: (id, patch) => useGm.getState().updateObject(id, patch),
-      onBoxSelect: (lightIds, points, objectIds, add) => useGm.getState().selectMany(lightIds, points, objectIds, add),
+      onBoxSelect: (lightIds, points, objectIds, add, characterIds) =>
+        useGm.getState().selectMany(lightIds, points, objectIds, add, characterIds),
       onObjectToggle: (id) => useGm.getState().toggleObjectSelected(id),
       onObjectsMove: (ids, dx, dy) => {
         // Lights selected with them (a group) come along.
@@ -157,7 +194,8 @@ export function GmApp() {
         if (map) useGm.getState().setMapLocked(!map.locked)
       },
       onCharacterSelect: (id) => useGm.getState().selectCharacter(id),
-      onCharacterMove: (id, p) => useGm.getState().moveCharacter(id, p),
+      onCharacterToggle: (id) => useGm.getState().toggleCharacterSelected(id),
+      onCharactersMove: (ids, dx, dy) => useGm.getState().moveCharacters(ids, dx, dy),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),
     })
     canvasRef.current = canvas
@@ -166,6 +204,7 @@ export function GmApp() {
     let objectImages: unknown = null
     let shownInputs: unknown[] | null = null
     const push = (s = useGm.getState()) => {
+      canvas.setActiveCombatant(s.combat?.summary?.activeId ?? null)
       if (s.objectImages !== objectImages) {
         objectImages = s.objectImages
         canvas.setObjectImages(s.objectImages)
@@ -292,9 +331,9 @@ export function GmApp() {
       }
       // Arrow keys move the selected character token (a square at a time when it snaps).
       const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]
-      if (arrow && !typing && gm.selectedCharacterId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (arrow && !typing && gm.selectedCharacterIds.length && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
-        gm.nudgeCharacter(gm.selectedCharacterId, arrow[0], arrow[1], e.shiftKey)
+        gm.nudgeCharacters(gm.selectedCharacterIds, arrow[0], arrow[1], e.shiftKey)
         return
       }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
@@ -330,6 +369,18 @@ export function GmApp() {
     }
   }, [])
 
+  if (duplicate) {
+    return (
+      <div className="gm-duplicate">
+        <h1>imagineVTT is already open</h1>
+        <p>It’s open in another tab or window, and two would overwrite each other’s work. Use that one.</p>
+        <p className="hint">
+          {duplicate.handed ? 'The combat link you opened here has been passed on to it. ' : ''}You can close this tab.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="gm">
       <Toolbar />
@@ -341,12 +392,21 @@ export function GmApp() {
             ref={hostRef}
             // Assets dragged from the library are placed where they're dropped.
             onDragOver={(e) => {
-              if (e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) {
+              if (e.dataTransfer.types.includes(ASSET_DRAG_TYPE) || e.dataTransfer.types.includes(COMBATANT_DRAG_TYPE)) {
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'copy'
               }
             }}
             onDrop={(e) => {
+              // A combatant's coin from the Combat section: its token goes (or moves) here.
+              const combatant = e.dataTransfer.getData(COMBATANT_DRAG_TYPE)
+              const where = combatant && canvasRef.current?.sceneAt(e.clientX, e.clientY)
+              if (combatant && where) {
+                e.preventDefault()
+                e.stopPropagation()
+                void (combatant === PLACE_ALL ? placeAllAt(where) : placeCombatantAt(combatant, where))
+                return
+              }
               const path = e.dataTransfer.getData(ASSET_DRAG_TYPE)
               const at = path && canvasRef.current?.sceneAt(e.clientX, e.clientY)
               if (!path || !at) return
@@ -369,11 +429,13 @@ export function GmApp() {
             <DoorPanel />
             <SoundPanel />
             <CharacterPanel />
+            <CharactersPanel />
             <GroupBar />
             <AssetPreview />
           </div>
           <PlacementHint />
           <GmNotice />
+          <CombatBanner />
         </div>
         <ScenePanel canvas={canvasRef} />
       </div>

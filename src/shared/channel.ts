@@ -1,3 +1,4 @@
+import type { OrderStrip } from './combat'
 import type { CurtainState } from './curtain'
 import type { FogMemory } from './fog'
 import type { Turn } from './handout'
@@ -16,6 +17,7 @@ export type Message =
   | { type: 'curtain'; state: CurtainState } // gm -> table: curtain dropped, raised, set up
   | { type: 'curtain-images'; images: Record<string, Blob> } // gm -> table: the curtain's pictures
   | { type: 'handout'; handout: { id: string; image: Blob; turn: Turn; fill: boolean } | null } // gm -> table: picture shown
+  | { type: 'order'; strip: OrderStrip | null } // gm -> table: the order of initiative the players see
   | { type: 'bye'; from: 'gm' | 'table' }
 
 /** Table heartbeat interval; the GM treats the table as gone after a few missed beats. */
