@@ -9,9 +9,15 @@ import { createVisibilityTest, visibilityPolygon, wallSegments } from './visibil
  * a border, with a portrait inside. They fit their squares, with a little room to pick them
  * up, and slide where they're moved rather than jump.
  */
+export type CharacterLabel = 'name' | 'type' | 'both' | 'none'
+
 export interface CharacterToken {
   id: string
   name: string
+  /** What kind of character it is ("Goblin archer"); shown under the name if chosen. */
+  type?: string
+  /** What's written at the bottom of its square(s); none if absent. */
+  label?: CharacterLabel
   /** Centre, in scene units. */
   x: number
   y: number
@@ -53,6 +59,15 @@ export function portraitRadius(border: string): number {
   const b = BORDERS.find((x) => x.id === border)
   // A touch under the ring, so no gap shows between them.
   return b ? b.inner + 0.02 : 1 - PLAIN_RING + 0.01
+}
+
+/** The label's lines, top to bottom: the name, then the type, as chosen (blank ones left out). */
+export function labelLines(t: Pick<CharacterToken, 'name' | 'type' | 'label'>): { text: string; kind: 'name' | 'type' }[] {
+  const label = t.label ?? 'none'
+  const lines: { text: string; kind: 'name' | 'type' }[] = []
+  if ((label === 'name' || label === 'both') && t.name.trim()) lines.push({ text: t.name.trim(), kind: 'name' })
+  if ((label === 'type' || label === 'both') && t.type?.trim()) lines.push({ text: t.type.trim(), kind: 'type' })
+  return lines
 }
 
 /** A move's slide, unless the scene or the token says otherwise (seconds). */

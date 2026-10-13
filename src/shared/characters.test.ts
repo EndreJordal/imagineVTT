@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultScene } from '../gm/slices/shared'
-import { seenTokens, snapToken, tokenDiameter, type CharacterToken } from './characters'
+import { labelLines, seenTokens, snapToken, tokenDiameter, type CharacterToken } from './characters'
 import { createLight } from './lights'
 import type { Scene } from './types'
 
@@ -32,6 +32,20 @@ describe('character tokens', () => {
   it('settles in a square (1) or on a grid corner (2 × 2)', () => {
     expect(snapToken({ x: 130, y: 260 }, 1, grid)).toEqual({ x: 150, y: 250 })
     expect(snapToken({ x: 130, y: 260 }, 2, grid)).toEqual({ x: 100, y: 300 })
+  })
+
+  it('writes the name over the type, as chosen, leaving out blanks', () => {
+    const t = { name: 'Grub', type: 'Goblin archer' }
+    expect(labelLines({ ...t, label: 'both' })).toEqual([
+      { text: 'Grub', kind: 'name' },
+      { text: 'Goblin archer', kind: 'type' },
+    ])
+    expect(labelLines({ ...t, label: 'type' })).toEqual([{ text: 'Goblin archer', kind: 'type' }])
+    expect(labelLines({ ...t, label: 'name' })).toEqual([{ text: 'Grub', kind: 'name' }])
+    expect(labelLines({ ...t, label: 'none' })).toEqual([])
+    expect(labelLines(t)).toEqual([]) // tokens made before labels
+    expect(labelLines({ name: 'Grub', label: 'both' })).toEqual([{ text: 'Grub', kind: 'name' }])
+    expect(labelLines({ name: 'Grub', type: '  ', label: 'type' })).toEqual([])
   })
 
   describe('who the players see', () => {

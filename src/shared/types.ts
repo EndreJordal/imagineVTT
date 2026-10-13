@@ -1,4 +1,5 @@
 import type { CharacterToken } from './characters'
+import type { Turn } from './handout'
 import type { DoorReveal } from './doors'
 import type { DoorSounds, GlobalSound, MapSound } from './sound'
 import type { HiddenArea } from './hidden'
@@ -38,6 +39,8 @@ export interface MapInfo extends Rect {
   /** Pixel size of the image file; width/height are its displayed size in scene units. */
   naturalWidth: number
   naturalHeight: number
+  /** Locked: the map can't be moved or resized (the padlock beside its resize square). */
+  locked?: boolean
   /** Stop dragging from moving the map along this axis. */
   lockX?: boolean
   lockY?: boolean
@@ -102,6 +105,8 @@ export interface Scene {
   characters?: CharacterToken[]
   /** How long character tokens take to slide to where they're moved (s; all floors). */
   characterSlide?: number
+  /** Quarter turns clockwise every character token (border, portrait and text) is turned by (all floors). */
+  characterTurn?: Turn
   /** The sounds doors make, unless a door has its own (all floors). */
   doorSounds?: DoorSounds
 }

@@ -55,7 +55,13 @@ export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
     set((s) => ({
       scene: {
         ...s.scene,
-        walls: s.scene.walls.map((w) => (w.id === id && w.door ? { ...w, door: { open: w.door.open, ...(reveal && { reveal }) } } : w)),
+        walls: s.scene.walls.map((w) => {
+          if (w.id !== id || !w.door) return w
+          // Its own reveal set or cleared; the rest of the door (its sounds) kept.
+          const { reveal: _old, ...door } = w.door
+          void _old
+          return { ...w, door: reveal ? { ...door, reveal } : door }
+        }),
       },
     })),
   setDoorReveal: (doorReveal) => set((s) => ({ scene: { ...s.scene, doorReveal } })),
@@ -112,7 +118,7 @@ export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
     set((s) => ({
       scene: {
         ...s.scene,
-        walls: s.scene.walls.map((w) => (w.id === id && w.door ? { ...w, door: { open: !w.door.open } } : w)),
+        walls: s.scene.walls.map((w) => (w.id === id && w.door ? { ...w, door: { ...w.door, open: !w.door.open } } : w)),
       },
     })),
   convertToDoor: (refs) =>

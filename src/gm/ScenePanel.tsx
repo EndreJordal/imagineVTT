@@ -195,7 +195,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
               name={t.name}
               selected={selectedCharacter === t.id}
               dim={!t.visible}
-              note={t.visible ? undefined : 'hidden'}
+              note={t.visible ? t.type : 'hidden'}
               onSelect={() => gm.selectCharacter(t.id)}
               onGo={() => goTo(t)}
               onRename={(name) => gm.updateCharacter(t.id, { name })}

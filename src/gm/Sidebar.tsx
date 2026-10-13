@@ -113,20 +113,40 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
             <h3>Map in the PVB</h3>
             <div className="row">
               <button
-                disabled={!!map.lockToGrid}
-                title={map.lockToGrid ? 'Unlock from grid to rescale' : "Scale the map to the table view's width"}
+                disabled={!!map.lockToGrid || !!map.locked}
+                title={
+                  map.lockToGrid
+                    ? 'Unlock from grid to rescale'
+                    : map.locked
+                      ? 'Unlock the map to fit it'
+                      : "Scale the map to the table view's width"
+                }
                 onClick={() => s.fitMapToView('x')}
               >
                 <Icon name="fit-width" /> Fit width
               </button>
               <button
-                disabled={!!map.lockToGrid}
-                title={map.lockToGrid ? 'Unlock from grid to rescale' : "Scale the map to the table view's height"}
+                disabled={!!map.lockToGrid || !!map.locked}
+                title={
+                  map.lockToGrid
+                    ? 'Unlock from grid to rescale'
+                    : map.locked
+                      ? 'Unlock the map to fit it'
+                      : "Scale the map to the table view's height"
+                }
                 onClick={() => s.fitMapToView('y')}
               >
                 <Icon name="fit-height" /> Fit height
               </button>
             </div>
+            <button
+              className={map.locked ? 'active' : ''}
+              aria-pressed={!!map.locked}
+              title="Lock the map in place: it can't be moved or resized (also the padlock beside its corner on the map)"
+              onClick={() => s.setMapLocked(!map.locked)}
+            >
+              <Icon name={map.locked ? 'locked' : 'unlocked'} /> Lock map position
+            </button>
             <div className="row">
               <button
                 className={map.lockX ? 'active' : ''}
@@ -161,8 +181,14 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                 type="number"
                 step={1}
                 min={5}
-                disabled={!!map.lockToGrid}
-                title={map.lockToGrid ? 'Unlock from grid to change the scale' : undefined}
+                disabled={!!map.lockToGrid || !!map.locked}
+                title={
+                  map.lockToGrid
+                    ? 'Unlock from grid to change the scale'
+                    : map.locked
+                      ? 'Unlock the map to change its scale'
+                      : undefined
+                }
                 value={round((map.width / mapNatural(map).width) * 100, 1)}
                 onChange={(e) => positive(e.target.valueAsNumber, (pct) => s.setMapScale(pct / 100))}
               />

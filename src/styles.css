@@ -1399,3 +1399,22 @@ button.curtain-down:hover:not(:disabled) {
   margin-right: 6px;
   font-weight: 600;
 }
+
+/* A token's portrait choices scroll in their own box, so the settings below stay in reach. */
+.character-panel .curtain-pictures {
+  max-height: 14em;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+/* A sound search's matches scroll in their own box. */
+.sound-picker-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 14em;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}

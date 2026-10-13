@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { BORDERS, DEFAULT_SLIDE, seenTokens, type CharacterToken } from '../shared/characters'
+import { BORDERS, DEFAULT_SLIDE, seenTokens, type CharacterLabel, type CharacterToken } from '../shared/characters'
 import type { CharacterLook } from './slices/characters'
 import { FolderPictures } from './FolderPictures'
 import { Icon } from './icons'
@@ -7,13 +7,21 @@ import { portraitFolder, setPortrait, usePortraits } from './portraits'
 import { useGm } from './store'
 import { Section, Slider, Switch } from './ui'
 
+const LABELS: { value: CharacterLabel; text: string; title: string }[] = [
+  { value: 'name', text: 'Name', title: 'Write its name at the bottom of its square' },
+  { value: 'type', text: 'Type', title: 'Write its type at the bottom of its square' },
+  { value: 'both', text: 'Both', title: 'The name, with the type under it' },
+  { value: 'none', text: 'None', title: 'No text on the token' },
+]
+
 const borderUrl = (id: string) => `${import.meta.env.BASE_URL}borders/${id}.png`
 
 /** Sidebar section: placing character tokens, how new ones look, and how fast tokens move. */
 export function CharactersSection() {
   const look = useGm((s) => s.newCharacterLook)
   const slide = useGm((s) => s.scene.characterSlide ?? DEFAULT_SLIDE)
-  const { setNewCharacterLook, setCharacterSlide, addCharacter } = useGm.getState()
+  const turn = useGm((s) => s.scene.characterTurn ?? 0)
+  const { setNewCharacterLook, setCharacterSlide, addCharacter, turnCharacters } = useGm.getState()
   return (
     <Section title="Character tokens">
       <p className="hint">
@@ -36,6 +44,19 @@ export function CharactersSection() {
         title="How long a token takes to slide to where it's moved (each token can have its own)"
         onChange={setCharacterSlide}
       />
+      <span className="slider-label">Turn all tokens</span>
+      <div className="row handout-turns">
+        <button className="icon-button" title="Turn all tokens 90° left" onClick={() => turnCharacters(-1)}>
+          <Icon name="turn-left" />
+        </button>
+        <button title="Turn all tokens 180°" onClick={() => turnCharacters(2)}>
+          180°
+        </button>
+        <button className="icon-button" title="Turn all tokens 90° right" onClick={() => turnCharacters(1)}>
+          <Icon name="turn-right" />
+        </button>
+        <span className="hint">{turn * 90}°</span>
+      </div>
     </Section>
   )
 }
@@ -72,6 +93,27 @@ export function CharacterPanel() {
           <Icon name="close" />
         </button>
       </header>
+      <input
+        aria-label="Type"
+        placeholder="Type (Goblin archer, Innkeeper…)"
+        value={token.type ?? ''}
+        onChange={(e) => set({ type: e.target.value })}
+      />
+      <span className="slider-label">Display</span>
+      <div className="segmented" role="radiogroup" aria-label="Display">
+        {LABELS.map((l) => (
+          <button
+            key={l.value}
+            role="radio"
+            aria-checked={(token.label ?? 'none') === l.value}
+            className={(token.label ?? 'none') === l.value ? 'active' : ''}
+            title={l.title}
+            onClick={() => set({ label: l.value })}
+          >
+            {l.text}
+          </button>
+        ))}
+      </div>
       <Switch
         left="Hidden"
         right="Visible"

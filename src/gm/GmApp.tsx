@@ -152,6 +152,10 @@ export function GmApp() {
       onSoundSelect: (id) => useGm.getState().selectSound(id),
       onSoundMove: (id, p) => useGm.getState().updateSound(id, { x: p.x, y: p.y }),
       onSoundPlay: (id) => playMapSound(id),
+      onMapLockToggle: () => {
+        const map = useGm.getState().scene.map
+        if (map) useGm.getState().setMapLocked(!map.locked)
+      },
       onCharacterSelect: (id) => useGm.getState().selectCharacter(id),
       onCharacterMove: (id, p) => useGm.getState().moveCharacter(id, p),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),

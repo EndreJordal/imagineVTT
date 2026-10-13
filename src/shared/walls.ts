@@ -119,20 +119,70 @@ function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; ind
   return null
 }
 
+const pathLength = (pts: Point[]) => pts.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - pts[i].x, p.y - pts[i].y), 0)
+
+/**
+ * A door between two points that are both corners of one wall, not next to each other: the
+ * wall between them is replaced by the door (its corners in between go), and what's left on
+ * either side stays. Around a closed shape the shorter way round is the one replaced.
+ */
+function doorOverStretch(walls: Wall[], a: Point, b: Point, newId: () => string): Wall[] | null {
+  for (const w of walls) {
+    if (w.door) continue
+    const ia = w.points.findIndex((q) => sameSpot(q, a))
+    const ib = w.points.findIndex((q) => sameSpot(q, b))
+    if (ia < 0 || ib < 0 || ia === ib) continue
+    const [i, j] = ia < ib ? [ia, ib] : [ib, ia]
+    const P = w.points
+    const door: Wall = { id: newId(), points: [{ ...P[i] }, { ...P[j] }], door: { open: false } }
+    const closed = P.length >= 4 && sameSpot(P[0], P[P.length - 1])
+    let pieces: Point[][]
+    if (closed) {
+      const direct = pathLength(P.slice(i, j + 1))
+      const around = pathLength([...P.slice(j), ...P.slice(1, i + 1)])
+      // Keep the longer way round as the wall, a single open piece from one door end to the other.
+      pieces = [direct <= around ? [...P.slice(j), ...P.slice(1, i + 1)] : P.slice(i, j + 1)]
+    } else {
+      pieces = [P.slice(0, i + 1), P.slice(j)]
+    }
+    const out: Wall[] = []
+    for (const x of walls) {
+      if (x.id !== w.id) {
+        out.push(x)
+        continue
+      }
+      let first = true
+      for (const piece of pieces) {
+        if (piece.length < 2) continue
+        out.push({ id: first ? w.id : newId(), points: piece.map((pt) => ({ ...pt })) })
+        first = false
+      }
+      out.push(door)
+    }
+    return out
+  }
+  return null
+}
+
 /** Whether p is one of the walls' points (doors aside). */
 const isWallPoint = (walls: Wall[], p: Point) => walls.some((w) => !w.door && w.points.some((q) => sameSpot(q, p)))
 
 /**
  * Put a door between a and b, two points on the same stretch of wall: the wall is cut
  * there (the pieces on either side stay walls) and a closed door spans the gap. A door
- * ending on a wall point shares it. Two wall points with no wall between them (the ends
- * of two walls, a gap left for a doorway) get a door across the gap. Returns null if
- * neither applies.
+ * ending on a wall point shares it. Two corners of one wall with others between them get a
+ * door in place of that stretch of wall. Two wall points with no wall between them (the
+ * ends of two walls, a gap left for a doorway) get a door across the gap. Returns null if
+ * none applies.
  */
 export function makeDoor(walls: Wall[], a: Point, b: Point, newId: () => string): Wall[] | null {
   if (sameSpot(a, b)) return null
   const at = commonSegment(walls, a, b)
   if (!at) {
+    // Two corners of one wall (with others between them): the door replaces what's between.
+    const over = doorOverStretch(walls, a, b, newId)
+    if (over) return over
+    // Otherwise only the ends of different walls, with nothing between them: a door in the gap.
     if (!isWallPoint(walls, a) || !isWallPoint(walls, b)) return null
     return [...walls, { id: newId(), points: [{ ...a }, { ...b }], door: { open: false } }]
   }

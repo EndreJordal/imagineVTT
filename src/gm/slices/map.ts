@@ -22,6 +22,8 @@ export interface MapSlice {
   /** Scale and align the map to span the table view along one axis. */
   fitMapToView(axis: 'x' | 'y'): void
   setMapLock(axis: 'x' | 'y', locked: boolean): void
+  /** Lock the map in place (it can't be moved or resized), or unlock it. */
+  setMapLocked(locked: boolean): void
   setMapLockToGrid(locked: boolean): void
   /** Scale and place the map so a grid detected in its image lands on the scene grid, and lock it there. */
   alignMapToGrid(cell: { period: number; phaseX: number; phaseY: number }): void
@@ -56,7 +58,7 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
   setMapScale: (scale) =>
     set((s) => {
       const map = s.scene.map
-      if (!map || map.lockToGrid) return s
+      if (!map || map.lockToGrid || map.locked) return s
       const width = mapNatural(map).width * scale
       const height = mapNatural(map).height * scale
       return { scene: { ...s.scene, ...placeMap(s.scene, { ...map, width, height }) } }
@@ -64,7 +66,7 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
   setMapPosition: ({ x, y }) =>
     set((s) => {
       const { map, grid } = s.scene
-      if (!map) return s
+      if (!map || map.locked) return s
       const next = { ...map, x: map.lockX ? map.x : x, y: map.lockY ? map.y : y }
       if (!map.lockToGrid) return { scene: { ...s.scene, ...placeMap(s.scene, next) } }
       // Keep offsets within one cell; the grid looks the same either way.
@@ -84,7 +86,7 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
   fitMapToView: (axis) =>
     set((s) => {
       const map = s.scene.map
-      if (!map || map.lockToGrid) return s
+      if (!map || map.lockToGrid || map.locked) return s
       const view = boundingRect(tableViewCorners(s.scene, s.display, s.tableScreen))
       return { scene: { ...s.scene, ...placeMap(s.scene, fitMapToRect(map, view, axis)) } }
     }),
@@ -93,6 +95,12 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
       const map = s.scene.map
       if (!map) return s
       return { scene: { ...s.scene, map: { ...map, [axis === 'x' ? 'lockX' : 'lockY']: locked } } }
+    }),
+  setMapLocked: (locked) =>
+    set((s) => {
+      const map = s.scene.map
+      if (!map) return s
+      return { scene: { ...s.scene, map: { ...map, locked } } }
     }),
   setMapLockToGrid: (locked) =>
     set((s) => {

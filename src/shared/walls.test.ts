@@ -139,6 +139,30 @@ describe('doors', () => {
     expect(makeDoor([top, bottom], P(200, 100), P(250, 300), id)).toBeNull()
   })
 
+  it('replaces the wall between two corners of one wall, however many lie between', () => {
+    k = 0
+    // A freeform wall: the corners between the door's ends sit a hair off the straight line.
+    const long = { id: 'w', points: [P(200, 0), P(200, 100), P(200.4, 200), P(200, 300), P(200, 400)] }
+    const out = makeDoor([long], P(200, 100), P(200, 300), id)!
+    expect(out.map((w) => [w.id, w.points, w.door ?? null])).toEqual([
+      ['w', [P(200, 0), P(200, 100)], null],
+      ['d2', [P(200, 300), P(200, 400)], null],
+      ['d1', [P(200, 100), P(200, 300)], { open: false }],
+    ])
+  })
+
+  it('replaces the shorter way round a closed shape', () => {
+    k = 0
+    // Corners 0, 1, 2, 3 of a room: a door between 1 and 3 replaces 1 > 2 > 3 (two sides).
+    const out = makeDoor([room], P(400, 0), P(0, 300), id)!
+    const door = out.find((w) => w.door)!
+    expect(door.points).toEqual([P(400, 0), P(0, 300)])
+    const wall = out.filter((w) => !w.door)
+    expect(wall).toHaveLength(1)
+    // What's left runs from one end of the door to the other, the long way (via the corner at 0,0).
+    expect(wall[0].points).toEqual([P(0, 300), P(0, 0), P(400, 0)])
+  })
+
   it('refuses points that are not on one stretch of wall', () => {
     expect(makeDoor([room], P(100, 0), P(400, 100), id)).toBeNull() // around a corner
     expect(makeDoor([room], P(100, 10), P(200, 0), id)).toBeNull() // off the line

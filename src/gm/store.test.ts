@@ -949,6 +949,20 @@ describe('character tokens in the store', () => {
     expect(useGm.getState().selectedCharacterId).toBe(tokens[1].id)
   })
 
+  it('turns every token together, in quarter turns that wrap', () => {
+    const { turnCharacters } = useGm.getState()
+    const turn = () => useGm.getState().scene.characterTurn ?? 0
+    turnCharacters(1)
+    expect(turn()).toBe(1)
+    turnCharacters(2)
+    expect(turn()).toBe(3)
+    turnCharacters(1)
+    expect(turn()).toBe(0)
+    turnCharacters(-1)
+    expect(turn()).toBe(3)
+    turnCharacters(1)
+  })
+
   it('moves a square at a time with the arrows, and onto squares when dropped', () => {
     const { addCharacter, nudgeCharacter, moveCharacter, updateCharacter } = useGm.getState()
     addCharacter({ x: 150, y: 150 })
@@ -963,5 +977,43 @@ describe('character tokens in the store', () => {
     expect(at()).toMatchObject({ x: 420, y: 333 })
     nudgeCharacter(id, 0, 1, false)
     expect(at().y).toBeCloseTo(343)
+  })
+})
+
+describe('locking the map in place', () => {
+  it('keeps a locked map where it is and how big it is, until it is unlocked', async () => {
+    const { setMap, setMapLocked, setMapPosition, setMapScale, fitMapToView } = useGm.getState()
+    setMap(new Blob(['x']), { width: 800, height: 600 })
+    const at = () => {
+      const m = useGm.getState().scene.map!
+      return [m.x, m.y, m.width]
+    }
+    const start = at()
+    setMapLocked(true)
+    setMapPosition({ x: start[0] + 300, y: start[1] + 300 })
+    fitMapToView('x')
+    setMapScale(2)
+    expect(at()).toEqual(start)
+    setMapLocked(false)
+    setMapPosition({ x: start[0] + 300, y: start[1] + 300 })
+    expect(at()).toEqual([start[0] + 300, start[1] + 300, start[2]])
+    setMap(null, null)
+  })
+})
+
+describe('doors keep their own settings', () => {
+  it('keeps its own reveal and sounds when a door opens, and its sounds when the reveal changes', () => {
+    const door = { id: 'door', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], door: { open: false } }
+    useGm.setState((s) => ({ scene: { ...s.scene, walls: [door] } }))
+    const { setDoorOwnReveal, setDoorOwnSounds, toggleDoor } = useGm.getState()
+    setDoorOwnSounds('door', { open: 'creak', close: null, volume: 0.5 })
+    setDoorOwnReveal('door', { effect: 'fade', duration: 2 })
+    toggleDoor('door')
+    const d = () => useGm.getState().scene.walls.find((w) => w.id === 'door')!.door!
+    expect(d()).toEqual({ open: true, reveal: { effect: 'fade', duration: 2 }, sounds: { open: 'creak', close: null, volume: 0.5 } })
+    setDoorOwnReveal('door', undefined)
+    expect(d().sounds).toBeDefined()
+    expect(d().reveal).toBeUndefined()
+    useGm.setState((s) => ({ scene: { ...s.scene, walls: [] } }))
   })
 })

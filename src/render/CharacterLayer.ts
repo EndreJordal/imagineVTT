@@ -1,6 +1,7 @@
 import { ColorMatrixFilter, Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import {
   BORDERS,
+  labelLines,
   PLAIN_RING,
   portraitRadius,
   slideOf,
@@ -21,6 +22,8 @@ interface Shown {
   mask: Graphics
   fill: Graphics
   initial: Text
+  /** The name and type, written at the bottom of the token's square(s). */
+  labels: { name: Label; type: Label }
   ring: Sprite
   plain: Graphics
   highlight: Graphics
@@ -35,6 +38,95 @@ interface Loaded {
   image: Blob
   texture: Texture | null
   bitmap: ImageBitmap | null
+}
+
+/** Label colours: the name white, the type gold; both outlined in black. */
+const NAME_COLOR = 0xffffff
+const TYPE_COLOR = 0xffd166
+/** Outline width (a fraction of the text height; half of it shows outside the letters). */
+const OUTLINE = 0.26
+/** The size labels are made at (and so already styled for). */
+const START_SIZE = 20
+/** Pushes the text down onto the square's bottom edge: the text box has room under the letters. */
+const BOTTOM_NUDGE = 0.12
+/** Distance between a name's and a type's baselines, as a fraction of the text height. */
+const LINE_PITCH = 0.86
+/** Label text height, as a fraction of a square. */
+const LABEL_SIZE = 0.2
+
+/** The shortest a label shrinks to fit its square (a fraction of full size); past that it's cut short. */
+const MIN_LABEL_SCALE = 0.4
+
+/**
+ * A line of label text: the black outline (`back`) and the lettering over it (`front`).
+ * Outlines and lettering are separate texts, so every outline sits under every letter:
+ * one line's outline can't cover the other line's letters.
+ */
+interface Label {
+  back: Text
+  front: Text
+}
+
+/** Set a label's text and size, cut short with … if it won't fit the width; returns its scale. */
+function fitLabel(label: Label, full: string, size: number, width: number): number {
+  const text = label.back
+  if (text.style.fontSize !== size) {
+    for (const t of [label.back, label.front]) {
+      t.style.fontSize = size
+      t.style.lineHeight = size
+      t.style.stroke = strokeOf(t === label.back, size)
+    }
+  }
+  const measure = (value: string) => {
+    for (const t of [label.back, label.front]) {
+      if (t.text !== value) t.text = value
+      t.scale.set(1)
+    }
+    return text.width
+  }
+  let w = measure(full)
+  if (w <= width) return 1
+  if (width / w >= MIN_LABEL_SCALE) return width / w
+  // Too long even shrunk: keep the start, as many characters as fit, and an ellipsis.
+  let n = Math.max(1, Math.floor((full.length * width) / (w * MIN_LABEL_SCALE)))
+  let cut = `${full.slice(0, n).trimEnd()}…`
+  w = measure(cut)
+  while (w * MIN_LABEL_SCALE > width && n > 1) {
+    cut = `${full.slice(0, --n).trimEnd()}…`
+    w = measure(cut)
+  }
+  return Math.min(1, width / w)
+}
+
+/**
+ * The outline's stroke; the lettering over it has the same stroke, invisible, so both texts
+ * measure and sit alike.
+ */
+function strokeOf(visible: boolean, size: number) {
+  return { color: 0x000000, width: size * OUTLINE, join: 'round' as const, alpha: visible ? 1 : 0 }
+}
+
+function labelText(fill: number): Label {
+  const make = (color: number, outline: boolean) => {
+    const text = new Text({
+      text: '',
+      style: {
+        fill: color,
+        fontFamily: 'Segoe UI, Arial, sans-serif',
+        fontWeight: '700',
+        fontSize: START_SIZE,
+        lineHeight: START_SIZE,
+        // Styled from the start: fitLabel only restyles when the size changes.
+        stroke: strokeOf(outline, START_SIZE),
+      },
+    })
+    text.anchor.set(0.5, 1)
+    // Rasterised sharp enough for the table and a zoomed-in GM view.
+    text.resolution = 3
+    text.visible = false
+    return text
+  }
+  return { back: make(0x000000, true), front: make(fill, false) }
 }
 
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
@@ -153,10 +245,13 @@ export class CharacterLayer extends Container {
     const plain = new Graphics()
     const ring = new Sprite({ anchor: 0.5 })
     const highlight = new Graphics()
+    const labels = { name: labelText(NAME_COLOR), type: labelText(TYPE_COLOR) }
     portrait.mask = mask
+    // All the outlines, then all the lettering.
     root.addChild(fill, initial, portrait, mask, plain, ring, highlight)
+    root.addChild(labels.name.back, labels.type.back, labels.name.front, labels.type.front)
     this.addChild(root)
-    const s: Shown = { root, portrait, mask, fill, initial, ring, plain, highlight, at: { x: t.x, y: t.y }, slide: null }
+    const s: Shown = { root, portrait, mask, fill, initial, labels, ring, plain, highlight, at: { x: t.x, y: t.y }, slide: null }
     this.shown.set(t.id, s)
     return s
   }
@@ -165,6 +260,8 @@ export class CharacterLayer extends Container {
     const r = tokenDiameter(t, scene) / 2
     if (!s.slide) s.at = { x: t.x, y: t.y }
     s.root.position.set(s.at.x, s.at.y)
+    // The whole token turns: border, portrait and text, to face whoever it's for.
+    s.root.rotation = ((scene.characterTurn ?? 0) * Math.PI) / 2
     const inner = r * portraitRadius(t.border)
     s.highlight.clear()
     if (t.id === this.selectedId) {
@@ -193,6 +290,8 @@ export class CharacterLayer extends Container {
       s.initial.style.fontSize = Math.max(4, inner)
     }
 
+    this.drawLabels(s, t, scene)
+
     // The border: a picture, or a plain ring in the chosen colour.
     const picture = BORDERS.some((b) => b.id === t.border)
     s.plain.clear()
@@ -218,6 +317,32 @@ export class CharacterLayer extends Container {
         .circle(0, 0, r - w)
         .stroke({ width: Math.max(1, r * 0.02), color: 0x000000, alpha: 0.5 })
     }
+  }
+
+  /**
+   * The name and/or type, at the bottom of the square(s) the token occupies: outlined so
+   * they read over any map; the name on top in white, the type below it in gold.
+   */
+  private drawLabels(s: Shown, t: CharacterToken, scene: Scene) {
+    const lines = labelLines(t)
+    const square = t.size * scene.grid.size
+    const size = scene.grid.size * LABEL_SIZE * (t.size === 2 ? 1.25 : 1)
+    // The last line's glyphs sit right on the square's bottom edge (outline included).
+    const bottom = square / 2 + size * BOTTOM_NUDGE
+    for (const l of [s.labels.name, s.labels.type]) l.back.visible = l.front.visible = false
+    // The last line sits on the bottom edge; the one above it stacks over it.
+    lines
+      .slice()
+      .reverse()
+      .forEach((line, i) => {
+        const label = s.labels[line.kind]
+        const fits = fitLabel(label, line.text, size, square * 0.96)
+        for (const text of [label.back, label.front]) {
+          text.scale.set(fits)
+          text.position.set(0, bottom - i * size * LINE_PITCH)
+          text.visible = true
+        }
+      })
   }
 
   private load(key: string): Loaded {

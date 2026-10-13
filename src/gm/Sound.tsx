@@ -260,6 +260,9 @@ export function SoundOutput() {
   )
 }
 
+/** The most matches a search lists (it narrows as you type). */
+const MAX_RESULTS = 100
+
 /** Pick a library sound (searchable), or none. */
 export function SoundPicker({
   label,
@@ -277,7 +280,7 @@ export function SoundPicker({
   const results = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     if (!words.length) return []
-    return sounds.filter((a) => words.every((w) => `${a.name} ${a.category}`.toLowerCase().includes(w))).slice(0, 8)
+    return sounds.filter((a) => words.every((w) => `${a.name} ${a.category}`.toLowerCase().includes(w))).slice(0, MAX_RESULTS)
   }, [sounds, query])
   const name = value ? (clips[value]?.name ?? sounds.find((a) => a.path === value)?.name ?? 'missing sound') : 'None'
   return (
@@ -303,21 +306,26 @@ export function SoundPicker({
       ) : (
         !value && <p className="hint">Connect the asset folder (Assets) to pick sounds.</p>
       )}
-      {results.map((a) => (
-        <button
-          key={a.path}
-          className="sound-row"
-          onClick={() =>
-            void loadSound(a.path).then((ok) => {
-              if (!ok) return
-              onChange(a.path)
-              setQuery('')
-            })
-          }
-        >
-          {a.name} <span className="hint">{a.category}</span>
-        </button>
-      ))}
+      {results.length > 0 && (
+        // Many matches scroll in their own box, so the panel doesn't outgrow the window.
+        <div className="sound-picker-results">
+          {results.map((a) => (
+            <button
+              key={a.path}
+              className="sound-row"
+              onClick={() =>
+                void loadSound(a.path).then((ok) => {
+                  if (!ok) return
+                  onChange(a.path)
+                  setQuery('')
+                })
+              }
+            >
+              {a.name} <span className="hint">{a.category}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

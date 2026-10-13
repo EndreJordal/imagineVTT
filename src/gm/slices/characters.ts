@@ -1,6 +1,7 @@
 /** Character tokens: placing, configuring and moving them. */
 import type { StateCreator } from 'zustand'
 import { snapToken, type CharacterToken } from '../../shared/characters'
+import { turnBy } from '../../shared/handout'
 import { nextName } from '../../shared/names'
 import type { Point } from '../../shared/types'
 import type { GmStore } from '../store'
@@ -22,6 +23,8 @@ export interface CharactersSlice {
   nudgeCharacter(id: string, dx: number, dy: number, fine: boolean): void
   removeCharacter(id: string): void
   setCharacterSlide(seconds: number): void
+  /** Turn every token (border, portrait and text) by quarter turns (clockwise). */
+  turnCharacters(by: number): void
 }
 
 const OTHERS_OFF = {
@@ -94,4 +97,6 @@ export const charactersSlice: StateCreator<GmStore, [], [], CharactersSlice> = (
       selectedCharacterId: s.selectedCharacterId === id ? null : s.selectedCharacterId,
     })),
   setCharacterSlide: (characterSlide) => set((s) => ({ scene: { ...s.scene, characterSlide } })),
+  turnCharacters: (by) =>
+    set((s) => ({ scene: { ...s.scene, characterTurn: turnBy(s.scene.characterTurn ?? 0, by) } })),
 })
