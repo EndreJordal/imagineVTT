@@ -1,3 +1,4 @@
+import type { CharacterToken } from './characters'
 import type { DoorReveal } from './doors'
 import type { DoorSounds, GlobalSound, MapSound } from './sound'
 import type { HiddenArea } from './hidden'
@@ -97,6 +98,10 @@ export interface Scene {
   sounds?: MapSound[]
   /** Sounds in the mixer, heard everywhere (all floors). */
   globalSounds?: GlobalSound[]
+  /** Character tokens on this floor. */
+  characters?: CharacterToken[]
+  /** How long character tokens take to slide to where they're moved (s; all floors). */
+  characterSlide?: number
   /** The sounds doors make, unless a door has its own (all floors). */
   doorSounds?: DoorSounds
 }

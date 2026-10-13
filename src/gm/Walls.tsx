@@ -53,8 +53,8 @@ export function DoorToolbox() {
       </header>
       <p className="hint">
         {started
-          ? 'Now click the other end, on the same stretch of wall.'
-          : 'Click a wall line where the door starts; the green dot shows valid points.'}
+          ? 'Now click the other end: on the same stretch of wall, or the end of the wall across a gap.'
+          : 'Click a wall line where the door starts, or a wall end beside a gap; the green dot shows valid points.'}
       </p>
       <ul className="key-list">
         <li>

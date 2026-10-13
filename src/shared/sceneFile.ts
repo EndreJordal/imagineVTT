@@ -99,7 +99,10 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     }
   }
   // Only the images objects actually show, on any floor.
-  const used = new Set(s.levels.flatMap((l) => l.objects ?? []).map((o) => o.asset))
+  const used = new Set([
+    ...s.levels.flatMap((l) => l.objects ?? []).map((o) => o.asset),
+    ...s.levels.flatMap((l) => l.characters ?? []).flatMap((c) => (c.portrait ? [c.portrait] : [])),
+  ])
   const assets: NonNullable<SceneJson['assets']> = {}
   let n = 0
   for (const [key, img] of Object.entries(s.objectImages)) {

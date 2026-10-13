@@ -50,7 +50,7 @@ export interface WallsSlice {
 export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
   selectedDoorId: null,
   selectDoor: (selectedDoorId) =>
-    set({ selectedDoorId, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null }),
+    set({ selectedDoorId, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedCharacterId: null }),
   setDoorOwnReveal: (id, reveal) =>
     set((s) => ({
       scene: {

@@ -13,6 +13,8 @@ import { DoorPanel, DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
 import { HiddenAreaPanel, HideToolbox } from './Hide'
 import { GroupBar, ScenePanel } from './ScenePanel'
 import { SoundPanel } from './Sound'
+import { CharacterPanel } from './Characters'
+import { portraitFolder } from './portraits'
 import { playMapSound, startSoundController } from './soundController'
 import { Sidebar } from './Sidebar'
 import { Toolbar } from './Toolbar'
@@ -68,7 +70,7 @@ export function GmApp() {
     let stopHistory: (() => void) | undefined
     let stopCurtain: (() => void) | undefined
     let stopSound: (() => void) | undefined
-    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts(), mapFolder.restore()]).then(([, saveCurtain, saveHandouts]) => {
+    void Promise.all([hydrate(), hydrateCurtain(), hydrateHandouts(), mapFolder.restore(), portraitFolder.restore()]).then(([, saveCurtain, saveHandouts]) => {
       if (cancelled) return (saveCurtain(), saveHandouts())
       stopCurtain = () => (saveCurtain(), saveHandouts())
       stop = startGmSync()
@@ -150,6 +152,8 @@ export function GmApp() {
       onSoundSelect: (id) => useGm.getState().selectSound(id),
       onSoundMove: (id, p) => useGm.getState().updateSound(id, { x: p.x, y: p.y }),
       onSoundPlay: (id) => playMapSound(id),
+      onCharacterSelect: (id) => useGm.getState().selectCharacter(id),
+      onCharacterMove: (id, p) => useGm.getState().moveCharacter(id, p),
       onCameraChange: (camera) => useGm.getState().setGmCamera(camera),
     })
     canvasRef.current = canvas
@@ -282,6 +286,13 @@ export function GmApp() {
         gm.setTool(SELECT)
         return
       }
+      // Arrow keys move the selected character token (a square at a time when it snaps).
+      const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]
+      if (arrow && !typing && gm.selectedCharacterId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        gm.nudgeCharacter(gm.selectedCharacterId, arrow[0], arrow[1], e.shiftKey)
+        return
+      }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if (typing) return
       useGm.getState().deleteSelection()
@@ -353,6 +364,7 @@ export function GmApp() {
             <HiddenAreaPanel />
             <DoorPanel />
             <SoundPanel />
+            <CharacterPanel />
             <GroupBar />
             <AssetPreview />
           </div>

@@ -13,6 +13,7 @@ import type { SoundClips } from '../shared/sound'
 import type { Display, Scene, Size, TableState } from '../shared/types'
 import { type FloorsSlice, floorsSlice } from './slices/floors'
 import { audioSlice, type AudioSlice } from './slices/audio'
+import { charactersSlice, type CharactersSlice } from './slices/characters'
 import { fogSlice, type FogSlice } from './slices/fog'
 import { groupsSlice, type GroupsSlice } from './slices/groups'
 import { type HiddenSlice, hiddenSlice } from './slices/hidden'
@@ -46,7 +47,8 @@ export interface GmStore
     ViewSlice,
     SessionSlice,
     GroupsSlice,
-    AudioSlice {}
+    AudioSlice,
+    CharactersSlice {}
 
 export const useGm = create<GmStore>()((...a) => ({
   ...floorsSlice(...a),
@@ -61,6 +63,7 @@ export const useGm = create<GmStore>()((...a) => ({
   ...sessionSlice(...a),
   ...groupsSlice(...a),
   ...audioSlice(...a),
+  ...charactersSlice(...a),
 }))
 
 /** What the table shows: its floor, with the shared parts of the scene. */

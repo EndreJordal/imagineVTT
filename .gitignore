@@ -29,3 +29,6 @@ scratch/
 
 # Arkenforge asset packs (licensed; several GB; never commit)
 media-assets/
+
+# Border pictures as downloaded (checkerboard baked in); cleaned copies are in public/borders
+/borders/

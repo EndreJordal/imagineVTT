@@ -50,6 +50,7 @@ export const TOOLS_OFF = {
   selectedHiddenId: null,
   selectedDoorId: null,
   selectedSoundId: null,
+  selectedCharacterId: null,
   tool: SELECT,
   wallDraft: [],
   doorDraft: null,

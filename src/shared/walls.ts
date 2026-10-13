@@ -119,15 +119,23 @@ function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; ind
   return null
 }
 
+/** Whether p is one of the walls' points (doors aside). */
+const isWallPoint = (walls: Wall[], p: Point) => walls.some((w) => !w.door && w.points.some((q) => sameSpot(q, p)))
+
 /**
  * Put a door between a and b, two points on the same stretch of wall: the wall is cut
  * there (the pieces on either side stay walls) and a closed door spans the gap. A door
- * ending on a wall point shares it. Returns null if a and b aren't on one wall segment.
+ * ending on a wall point shares it. Two wall points with no wall between them (the ends
+ * of two walls, a gap left for a doorway) get a door across the gap. Returns null if
+ * neither applies.
  */
 export function makeDoor(walls: Wall[], a: Point, b: Point, newId: () => string): Wall[] | null {
   if (sameSpot(a, b)) return null
   const at = commonSegment(walls, a, b)
-  if (!at) return null
+  if (!at) {
+    if (!isWallPoint(walls, a) || !isWallPoint(walls, b)) return null
+    return [...walls, { id: newId(), points: [{ ...a }, { ...b }], door: { open: false } }]
+  }
   const out: Wall[] = []
   for (const w of walls) {
     if (w.id !== at.wallId) {

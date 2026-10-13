@@ -130,7 +130,8 @@ export const hiddenSlice: StateCreator<GmStore, [], [], HiddenSlice> = (set, get
       return { scene: { ...s.scene, hiddenAreas } }
     }),
   selectedHiddenId: null,
-  selectHidden: (id) => set({ selectedHiddenId: id, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [] }),
+  selectHidden: (id) =>
+    set({ selectedHiddenId: id, selectedLightIds: [], selectedWallPoints: [], selectedObjectIds: [], selectedCharacterId: null }),
   updateHidden: (id, patch) =>
     set((s) => ({
       scene: { ...s.scene, hiddenAreas: (s.scene.hiddenAreas ?? []).map((a) => (a.id === id ? { ...a, ...patch } : a)) },

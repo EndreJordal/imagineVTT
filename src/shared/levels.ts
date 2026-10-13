@@ -1,3 +1,4 @@
+import type { CharacterToken } from './characters'
 import type { HiddenArea } from './hidden'
 import type { MapSound } from './sound'
 import type { Light } from './lights'
@@ -29,6 +30,7 @@ export interface Level {
   hiddenEnabled?: boolean
   groups?: SceneGroup[]
   sounds?: MapSound[]
+  characters?: CharacterToken[]
 }
 
 /** A floor's part of a scene (the scene shows one floor; see applyLevel). */
@@ -47,6 +49,7 @@ export function extractLevel(scene: Scene, base: Pick<Level, 'id' | 'name'>): Le
     hiddenEnabled: scene.hiddenEnabled ?? true,
     groups: scene.groups ?? [],
     sounds: scene.sounds ?? [],
+    characters: scene.characters ?? [],
   }
 }
 
@@ -65,6 +68,7 @@ export function applyLevel(scene: Scene, level: Level): Scene {
     hiddenEnabled: level.hiddenEnabled ?? true,
     groups: level.groups ?? [],
     sounds: level.sounds ?? [],
+    characters: level.characters ?? [],
   }
 }
 
@@ -84,6 +88,7 @@ export function emptyLevel(id: string, name: string, like: Scene): Level {
     hiddenEnabled: true,
     groups: [],
     sounds: [],
+    characters: [],
   }
 }
 

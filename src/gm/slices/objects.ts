@@ -95,6 +95,7 @@ export const objectsSlice: StateCreator<GmStore, [], [], ObjectsSlice> = (set) =
       selectedWallPoints: [],
       selectedHiddenId: null,
       selectedSoundId: null,
+      selectedCharacterId: null,
     }),
   noticeObjects: () =>
     set((s) => {

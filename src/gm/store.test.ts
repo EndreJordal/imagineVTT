@@ -930,3 +930,38 @@ describe('sounds in the store', () => {
     expect(s.selectedSoundId).toBeNull()
   })
 })
+
+describe('character tokens in the store', () => {
+  beforeEach(() => {
+    useGm.setState((s) => ({
+      scene: { ...s.scene, characters: [], grid: { ...s.scene.grid, size: 100, offsetX: 0, offsetY: 0 } },
+      selectedCharacterId: null,
+    }))
+  })
+
+  it('places tokens on a square, numbered, and selects the new one', () => {
+    const { addCharacter } = useGm.getState()
+    addCharacter({ x: 120, y: 290 })
+    addCharacter({ x: 0, y: 0 })
+    const tokens = useGm.getState().scene.characters!
+    expect(tokens.map((t) => t.name)).toEqual(['Character 1', 'Character 2'])
+    expect(tokens[0]).toMatchObject({ x: 150, y: 250, visible: true, snap: true, size: 1 })
+    expect(useGm.getState().selectedCharacterId).toBe(tokens[1].id)
+  })
+
+  it('moves a square at a time with the arrows, and onto squares when dropped', () => {
+    const { addCharacter, nudgeCharacter, moveCharacter, updateCharacter } = useGm.getState()
+    addCharacter({ x: 150, y: 150 })
+    const id = useGm.getState().selectedCharacterId!
+    const at = () => useGm.getState().scene.characters!.find((t) => t.id === id)!
+    nudgeCharacter(id, 1, 0, false)
+    expect(at()).toMatchObject({ x: 250, y: 150 })
+    moveCharacter(id, { x: 420, y: 333 })
+    expect(at()).toMatchObject({ x: 450, y: 350 })
+    updateCharacter(id, { snap: false })
+    moveCharacter(id, { x: 420, y: 333 })
+    expect(at()).toMatchObject({ x: 420, y: 333 })
+    nudgeCharacter(id, 0, 1, false)
+    expect(at().y).toBeCloseTo(343)
+  })
+})

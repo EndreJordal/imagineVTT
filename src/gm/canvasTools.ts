@@ -93,7 +93,7 @@ function wallTool(): CanvasTool {
   }
 }
 
-/** Building doors: two clicks on a wall line make a door; clicking a door's button toggles it. */
+/** Building doors: two clicks on a wall line (or two wall ends across a gap) make a door; clicking a door's button toggles it. */
 function doorTool(): CanvasTool {
   let at: Point | null = null
   return {

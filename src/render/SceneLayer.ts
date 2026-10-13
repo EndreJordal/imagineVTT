@@ -9,6 +9,8 @@ import { FogLayer } from './FogLayer'
 import { LightingLayer } from './LightingLayer'
 import { createMapMesh, SHARED_SLOTS } from './mapShader'
 import { ObjectsLayer } from './ObjectsLayer'
+import { CharacterLayer } from './CharacterLayer'
+import { seenTokens } from '../shared/characters'
 
 /**
  * Who the scene is drawn for under fog of war: the players see black, greyscale memory and
@@ -53,26 +55,32 @@ export class SceneLayer extends Container {
   private dimOnly = false
   /** Images placed on the map, drawn over it with the same shading. */
   private objects = new ObjectsLayer(this.map.group)
+  /** Character tokens, over everything on the map. */
+  readonly characters = new CharacterLayer()
+  /** Which tokens the players see, kept while what decides it is the same. */
+  private seen: { inputs: unknown[]; ids: Set<string> } | null = null
 
   constructor() {
     super()
-    this.addChild(this.map.mesh, this.objects)
+    this.addChild(this.map.mesh, this.objects, this.characters)
   }
 
   /** Called when something loaded in the background needs a redraw (object images). */
   set onChange(fn: () => void) {
     this.changed = fn
     this.objects.onChange = fn
+    this.characters.onChange = fn
   }
 
   /** Whether frames are needed with nothing changed (flickering lights, animated objects). */
   isAnimating() {
-    return this.lighting.animated || this.objects.animated
+    return this.lighting.animated || this.objects.animated || this.characters.animated
   }
 
   /** The images of the assets objects show (from the GM; kept with the scene). */
   setObjectImages(images: AssetImages) {
     this.objects.setImages(images)
+    this.characters.setImages(images)
   }
 
   /** Call before each frame: animates light flicker, redraws sight when vision tokens move. */
@@ -92,6 +100,7 @@ export class SceneLayer extends Container {
     this.map.uniformsChanged()
     this.shareTextures()
     this.objects.animate(seconds)
+    this.characters.animate(seconds)
   }
 
   /** Objects read the same light, sight and memory maps as the map. */
@@ -225,6 +234,7 @@ export class SceneLayer extends Container {
     this.lighting.destroy()
     this.fog.destroy()
     this.objects.destroy()
+    this.characters.destroy()
     super.destroy(options)
   }
 
@@ -251,6 +261,12 @@ export class SceneLayer extends Container {
     this.lighting.sync(scene.lights, bounds, scene.grid.size, scene.darkness, scene.walls)
     this.fog.sync(scene.lights, bounds, scene.grid.size, scene.walls)
     this.objects.sync(scene.objects ?? [], { players: viewer === 'players', obscured: this.fogMode === 'players' })
+    const inputs = [
+      scene.characters, scene.lights, scene.walls, scene.fog.mode, scene.darkness, scene.hiddenAreas,
+      scene.hiddenEnabled, scene.grid, scene.map,
+    ]
+    if (!this.seen || inputs.some((v, i) => v !== this.seen!.inputs[i])) this.seen = { inputs, ids: seenTokens(scene) }
+    this.characters.sync(scene, this.seen.ids, viewer === 'players')
 
     const u = this.map.uniforms
     u.uBounds.set([bounds.x, bounds.y, bounds.width, bounds.height])

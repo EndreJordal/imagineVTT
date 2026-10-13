@@ -128,6 +128,17 @@ describe('doors', () => {
     expect(out.some((w) => !w.door && sameSpot(w.points[0], P(400, 300)))).toBe(true)
   })
 
+  it('puts a door across the gap between two walls ends', () => {
+    k = 0
+    const top = { id: 't', points: [P(200, 0), P(200, 100)] }
+    const bottom = { id: 'b', points: [P(200, 300), P(200, 400)] }
+    const out = makeDoor([top, bottom], P(200, 100), P(200, 300), id)!
+    expect(out.slice(0, 2)).toEqual([top, bottom]) // the walls stay as they were
+    expect(out[2]).toEqual({ id: 'd1', points: [P(200, 100), P(200, 300)], door: { open: false } })
+    // Only between wall points: a loose end isn't a doorway.
+    expect(makeDoor([top, bottom], P(200, 100), P(250, 300), id)).toBeNull()
+  })
+
   it('refuses points that are not on one stretch of wall', () => {
     expect(makeDoor([room], P(100, 0), P(400, 100), id)).toBeNull() // around a corner
     expect(makeDoor([room], P(100, 10), P(200, 0), id)).toBeNull() // off the line

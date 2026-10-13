@@ -129,6 +129,8 @@ export const mapSlice: StateCreator<GmStore, [], [], MapSlice> = (set) => ({
           walls: s.scene.walls.map((w) => ({ ...w, points: w.points.map(turn) })),
           lights: s.scene.lights.map((l) => ({ ...l, ...turn(l), angle: l.angle + quarter })),
           objects: s.scene.objects.map((o) => ({ ...o, ...turn(o), rotation: o.rotation + quarter })),
+          sounds: s.scene.sounds?.map((x) => ({ ...x, ...turn(x) })),
+          characters: s.scene.characters?.map((c) => ({ ...c, ...turn(c) })),
           hiddenAreas: (s.scene.hiddenAreas ?? []).flatMap((a) => {
             const shape = a.shape && turnHidden(a.shape, direction)
             const cells = turnHidden(a.cells, direction) ?? (shape && nothingHidden(shape))

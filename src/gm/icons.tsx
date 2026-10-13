@@ -40,6 +40,7 @@ import {
   Theater,
   Tv,
   Undo2,
+  UserRound,
   Volume2,
   WandSparkles,
   X,
@@ -93,6 +94,7 @@ const ICONS = {
   sound: Volume2,
   play: Play,
   stop: Square,
+  character: UserRound,
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONS

@@ -77,7 +77,7 @@ export const lightsSlice: StateCreator<GmStore, [], [], LightsSlice> = (set, get
       }
     }),
   selectLight: (id) =>
-    set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null }),
+    set({ selectedLightIds: id ? [id] : [], selectedWallPoints: [], selectedObjectIds: [], selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null, selectedCharacterId: null }),
   toggleLightSelected: (id) =>
     set((s) => ({
       selectedLightIds: s.selectedLightIds.includes(id)

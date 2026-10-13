@@ -49,6 +49,7 @@ export const audioSlice: StateCreator<GmStore, [], [], AudioSlice> = (set) => ({
       selectedWallPoints: [],
       selectedHiddenId: null,
       selectedDoorId: null,
+      selectedCharacterId: null,
     }),
   addSound: (clip, name, at) =>
     set((s) => {

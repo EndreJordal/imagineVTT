@@ -1340,3 +1340,62 @@ button.curtain-down:hover:not(:disabled) {
 .handout-turns {
   align-items: center;
 }
+
+/* Character tokens: the border picker, and the token panel's name. */
+.border-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(3.2em, 1fr));
+  gap: 4px;
+}
+
+.border-choice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1c1c21;
+}
+
+.border-choice.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.border-choice img {
+  width: 100%;
+  height: 100%;
+}
+
+.border-choice.plain {
+  position: relative;
+}
+
+.border-plain-ring {
+  width: 80%;
+  height: 80%;
+  padding: 0;
+  border: 4px solid;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.border-choice.plain input[type='color'] {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 1.3em;
+  height: 1.3em;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+
+.panel-name {
+  flex: 1;
+  min-width: 0;
+  margin-right: 6px;
+  font-weight: 600;
+}

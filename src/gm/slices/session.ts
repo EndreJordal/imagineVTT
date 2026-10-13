@@ -109,5 +109,7 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
     if (selectedWallPoints.length) deleteWallPoints(selectedWallPoints)
     if (selectedLightIds.length) removeLights(selectedLightIds)
     if (selectedObjectIds.length) removeObjects(selectedObjectIds)
+    const { selectedCharacterId, removeCharacter } = get()
+    if (selectedCharacterId) removeCharacter(selectedCharacterId)
   },
 })

@@ -12,6 +12,7 @@ import {
 import { emitsLight, isDirectional, LIGHT_PRESETS, type Light } from '../shared/lights'
 import type { FogMemory } from '../shared/fog'
 import { hitsObject, objectCorners, type AssetImages, type MapObject } from '../shared/mapObjects'
+import { snapToken, tokenDiameter, type CharacterToken } from '../shared/characters'
 import type { GmCamera } from '../shared/sceneFile'
 import {
   inRect,
@@ -135,6 +136,10 @@ export interface Handlers {
   onSoundMove(id: string, p: Point): void
   /** A sound's play button. */
   onSoundPlay(id: string): void
+  /** A character token clicked (null: nothing). */
+  onCharacterSelect(id: string | null): void
+  /** A character token dropped at p (it slides there). */
+  onCharacterMove(id: string, p: Point): void
   /** A grouped light or object clicked: select its group. */
   onGroupSelect(id: string): void
   /** Several selected objects dragged together. */
@@ -158,6 +163,7 @@ export const UI_KEYS = [
   'hideBrush',
   'selectedHiddenId',
   'selectedSoundId',
+  'selectedCharacterId',
 ] as const satisfies readonly (keyof GmStore)[]
 
 /** What the canvas shows besides the scene: the store's UI_KEYS, and what's worked out from it. */
@@ -182,6 +188,8 @@ type Drag =
   // base: the pointer's distance from the view's centre that means true scale (zoom 1).
   | { mode: 'viewZoom'; base: number }
   | { mode: 'sound'; id: string; grab: Point }
+  /** Dragging a character token: a ghost shows where it'll go; it slides there on release. */
+  | { mode: 'character'; id: string; grab: Point; to: Point | null }
   | { mode: 'map'; grab: Point }
   | { mode: 'resize'; grab: Point }
   // wasSelected: the light was already selected when pressed, so a click (no drag) narrows
@@ -205,7 +213,10 @@ type Drag =
  * a map locked to the grid.
  */
 type Target =
-  | { kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'object' | 'objectRotate'; id: string }
+  | {
+      kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'character' | 'object' | 'objectRotate'
+      id: string
+    }
   /** A selected object's corner handle, with the resize cursor for its direction. */
   | { kind: 'objectResize'; id: string; cursor: string }
   | { kind: 'wallPoint'; ref: WallPointRef }
@@ -225,6 +236,7 @@ const CURSORS: Record<Drag['mode'] | 'locked' | 'door' | 'hidden' | 'soundPlay',
   hidden: 'pointer',
   soundPlay: 'pointer',
   sound: 'move',
+  character: 'grab',
   pan: 'grab',
   view: 'move',
   viewZoom: 'nwse-resize',
@@ -299,6 +311,8 @@ export class GmCanvas extends PixiHost {
   private toolLayer = new Graphics()
   /** The Shift-drag selection box. */
   private selectionBox = new Graphics()
+  /** Where a dragged character token will go. */
+  private characterGhost = new Graphics()
   private wallsDrawn: { walls: unknown; px: number; selected: WallPointRef[] } | null = null
   private ui: GmUi = {
     tableScreen: { width: 1920, height: 1080 },
@@ -314,6 +328,7 @@ export class GmCanvas extends PixiHost {
     hideBrush: 1,
     selectedHiddenId: null,
     selectedSoundId: null,
+    selectedCharacterId: null,
     onion: null,
     curtainDown: false,
     handout: null,
@@ -383,6 +398,7 @@ export class GmCanvas extends PixiHost {
       this.lightTokens,
       this.aimHandle,
       this.selectionBox,
+      this.characterGhost,
       this.toolLayer,
     )
     this.app.stage.addChild(this.camera)
@@ -578,6 +594,7 @@ export class GmCanvas extends PixiHost {
     this.drawSoundTokens()
     this.drawWalls()
     this.drawObjectHandles()
+    this.sceneLayer.characters.select(this.ui.selectedCharacterId, this.px)
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -877,6 +894,22 @@ export class GmCanvas extends PixiHost {
     return this.state?.scene.walls.find((w) => w.id === ref.wallId)?.points[ref.index]
   }
 
+  /** A faint token where the dragged one will go, and the way there. */
+  private drawCharacterGhost(t: CharacterToken, to: Point) {
+    if (!this.state) return
+    const r = tokenDiameter(t, this.state.scene) / 2
+    const px = this.px
+    this.characterGhost
+      .clear()
+      .moveTo(t.x, t.y)
+      .lineTo(to.x, to.y)
+      .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.5 })
+      .circle(to.x, to.y, r)
+      .fill({ color: 0xffffff, alpha: 0.15 })
+      .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.9 })
+    this.requestRender()
+  }
+
   private drawSelectionBox() {
     this.requestRender()
     const g = this.selectionBox.clear()
@@ -925,6 +958,9 @@ export class GmCanvas extends PixiHost {
       const l = lights[i]
       if (this.ghostLightIds.has(l.id)) continue
       if (Math.hypot(p.x - l.x, p.y - l.y) <= (TOKEN_PX + 2) * px) return { kind: 'light', id: l.id }
+    }
+    for (const t of [...(state.scene.characters ?? [])].reverse()) {
+      if (Math.hypot(p.x - t.x, p.y - t.y) <= tokenDiameter(t, state.scene) / 2) return { kind: 'character', id: t.id }
     }
     for (const sound of [...(state.scene.sounds ?? [])].reverse()) {
       const play = { x: sound.x + PLAY_OFFSET_PX * px, y: sound.y }
@@ -1084,6 +1120,11 @@ export class GmCanvas extends PixiHost {
       this.drag = { mode: 'objectRotate', id: target.id }
     } else if (target?.kind === 'aim') {
       this.drag = { mode: 'aim', id: target.id }
+    } else if (target?.kind === 'character') {
+      const t = scene?.characters?.find((x) => x.id === target.id)
+      if (!t) return
+      this.handlers.onCharacterSelect(t.id)
+      this.drag = { mode: 'character', id: t.id, grab: { x: t.x - p.x, y: t.y - p.y }, to: null }
     } else if (target?.kind === 'soundPlay') {
       this.handlers.onSoundPlay(target.id)
       this.pressedAt = null
@@ -1204,7 +1245,12 @@ export class GmCanvas extends PixiHost {
       return
     }
     const to = { x: p.x + drag.grab.x, y: p.y + drag.grab.y }
-    if (drag.mode === 'sound') {
+    if (drag.mode === 'character') {
+      const t = this.state?.scene.characters?.find((x) => x.id === drag.id)
+      if (!t || !this.state) return
+      drag.to = t.snap ? snapToken(to, t.size, this.state.scene.grid) : to
+      this.drawCharacterGhost(t, drag.to)
+    } else if (drag.mode === 'sound') {
       this.handlers.onSoundMove(drag.id, to)
     } else if (drag.mode === 'light') {
       if (!this.handlers.onLightMove(drag.id, to, e.altKey)) this.dropDrag(e)
@@ -1232,7 +1278,8 @@ export class GmCanvas extends PixiHost {
     const clicked = start && Math.hypot(c.x - start.x, c.y - start.y) < CLICK_PX
     const drag = this.drag
     const onSomething =
-      drag && ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate', 'sound'].includes(drag.mode)
+      drag &&
+      ['light', 'aim', 'wallPoint', 'box', 'object', 'objectResize', 'objectRotate', 'sound', 'character'].includes(drag.mode)
     if (drag?.mode === 'box') {
       // Shift+click (no box drawn) on an object or light: in or out of the selection.
       const on = clicked ? this.targetAt(drag.start) : null
@@ -1257,6 +1304,10 @@ export class GmCanvas extends PixiHost {
       this.handlers.onWallPointSelect(drag.ref)
     } else if (clicked && drag && !onSomething && !e.ctrlKey && !e.metaKey) {
       this.handlers.onLightSelect(null) // clears the whole selection
+    }
+    if (drag?.mode === 'character') {
+      this.characterGhost.clear()
+      if (drag.to && !clicked) this.handlers.onCharacterMove(drag.id, drag.to)
     }
     if (drag?.mode === 'pan') this.reportCamera()
     this.pressedAt = null

@@ -31,6 +31,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const selectedObjects = useGm((s) => s.selectedObjectIds)
   const selectedHidden = useGm((s) => s.selectedHiddenId)
   const selectedSound = useGm((s) => s.selectedSoundId)
+  const selectedCharacter = useGm((s) => s.selectedCharacterId)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const toggleCollapsed = () => {
     setCollapsed(!collapsed)
@@ -183,6 +184,21 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
               onSelect={() => gm.selectHidden(a.id)}
               onGo={() => goTo(areaCentre(a, bounds))}
               onRename={(name) => gm.updateHidden(a.id, { name })}
+            />
+          ))}
+        </List>
+        <List title="Characters" empty="Add character tokens from the sidebar (Character tokens).">
+          {[...(scene.characters ?? [])].sort(byName).map((t) => (
+            <Row
+              key={t.id}
+              icon={<Icon name="character" size={14} />}
+              name={t.name}
+              selected={selectedCharacter === t.id}
+              dim={!t.visible}
+              note={t.visible ? undefined : 'hidden'}
+              onSelect={() => gm.selectCharacter(t.id)}
+              onGo={() => goTo(t)}
+              onRename={(name) => gm.updateCharacter(t.id, { name })}
             />
           ))}
         </List>
