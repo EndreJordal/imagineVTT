@@ -3,6 +3,7 @@ import type { Picture } from './folderAccess'
 import { Icon } from './icons'
 import type { FolderFields, PictureFolder } from './pictureFolder'
 import { useThumbnail } from './thumbnails'
+import { useRowsBox } from './useRowsBox'
 
 /**
  * A picture folder's controls (choose, reconnect, rescan, change) and its pictures as
@@ -20,6 +21,8 @@ export function FolderPictures(props: {
   onSelect(id: string): void
   /** Double-click: the main action (show, use). */
   onOpen?(id: string): void
+  /** Rows shown before the pictures scroll in their own box (all, if unset). */
+  rows?: number
 }) {
   const { state, folder, what } = props
   const { status, folderName, images } = state
@@ -30,6 +33,9 @@ export function FolderPictures(props: {
     window.addEventListener('focus', rescan)
     return () => window.removeEventListener('focus', rescan)
   }, [folder, props.state.status])
+
+  const rows = props.rows
+  const list = useRowsBox(rows, images.length)
 
   return (
     <>
@@ -65,7 +71,7 @@ export function FolderPictures(props: {
         </p>
       )}
       {images.length > 0 && (
-        <div className="curtain-pictures">
+        <div className={`curtain-pictures${rows ? ' scrolls' : ''}`} ref={list}>
           {images.map((image) => (
             <Thumb
               key={image.id}

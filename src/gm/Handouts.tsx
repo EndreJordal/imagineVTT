@@ -19,6 +19,7 @@ export function HandoutsSection() {
         folder={handoutFolder}
         what="pictures"
         ns="handout:"
+        rows={3}
         onSelect={select}
         onOpen={(id) => void showHandout(id)}
         thumb={(image) => ({

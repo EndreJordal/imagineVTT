@@ -120,8 +120,9 @@ export function levelFogMemory(s: Pick<GmStore, 'levelId' | 'fogMemory' | 'level
 }
 
 // Calibrated on the GM's own table TV: the nominal 96 CSS px per inch square measured 137 mm
-// instead of 100. Other screens differ; calibration corrects it.
-export const defaultDisplay: Display = { pxPerMm: (96 / MM_PER_INCH) * (100 / 137), orientation: 0 }
+// instead of 100. Other screens differ; calibration corrects it. The 137 counts as applied, so
+// typing it again doesn't correct twice.
+export const defaultDisplay: Display = { pxPerMm: (96 / MM_PER_INCH) * (100 / 137), lastMeasuredMm: 137, orientation: 0 }
 
 // Until a table window has ever connected, assume a 1080p TV.
 export const defaultTableScreen: Size = { width: 1920, height: 1080 }

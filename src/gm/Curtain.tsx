@@ -10,6 +10,7 @@ import {
 } from './curtainStore'
 import { Icon } from './icons'
 import { useThumbnail } from './thumbnails'
+import { useRowsBox } from './useRowsBox'
 import { Field, Section, Slider } from './ui'
 
 /** Toolbar button: drops a picture over the table instead of the map, or raises it (C). */
@@ -42,6 +43,7 @@ export function CurtainButton() {
 export function CurtainSection() {
   const state = useCurtain((s) => s.state)
   const images = useCurtain((s) => s.images)
+  const list = useRowsBox(3, images.length)
   const status = useCurtain((s) => s.status)
   const folderName = useCurtain((s) => s.folderName)
   const { setCurtain, setSlideshow } = useCurtain.getState()
@@ -86,7 +88,7 @@ export function CurtainSection() {
         <p className="hint">No pictures in “{folderName}” yet: put JPG, PNG or WebP files in it.</p>
       )}
       {images.length > 0 && (
-        <div className="curtain-pictures">
+        <div className="curtain-pictures scrolls" ref={list}>
           {images.map((image) => (
             <Thumb
               key={image.id}

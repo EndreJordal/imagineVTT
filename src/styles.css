@@ -1408,6 +1408,13 @@ button.curtain-down:hover:not(:disabled) {
   scrollbar-gutter: stable;
 }
 
+/* A long folder list scrolls in its own box (its height is set to so many rows). */
+.curtain-pictures.scrolls {
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
 /* A sound search's matches scroll in their own box. */
 .sound-picker-results {
   display: flex;

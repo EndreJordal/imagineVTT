@@ -54,6 +54,7 @@ function MapPicker() {
         folder={mapFolder}
         what="maps"
         ns="map:"
+        rows={3}
         onSelect={(selectedId) => useMapFolder.setState({ selectedId })}
         onOpen={(id) => void chooseMap(id)}
         thumb={(image) =>
