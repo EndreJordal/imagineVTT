@@ -1,7 +1,7 @@
 /** The fight linked to the scene (from the combat tracker), and its combatants' tokens. */
 import type { StateCreator } from 'zustand'
 import { snapToken, type CharacterToken } from '../../shared/characters'
-import { combatantLook, isDown, type Combatant, type CombatSave, type CombatSummary } from '../../shared/combat'
+import { combatantLook, isDown, type Combatant, type CombatSave, type CombatSummary, type TurnMove } from '../../shared/combat'
 import type { GridSettings, Point } from '../../shared/types'
 import type { GmStore } from '../store'
 import { selectOnly } from './shared'
@@ -15,7 +15,9 @@ export interface CombatSlice {
   trackerHeard(linkId: string | null): void
   /** The tracker's report: kept (true) only if it's this scene's fight. */
   receiveTrackerState(linkId: string, summary: CombatSummary, snapshot: unknown): boolean
-  setCombatOrder(patch: Partial<Pick<CombatSave, 'showOrder' | 'edge' | 'facing' | 'both'>>): void
+  setCombatOrder(patch: Partial<Pick<CombatSave, 'showOrder' | 'edge' | 'facing' | 'both' | 'showStart'>>): void
+  /** How far the acting combatant's token has moved on its turn (undone with its moves). */
+  turnMove: TurnMove | null
   /** Place a combatant's token at p on the floor being viewed (or move the one there). */
   placeCombatant(id: string, at: Point, portrait: string | null): void
   /** Place the tokens of these combatants (those not on this floor yet) in a block around p. */
@@ -61,7 +63,8 @@ function tokenFor(c: Combatant, at: Point, portrait: string | null, grid: GridSe
 
 export const combatSlice: StateCreator<GmStore, [], [], CombatSlice> = (set) => ({
   combat: null,
-  setCombat: (combat) => set({ combat }),
+  setCombat: (combat) => set({ combat, turnMove: null }),
+  turnMove: null,
   tracker: { seen: 0, linkId: null },
   trackerHeard: (linkId) => set({ tracker: { seen: Date.now(), linkId } }),
   receiveTrackerState: (linkId, summary, snapshot) => {
@@ -77,8 +80,12 @@ export const combatSlice: StateCreator<GmStore, [], [], CombatSlice> = (set) => 
         return moved === l.characters ? l : { ...l, characters: moved }
       })
       const tokensChanged = characters !== s.scene.characters || levels.some((l, i) => l !== s.levels[i])
+      // Another turn: the count starts again.
+      const turn = s.turnMove
+      const sameTurn = turn && turn.ref === summary.activeId && turn.round === summary.round
       return {
         combat: { ...s.combat, summary, snapshot },
+        ...(turn && !sameTurn && { turnMove: null }),
         tracker: { seen: Date.now(), linkId },
         ...(tokensChanged && { scene: { ...s.scene, characters }, levels }),
       }

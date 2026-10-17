@@ -1,4 +1,5 @@
 import type { CharacterLabel, CharacterToken } from './characters'
+import type { Point } from './types'
 
 /**
  * Combat link: a fight run in the V:tM combat tracker, linked to the open scene. The campaign
@@ -66,6 +67,8 @@ export interface CombatSave {
   facing?: OrderFacing
   /** Also along the opposite edge, facing its own side the same way. */
   both?: boolean
+  /** A faint ring where the acting combatant's token started its turn (on unless false). */
+  showStart?: boolean
   /** Before edge/facing/both: 'bottom', 'top' or 'both' (read by orderPlacement). */
   edges?: 'bottom' | 'top' | 'both'
 }
@@ -172,6 +175,8 @@ export interface OrderEntry {
   down: boolean
   /** Initiative this turn (null: not rolled yet). */
   init: number | null
+  /** Squares its token has moved this turn (the acting combatant's, once it has moved). */
+  moved?: number
 }
 
 /** What the table shows of the fight. */
@@ -180,6 +185,51 @@ export interface OrderStrip {
   phase: string
   entries: OrderEntry[]
   placement: OrderPlacement
+  /** Where the acting combatant's token started its turn (scene units), ringed on the table. */
+  start?: { x: number; y: number; r: number }
+}
+
+/** How far the acting combatant's token has moved on its turn. */
+export interface TurnMove {
+  /** Whose turn, in which round (a new turn starts the count again). */
+  ref: string
+  round: number
+  /** Where its token stood when the turn began. */
+  start: Point
+  /** Squares moved (diagonals count 1, like straight moves). */
+  squares: number
+  /** Arrow-key steps since the last drag (where each went, after where they began). */
+  steps: Point[]
+}
+
+/** Squares between two points: diagonals count 1, like straight moves. */
+export const squaresBetween = (a: Point, b: Point, grid: number) =>
+  Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / grid
+
+const samePoint = (a: Point, b: Point) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5
+
+/**
+ * The turn's movement once the acting token moved from `from` to `to`. Every move counts,
+ * there and back, except an arrow-key step back onto the square the last step left: that
+ * takes the step off again.
+ */
+export function turnMoved(
+  turn: TurnMove | null,
+  ref: string,
+  round: number,
+  from: Point,
+  to: Point,
+  grid: number,
+  arrowKey: boolean,
+): TurnMove {
+  const t = turn && turn.ref === ref && turn.round === round ? turn : { ref, round, start: from, squares: 0, steps: [] }
+  const cost = squaresBetween(from, to, grid)
+  if (!arrowKey) return { ...t, squares: t.squares + cost, steps: [] }
+  const steps = t.steps.length ? t.steps : [from]
+  if (steps.length >= 2 && samePoint(steps[steps.length - 2], to)) {
+    return { ...t, squares: Math.max(0, t.squares - cost), steps: steps.slice(0, -1) }
+  }
+  return { ...t, squares: t.squares + cost, steps: [...steps, to] }
 }
 
 /**

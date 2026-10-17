@@ -3,7 +3,7 @@ import type { StateCreator } from 'zustand'
 import { applyLevel } from '../../shared/levels'
 import { migrateLevel, migrateScene } from '../../shared/migrate'
 import type { SceneFile } from '../../shared/sceneFile'
-import type { TableState } from '../../shared/types'
+import type { Point, TableState } from '../../shared/types'
 import { sameRef, type WallPointRef } from '../../shared/walls'
 import type { GmStore } from '../store'
 import { defaultScene, FIRST_LEVEL, firstLevel, TOOLS_OFF, selectOnly, SINGLES_OFF } from './shared'
@@ -26,6 +26,12 @@ export interface SessionSlice {
   /** The scene was just saved under this name (and, given, to this file in the scenes folder). */
   markSaved(name: string, sceneFile?: string | null): void
   markUnsaved(): void
+  /** Alert mode: a click on the map (in the table view) makes an alert there. */
+  alerting: boolean
+  setAlerting(on: boolean): void
+  /** The last alert made (id changes with each, so the same spot can be alerted again). */
+  lastAlert: { at: Point; id: number } | null
+  sendAlert(at: Point): void
   /** A brief message over the GM's map (id changes with each one, to show it afresh). */
   notice: { text: string; id: number } | null
   notify(text: string): void
@@ -97,6 +103,10 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
   markSaved: (sceneName, sceneFile) =>
     set((s) => ({ sceneName, unsaved: false, sceneFile: sceneFile === undefined ? s.sceneFile : sceneFile })),
   markUnsaved: () => set({ unsaved: true }),
+  alerting: false,
+  setAlerting: (alerting) => set({ alerting }),
+  lastAlert: null,
+  sendAlert: (at) => set((s) => ({ lastAlert: { at, id: (s.lastAlert?.id ?? 0) + 1 } })),
   notice: null,
   notify: (text) => set((s) => ({ notice: { text, id: (s.notice?.id ?? 0) + 1 } })),
   selectMany: (lightIds, wallPoints, objectIds, add, characterIds = []) =>

@@ -4,6 +4,7 @@ import { snapToken, type CharacterToken } from '../../shared/characters'
 import { turnBy } from '../../shared/handout'
 import { nextName } from '../../shared/names'
 import type { Point } from '../../shared/types'
+import { turnMoved } from '../../shared/combat'
 import type { GmStore } from '../store'
 import { selectOnly, SINGLES_OFF } from './shared'
 
@@ -92,8 +93,10 @@ export const charactersSlice: StateCreator<GmStore, [], [], CharactersSlice> = (
   updateCharacter: (id, patch) => set((s) => change(s, [id], (t) => patched(t, patch, s.scene.grid))),
   updateCharacters: (ids, patch) => set((s) => change(s, ids, (t) => patched(t, patch, s.scene.grid))),
   moveCharacters: (ids, dx, dy) =>
-    set((s) => change(s, ids, (t) => ({ ...t, ...settle(t, { x: t.x + dx, y: t.y + dy }, s.scene.grid) }))),
-  nudgeCharacters: (ids, dx, dy, fine) => set((s) => nudge(s, ids, dx, dy, fine)),
+    set((s) =>
+      counted(s, change(s, ids, (t) => ({ ...t, ...settle(t, { x: t.x + dx, y: t.y + dy }, s.scene.grid) })), false),
+    ),
+  nudgeCharacters: (ids, dx, dy, fine) => set((s) => counted(s, nudge(s, ids, dx, dy, fine), true)),
   removeCharacter: (id) =>
     set((s) => ({
       scene: { ...s.scene, characters: (s.scene.characters ?? []).filter((t) => t.id !== id) },
@@ -111,6 +114,17 @@ export const charactersSlice: StateCreator<GmStore, [], [], CharactersSlice> = (
   turnCharacters: (by) =>
     set((s) => ({ scene: { ...s.scene, characterTurn: turnBy(s.scene.characterTurn ?? 0, by) } })),
 })
+
+/** A move, with the acting combatant's token's moves counted for its turn. */
+function counted(s: GmStore, next: { scene: GmStore['scene'] }, arrowKey: boolean) {
+  const summary = s.combat?.summary
+  const ref = summary?.activeId
+  if (!summary || !ref) return next
+  const from = s.scene.characters?.find((t) => t.ref === ref)
+  const to = next.scene.characters?.find((t) => t.ref === ref)
+  if (!from || !to || (from.x === to.x && from.y === to.y)) return next
+  return { ...next, turnMove: turnMoved(s.turnMove, ref, summary.round, from, to, s.scene.grid.size, arrowKey) }
+}
 
 /** Tokens moved by whole squares (a fraction of one if they don't snap: Shift for half). */
 function nudge(s: GmStore, ids: string[], dx: number, dy: number, fine: boolean) {

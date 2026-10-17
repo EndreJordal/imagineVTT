@@ -1635,3 +1635,23 @@ button.primary {
   color: var(--accent);
   font: bold 14px system-ui, sans-serif;
 }
+
+/* Measuring: the preset colours, as round buttons, then the picker. */
+.measure-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.measure-color {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+
+.measure-color.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #000;
+}

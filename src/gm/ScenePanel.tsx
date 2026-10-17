@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type RefObject } from 'react'
+import { useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { areaCentre } from '../shared/hidden'
 import { sceneBounds } from '../shared/geometry'
 import { isParty } from '../shared/levels'
@@ -23,7 +23,8 @@ function loadCollapsed() {
 /**
  * The right-hand list of what's on the floor viewed: groups, objects, lights, vision tokens and
  * hidden areas. Click to select (a group: all of it), double-click to go to it; double-click a
- * name to rename it. Collapses to a strip.
+ * name to rename it. Objects, lights and character tokens select like files in a file explorer:
+ * Ctrl+click adds or takes one, Shift+click selects everything between. Collapses to a strip.
  */
 export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const [collapsed, setCollapsed] = useState(loadCollapsed)
@@ -34,6 +35,8 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const selectedSound = useGm((s) => s.selectedSoundId)
   const selectedCharacters = useGm((s) => s.selectedCharacterIds)
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  /** The row Shift+click selects from (the last one clicked without Shift). */
+  const anchor = useRef<string | null>(null)
   const toggleCollapsed = () => {
     setCollapsed(!collapsed)
     try {
@@ -63,6 +66,39 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const hidden = scene.hiddenAreas ?? []
   const byName = <T extends { name?: string }>(a: T, b: T) =>
     (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true })
+  const objects = [...scene.objects].sort(byName)
+  const sortedLights = [...lights].sort((a, b) => lightName(a).localeCompare(lightName(b), undefined, { numeric: true }))
+  const characters = [...(scene.characters ?? [])].sort(byName)
+
+  // What can be selected together, in the order the list shows it (for Shift+click ranges).
+  type Kind = 'object' | 'light' | 'character'
+  const order: { kind: Kind; id: string }[] = [
+    ...objects.map((o) => ({ kind: 'object' as const, id: o.id })),
+    ...[...sortedLights, ...viewers].map((l) => ({ kind: 'light' as const, id: l.id })),
+    ...characters.map((t) => ({ kind: 'character' as const, id: t.id })),
+  ]
+  const keyOf = (kind: Kind, id: string) => `${kind}:${id}`
+  /** A click on a row: alone (`only`), or with Ctrl or Shift, added to or ranged with the selection. */
+  const pick = (kind: Kind, id: string, e: MouseEvent, only: () => void) => {
+    const add = e.ctrlKey || e.metaKey
+    const chosen = {
+      object: new Set(add ? selectedObjects : []),
+      light: new Set(add ? selectedLights : []),
+      character: new Set(add ? selectedCharacters : []),
+    }
+    const select = () => gm.selectMany([...chosen.light], [], [...chosen.object], false, [...chosen.character])
+    const from = order.findIndex((x) => keyOf(x.kind, x.id) === anchor.current)
+    const to = order.findIndex((x) => x.kind === kind && x.id === id)
+    if (e.shiftKey && from >= 0 && to >= 0) {
+      for (const x of order.slice(Math.min(from, to), Math.max(from, to) + 1)) chosen[x.kind].add(x.id)
+      return select()
+    }
+    anchor.current = keyOf(kind, id)
+    if (!add) return only()
+    if (chosen[kind].has(id)) chosen[kind].delete(id)
+    else chosen[kind].add(id)
+    select()
+  }
 
   const lightRow = (l: Light) => (
     <Row
@@ -72,7 +108,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       selected={selectedLights.includes(l.id)}
       dim={!l.on && !l.vision}
       note={isParty(l) ? 'party' : undefined}
-      onSelect={() => gm.selectLight(l.id)}
+      onSelect={(e) => pick('light', l.id, e, () => gm.selectLight(l.id))}
       onGo={() => goTo(l)}
       onRename={(name) => gm.updateLight(l.id, { name })}
     />
@@ -86,7 +122,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       selected={selectedCharacters.includes(t.id)}
       dim={!t.visible}
       note={t.visible ? t.type : 'hidden'}
-      onSelect={() => gm.selectCharacter(t.id)}
+      onSelect={(e) => pick('character', t.id, e, () => gm.selectCharacter(t.id))}
       onGo={() => goTo(t)}
       onRename={(name) => gm.updateCharacter(t.id, { name })}
     />
@@ -146,7 +182,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                           key={o.id}
                           name={o.name}
                           selected={selectedObjects.includes(o.id)}
-                          onSelect={() => gm.selectObject(o.id)}
+                          onSelect={(e) => pick('object', o.id, e, () => gm.selectObject(o.id))}
                           onGo={() => goTo(o)}
                           onRename={(name) => gm.updateObject(o.id, { name })}
                         />
@@ -172,21 +208,21 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           </List>
         )}
         <List title="Objects" empty="Drag assets onto the map from the library.">
-          {[...scene.objects].sort(byName).map((o) => (
+          {objects.map((o) => (
             <Row
               key={o.id}
               name={o.name}
               selected={selectedObjects.includes(o.id)}
               dim={o.visibility === 'hidden' && !o.seen}
               note={o.group ? groupName(groups, o.group) : undefined}
-              onSelect={() => gm.selectObject(o.id)}
+              onSelect={(e) => pick('object', o.id, e, () => gm.selectObject(o.id))}
               onGo={() => goTo(o)}
               onRename={(name) => gm.updateObject(o.id, { name })}
             />
           ))}
         </List>
         <List title="Lights" empty="Place lights with the light tool (L).">
-          {[...lights].sort((a, b) => lightName(a).localeCompare(lightName(b), undefined, { numeric: true })).map(lightRow)}
+          {sortedLights.map(lightRow)}
         </List>
         {viewers.length > 0 && <List title="Vision tokens">{viewers.map(lightRow)}</List>}
         <List title="Hidden areas" empty="Hide areas with the hide tool (H).">
@@ -210,7 +246,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           onTitleClick={() => gm.selectCharacters((scene.characters ?? []).map((t) => t.id))}
           titleHint="Select all the character tokens on this floor"
         >
-          {[...(scene.characters ?? [])].sort(byName).map(characterRow)}
+          {characters.map(characterRow)}
         </List>
         <List title="Sounds" empty="Drag sounds onto the map from the library (Assets, Audio).">
           {[...(scene.sounds ?? [])].sort(byName).map((x) => (
@@ -272,7 +308,7 @@ function Row(props: {
   selected?: boolean
   dim?: boolean
   bare?: boolean
-  onSelect(): void
+  onSelect(e: MouseEvent): void
   onGo(): void
   onRename(name: string): void
   action?: { label: string; run(): void }
@@ -287,8 +323,10 @@ function Row(props: {
     <div
       className={`scene-row${props.selected ? ' selected' : ''}${props.dim ? ' dim' : ''}`}
       onClick={props.onSelect}
+      // Shift+click selects a range: don't let it highlight the text too.
+      onMouseDown={(e) => e.shiftKey && e.preventDefault()}
       onDoubleClick={props.onGo}
-      title="Click to select, double-click to go to it"
+      title="Click to select (Ctrl+click: add or take one, Shift+click: everything between), double-click to go to it"
     >
       {props.icon}
       {editing ? (

@@ -1,9 +1,10 @@
+import type { Measure } from './measure'
 import type { OrderStrip } from './combat'
 import type { CurtainState } from './curtain'
 import type { FogMemory } from './fog'
 import type { Turn } from './handout'
 import type { AssetImages } from './mapObjects'
-import type { Size, TableState } from './types'
+import type { Point, Size, TableState } from './types'
 
 /** Messages between the GM window and the table window (same origin, same machine). */
 export type Message =
@@ -18,6 +19,8 @@ export type Message =
   | { type: 'curtain-images'; images: Record<string, Blob> } // gm -> table: the curtain's pictures
   | { type: 'handout'; handout: { id: string; image: Blob; turn: Turn; fill: boolean } | null } // gm -> table: picture shown
   | { type: 'order'; strip: OrderStrip | null } // gm -> table: the order of initiative the players see
+  | { type: 'alert'; at: Point } // gm -> table: the GM's alert at a spot (a ring closing in on it)
+  | { type: 'measure'; draft: Measure | null } // gm -> table: the measurement being drawn
   | { type: 'bye'; from: 'gm' | 'table' }
 
 /** Table heartbeat interval; the GM treats the table as gone after a few missed beats. */

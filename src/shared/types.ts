@@ -1,3 +1,4 @@
+import type { Measure } from './measure'
 import type { CharacterToken } from './characters'
 import type { Turn } from './handout'
 import type { DoorReveal } from './doors'
@@ -103,6 +104,8 @@ export interface Scene {
   globalSounds?: GlobalSound[]
   /** Character tokens on this floor. */
   characters?: CharacterToken[]
+  /** Measurements and drawings kept on this floor. */
+  measures?: Measure[]
   /** How long character tokens take to slide to where they're moved (s; all floors). */
   characterSlide?: number
   /** Quarter turns clockwise every character token (border, portrait and text) is turned by (all floors). */

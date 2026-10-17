@@ -13,6 +13,7 @@ export type Tool =
   | { kind: 'doors' }
   | { kind: 'light'; light: LightKind }
   | { kind: 'hide'; mode: HideTool }
+  | { kind: 'measure' }
 
 
 export const SELECT: Tool = { kind: 'select' }

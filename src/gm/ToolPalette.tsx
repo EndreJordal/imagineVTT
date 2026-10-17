@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { LIGHT_MENU, LIGHT_PRESETS, type LightKind } from '../shared/lights'
+import type { MeasureShape } from '../shared/measure'
 import { useGm } from './store'
 import { SELECT } from './tools'
 import { useDropdown } from './useDropdown'
@@ -19,7 +20,7 @@ function selectTool() {
 
 /**
  * Tools on a strip at the map's left edge: select, build walls, build doors, place a light,
- * hide areas. Keys: Esc select, W walls, D doors, L lights, H hide.
+ * hide areas, measure. Keys: Esc select, W walls, D doors, L lights, H hide, M measure.
  */
 export function ToolPalette() {
   const kind = useGm((s) => s.tool.kind)
@@ -37,6 +38,7 @@ export function ToolPalette() {
       else if (key === 'd') gm.toggleTool('doors')
       else if (key === 'l') setOpen((open) => !open)
       else if (key === 'h') gm.toggleTool('hide')
+      else if (key === 'm') gm.toggleTool('measure')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -72,6 +74,7 @@ export function ToolPalette() {
         active={kind === 'hide'}
         onClick={() => useGm.getState().toggleTool('hide')}
       />
+      <MeasureMenu />
       <div className="menu" ref={lightsRoot}>
         <ToolButton
           icon={placing ? <LightKindIcon icon={LIGHT_PRESETS[placing].icon} size={20} /> : <Icon name="lights" size={20} />}
@@ -105,6 +108,55 @@ export function ToolPalette() {
       </div>
       <SnapMenu />
     </nav>
+  )
+}
+
+const SHAPES: { value: MeasureShape; label: string }[] = [
+  { value: 'line', label: 'Line' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'free', label: 'Freeform' },
+]
+
+/** The measuring tool: its button picks it up (showing the shapes) or puts it down; right-click: the shapes. */
+function MeasureMenu() {
+  const active = useGm((s) => s.tool.kind === 'measure')
+  const shape = useGm((s) => s.measure.shape)
+  const { open, setOpen, root } = useDropdown()
+  const pick = (value: MeasureShape) => {
+    const gm = useGm.getState()
+    gm.setMeasure({ shape: value })
+    gm.setTool({ kind: 'measure' })
+    setOpen(false)
+  }
+  return (
+    <div className="menu" ref={root}>
+      <ToolButton
+        icon={<Icon name={`measure-${shape}`} size={20} />}
+        label={`Measure (${SHAPES.find((s) => s.value === shape)?.label.toLowerCase()}); right-click for the shape`}
+        keyName="M"
+        active={active || open}
+        onClick={() => {
+          // Picking it up shows the shapes too; clicking it again puts it down.
+          useGm.getState().toggleTool('measure')
+          setOpen(!active)
+        }}
+        onContextMenu={() => setOpen(!open)}
+      />
+      {open && (
+        <ul className="menu-list tool-flyout" role="menu" aria-label="Measure">
+          {SHAPES.map((s) => (
+            <li key={s.value} role="none">
+              <button role="menuitemradio" aria-checked={s.value === shape} className={s.value === shape ? 'active' : ''} onClick={() => pick(s.value)}>
+                <span className="menu-icon" aria-hidden>
+                  <Icon name={`measure-${s.value}`} />
+                </span>
+                <span className="menu-label">{s.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -149,7 +201,14 @@ function SnapMenu() {
   )
 }
 
-function ToolButton(props: { icon: ReactNode; label: string; keyName: string; active: boolean; onClick(): void }) {
+function ToolButton(props: {
+  icon: ReactNode
+  label: string
+  keyName: string
+  active: boolean
+  onClick(): void
+  onContextMenu?(): void
+}) {
   return (
     <button
       className={`tool-button${props.active ? ' active' : ''}`}
@@ -157,6 +216,13 @@ function ToolButton(props: { icon: ReactNode; label: string; keyName: string; ac
       aria-label={props.label}
       title={`${props.label} (${props.keyName})`}
       onClick={props.onClick}
+      onContextMenu={
+        props.onContextMenu &&
+        ((e) => {
+          e.preventDefault()
+          props.onContextMenu!()
+        })
+      }
     >
       {props.icon}
     </button>

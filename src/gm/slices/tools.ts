@@ -13,7 +13,7 @@ export interface ToolsSlice {
    */
   setTool(tool: Tool): void
   /** Pick up a tool, or put it down if it's in hand (W, D, H); hiding in its last mode. */
-  toggleTool(kind: 'walls' | 'doors' | 'hide'): void
+  toggleTool(kind: 'walls' | 'doors' | 'hide' | 'measure'): void
   /** Snapping for walls, doors and placing lights: every 1, 1/2 or 1/4 square; 0 = none. */
   snap: number
   setSnap(fraction: number): void

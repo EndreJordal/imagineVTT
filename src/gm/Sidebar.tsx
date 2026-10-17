@@ -6,6 +6,7 @@ import { HandoutsSection } from './Handouts'
 import { CharactersSection } from './Characters'
 import { CombatSection } from './Combat'
 import { FolderPictures } from './FolderPictures'
+import { MeasuringSection } from './Measuring'
 import { isMapInUse, mapFolder, chooseMap, useMapFolder } from './mapFolder'
 import { DetectGrid } from './DetectGrid'
 import type { GmCanvas } from './GmCanvas'
@@ -174,6 +175,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       <HandoutsSection />
       <CombatSection canvas={canvas} />
       <CharactersSection />
+      <MeasuringSection />
 
       <Section title="Map">
         <MapPicker />

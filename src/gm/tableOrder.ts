@@ -1,4 +1,4 @@
-import { seenTokens } from '../shared/characters'
+import { seenTokens, tokenDiameter } from '../shared/characters'
 import { orderFor, orderPlacement, portraitKeyOf, type OrderStrip } from '../shared/combat'
 import { tableState, type GmStore } from './store'
 
@@ -25,13 +25,28 @@ export function tableOrder(s: GmStore): OrderStrip | null {
     scene.hiddenEnabled,
     scene.grid,
     s.objectImages,
+    s.turnMove,
   ]
   if (memo && inputs.every((v, i) => v === memo!.inputs[i])) return memo.strip
   const key = (url: string) => {
     const k = portraitKeyOf(url)
     return s.objectImages[k] ? k : null
   }
-  const strip = orderFor(combat.summary, scene.characters ?? [], seenTokens(scene), key, orderPlacement(combat))
+  const seen = seenTokens(scene)
+  const order = orderFor(combat.summary, scene.characters ?? [], seen, key, orderPlacement(combat))
+  // The acting combatant: how far it has moved this turn, and (if the players see its token)
+  // a ring where it started.
+  const turn = s.turnMove
+  const token = turn && scene.characters?.find((t) => t.ref === turn.ref)
+  const strip: OrderStrip = turn
+    ? {
+        ...order,
+        entries: order.entries.map((e) => (e.id === turn.ref ? { ...e, moved: Math.round(turn.squares) } : e)),
+        ...(combat.showStart !== false &&
+          token &&
+          seen.has(token.id) && { start: { ...turn.start, r: tokenDiameter(token, scene) / 2 } }),
+      }
+    : order
   memo = { inputs, strip }
   return strip
 }

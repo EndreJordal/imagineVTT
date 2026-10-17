@@ -1,3 +1,4 @@
+import type { Measure } from '../shared/measure'
 import { Container, Graphics, Text } from 'pixi.js'
 import { CurtainLayer } from '../render/CurtainLayer'
 import { HandoutLayer } from '../render/HandoutLayer'
@@ -13,7 +14,7 @@ import type { FogMemory } from '../shared/fog'
 import { activeAreas } from '../shared/hidden'
 import type { AssetImages } from '../shared/mapObjects'
 import { reuse } from '../shared/reuse'
-import type { TableState } from '../shared/types'
+import type { Point, TableState } from '../shared/types'
 
 /** Display-only renderer for the table TV. Fixed physical scale, no input. */
 export class TableCanvas extends PixiHost {
@@ -94,10 +95,24 @@ export class TableCanvas extends PixiHost {
   }
 
   /** Images of the assets objects show. */
+  /** The measurement the GM is drawing (null: none). */
+  setMeasureDraft(draft: Measure | null) {
+    this.sceneLayer.measures.setDraft(draft)
+    this.requestRender()
+  }
+
+  /** The GM's alert at a spot. */
+  alert(at: Point) {
+    if (!this.ready || !this.state) return
+    this.sceneLayer.alert(at, this.state.scene.grid.size)
+    this.requestRender()
+  }
+
   /** The players' order of initiative (null: none), and a glow on whoever is acting. */
   setOrder(strip: OrderStrip | null) {
     this.order = strip
     this.sceneLayer.characters.setActive(strip?.entries.find((e) => e.active)?.id ?? null)
+    this.sceneLayer.setTurnStart(strip?.start ?? null)
     if (this.ready) this.initiative.setStrip(strip)
     this.requestRender()
   }

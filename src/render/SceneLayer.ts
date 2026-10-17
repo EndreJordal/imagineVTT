@@ -1,10 +1,12 @@
-import { BufferImageSource, Container, ImageSource, Texture, type Renderer } from 'pixi.js'
+import { BufferImageSource, Container, Graphics, ImageSource, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import { mapNatural, sceneBounds } from '../shared/geometry'
 import { activeAreas, areaMask, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
 import { MEMORY_BRIGHTNESS, NIGHT_DESATURATION, NIGHT_DIMMING } from '../shared/night'
 import type { AssetImages } from '../shared/mapObjects'
-import type { Scene } from '../shared/types'
+import type { Point, Scene } from '../shared/types'
+import { AlertLayer } from './AlertLayer'
+import { MeasureLayer } from './MeasureLayer'
 import { FogLayer } from './FogLayer'
 import { LightingLayer } from './LightingLayer'
 import { createMapMesh, SHARED_SLOTS } from './mapShader'
@@ -55,14 +57,39 @@ export class SceneLayer extends Container {
   private dimOnly = false
   /** Images placed on the map, drawn over it with the same shading. */
   private objects = new ObjectsLayer(this.map.group)
+  /** Where the acting combatant's token started its turn: a faint ring under the tokens. */
+  private turnStart = new Graphics()
   /** Character tokens, over everything on the map. */
   readonly characters = new CharacterLayer()
+  /** Measurements and drawings, over the tokens. */
+  readonly measures = new MeasureLayer()
+  /** The GM's alerts (a ring closing in on a spot), over the tokens. */
+  private alerts = new AlertLayer()
   /** Which tokens the players see, kept while what decides it is the same. */
   private seen: { inputs: unknown[]; ids: Set<string> } | null = null
 
   constructor() {
     super()
-    this.addChild(this.map.mesh, this.objects, this.characters)
+    this.addChild(this.map.mesh, this.objects, this.turnStart, this.characters, this.measures, this.alerts)
+  }
+
+  /** Show the GM's alert at p (sized by the scene's squares). */
+  alert(p: Point, gridSize: number) {
+    this.alerts.setGrid(gridSize)
+    this.alerts.add(p)
+    this.changed?.()
+  }
+
+  /** Ring the spot the acting token started its turn from (null: none). */
+  setTurnStart(start: { x: number; y: number; r: number } | null) {
+    const g = this.turnStart.clear()
+    if (!start) return
+    const { x, y, r } = start
+    g.circle(x, y, r)
+      .fill({ color: 0xffd98a, alpha: 0.08 })
+      .stroke({ width: r * 0.06, color: 0xffd98a, alpha: 0.55 })
+      .circle(x, y, r * 0.08)
+      .fill({ color: 0xffd98a, alpha: 0.55 })
   }
 
   /** Called when something loaded in the background needs a redraw (object images). */
@@ -74,7 +101,7 @@ export class SceneLayer extends Container {
 
   /** Whether frames are needed with nothing changed (flickering lights, animated objects). */
   isAnimating() {
-    return this.lighting.animated || this.objects.animated || this.characters.animated
+    return this.lighting.animated || this.objects.animated || this.characters.animated || this.alerts.animated
   }
 
   /** The images of the assets objects show (from the GM; kept with the scene). */
@@ -101,6 +128,7 @@ export class SceneLayer extends Container {
     this.shareTextures()
     this.objects.animate(seconds)
     this.characters.animate(seconds)
+    this.alerts.animate(seconds)
   }
 
   /** Objects read the same light, sight and memory maps as the map. */
@@ -267,6 +295,7 @@ export class SceneLayer extends Container {
     ]
     if (!this.seen || inputs.some((v, i) => v !== this.seen!.inputs[i])) this.seen = { inputs, ids: seenTokens(scene) }
     this.characters.sync(scene, this.seen.ids, viewer === 'players')
+    this.measures.sync(scene.measures, scene.grid.size, scene.characterTurn ?? 0)
 
     const u = this.map.uniforms
     u.uBounds.set([bounds.x, bounds.y, bounds.width, bounds.height])

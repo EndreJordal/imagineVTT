@@ -3,6 +3,8 @@ import {
   combatantLook,
   oppositeEdge,
   orderFor,
+  turnMoved,
+  type TurnMove,
   orderPlacement,
   portraitKeyOf,
   readCombatLink,
@@ -110,5 +112,42 @@ describe("the players' order", () => {
   it('shows an ambusher once the players can see its token', () => {
     const strip = orderFor(summary, tokens, new Set(['t1', 't2']), () => null)
     expect(strip.entries.map((e) => e.id)).toEqual(['pc', 'seen', 'ambusher', 'unplaced'])
+  })
+})
+
+describe('movement on a turn', () => {
+  const at = (x: number, y: number) => ({ x: x * 100 + 50, y: y * 100 + 50 })
+  const step = (turn: TurnMove | null, from: [number, number], to: [number, number], arrowKey: boolean) =>
+    turnMoved(turn, 'a', 1, at(...from), at(...to), 100, arrowKey)
+
+  it('counts diagonals as 1, and every dragged move, there and back', () => {
+    let t = step(null, [0, 0], [3, 2], false)
+    expect(t.squares).toBe(3)
+    expect(t.start).toEqual(at(0, 0))
+    t = step(t, [3, 2], [0, 0], false)
+    expect(t.squares).toBe(6)
+  })
+
+  it('takes an arrow-key step back off again', () => {
+    let t = step(null, [0, 0], [1, 0], true)
+    t = step(t, [1, 0], [2, 0], true)
+    expect(t.squares).toBe(2)
+    t = step(t, [2, 0], [1, 0], true)
+    expect(t.squares).toBe(1)
+    t = step(t, [1, 0], [0, 0], true)
+    expect(t.squares).toBe(0)
+    // A drag, then a step back onto where the drag began: that counts.
+    t = step(t, [0, 0], [4, 0], false)
+    t = step(t, [4, 0], [5, 0], true)
+    t = step(t, [5, 0], [4, 0], true)
+    expect(t.squares).toBe(4)
+    t = step(t, [4, 0], [3, 0], true)
+    expect(t.squares).toBe(5)
+  })
+
+  it('starts again on a new turn', () => {
+    const t = step(null, [0, 0], [2, 0], false)
+    expect(turnMoved(t, 'b', 1, at(2, 0), at(3, 0), 100, false)).toMatchObject({ ref: 'b', squares: 1, start: at(2, 0) })
+    expect(turnMoved(t, 'a', 2, at(2, 0), at(3, 0), 100, false).squares).toBe(1)
   })
 })

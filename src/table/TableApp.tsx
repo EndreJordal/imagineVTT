@@ -55,6 +55,12 @@ export function TableApp() {
         case 'order':
           canvas.setOrder(msg.strip)
           break
+        case 'alert':
+          canvas.alert(msg.at)
+          break
+        case 'measure':
+          canvas.setMeasureDraft(msg.draft)
+          break
         case 'bye':
           if (msg.from === 'gm') setConnected(false)
           break

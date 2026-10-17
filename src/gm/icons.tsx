@@ -45,6 +45,10 @@ import {
   WandSparkles,
   X,
   type LucideIcon,
+  Megaphone,
+  Slash,
+  Circle,
+  Spline,
 } from 'lucide-react'
 import type { LightIcon } from '../shared/lights'
 
@@ -94,6 +98,11 @@ const ICONS = {
   sound: Volume2,
   play: Play,
   stop: Square,
+  alert: Megaphone,
+  measure: Slash,
+  'measure-line': Slash,
+  'measure-circle': Circle,
+  'measure-free': Spline,
   character: UserRound,
 } satisfies Record<string, LucideIcon>
 

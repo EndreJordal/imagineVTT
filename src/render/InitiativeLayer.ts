@@ -207,6 +207,28 @@ export class InitiativeLayer extends Container {
       coin.addChild(num)
     }
 
+    // How far the acting combatant has moved this turn, on a badge at the other shoulder.
+    if (e.moved !== undefined) {
+      const h = Math.max(16, r * 0.62)
+      const label = new Text({
+        text: `${e.moved} yd`,
+        style: { fill: 0xffe2a0, fontFamily: 'Segoe UI, Arial, sans-serif', fontWeight: '700', fontSize: h * 0.62 },
+      })
+      label.anchor.set(0.5)
+      label.resolution = 2
+      const w = Math.max(h, label.width + h * 0.6)
+      const bx = -r * 0.74
+      const by = -r * 0.74
+      coin.addChild(
+        new Graphics()
+          .roundRect(bx - w / 2, by - h / 2, w, h, h / 2)
+          .fill(0x15151a)
+          .stroke({ width: Math.max(1.5, h * 0.08), color: 0xffc04d }),
+      )
+      label.position.set(bx, by)
+      coin.addChild(label)
+    }
+
     // The name below; a long one wraps onto a second line rather than shrinking.
     const size = Math.max(10, d * 0.22)
     const name = new Text({

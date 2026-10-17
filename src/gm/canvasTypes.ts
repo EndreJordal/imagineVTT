@@ -75,6 +75,14 @@ export interface Handlers {
   onSoundPlay(id: string): void
   /** The padlock beside the map's resize square clicked (locks or unlocks the map). */
   onMapLockToggle(): void
+  /** Measuring: start, drag and let go (free: Alt held, no snapping); right-click removes one. */
+  onMeasureStart(p: Point, free: boolean): void
+  onMeasureMove(p: Point, free: boolean): void
+  onMeasureEnd(): void
+  onMeasureRemove(id: string): void
+  /** Alert mode: a click in the table view made an alert there; right-click leaves the mode. */
+  onAlert(p: Point): void
+  onAlertOff(): void
   /** A character token clicked (null: nothing). */
   onCharacterSelect(id: string | null): void
   /** A character token in or out of the selection (Shift+click). */
@@ -105,6 +113,10 @@ export const UI_KEYS = [
   'selectedHiddenId',
   'selectedSoundId',
   'selectedCharacterIds',
+  'turnMove',
+  'alerting',
+  'lastAlert',
+  'measureDraft',
 ] as const satisfies readonly (keyof GmStore)[]
 
 /** What the canvas shows besides the scene: the store's UI_KEYS, and what's worked out from it. */

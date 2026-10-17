@@ -42,6 +42,33 @@ class Player {
     return { ctx: this.ctx, master: this.master! }
   }
 
+  /** A soft, glassy ping (the GM's alert), through the game's volume and speakers. */
+  ping() {
+    const { ctx, master } = this.game()
+    const t = ctx.currentTime
+    // Rounded off at the top, so it rings rather than stings.
+    const tone = ctx.createBiquadFilter()
+    tone.type = 'lowpass'
+    tone.frequency.value = 6000
+    tone.connect(master)
+    // Struck glass: a fundamental with slightly out-of-tune overtones that die away sooner.
+    for (const [ratio, level, decay] of [
+      [1, 0.45, 1.9],
+      [2.32, 0.16, 0.9],
+      [4.25, 0.06, 0.45],
+    ]) {
+      const osc = ctx.createOscillator()
+      osc.frequency.value = 1175 * ratio
+      const gain = ctx.createGain()
+      gain.gain.setValueAtTime(0.0001, t)
+      gain.gain.exponentialRampToValueAtTime(level, t + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + decay)
+      osc.connect(gain).connect(tone)
+      osc.start(t)
+      osc.stop(t + decay + 0.05)
+    }
+  }
+
   /** Let sound start (call from a click or key press). */
   wake() {
     if (this.ctx?.state === 'suspended') void this.ctx.resume()

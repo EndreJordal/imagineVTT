@@ -39,6 +39,7 @@ export function Toolbar() {
       <ObscuringMenu />
       <SoundMixer />
       <CurtainButton />
+      <AlertButton />
       <span className="toolbar-spacer" />
       <SettingsMenu />
     </header>
@@ -238,5 +239,24 @@ function GmVision() {
       />
       <span className="toolbar-value">{label}</span>
     </div>
+  )
+}
+
+/** Alert mode: click the map (in the table view) to ring a spot for the players, with a ping. */
+function AlertButton() {
+  const alerting = useGm((s) => s.alerting)
+  return (
+    <button
+      className={alerting ? 'active' : ''}
+      aria-pressed={alerting}
+      title={
+        alerting
+          ? 'Alert mode: click the map inside the table view to alert the players there. Right-click or Esc to stop'
+          : 'Alert: click a spot on the map to draw the players\' eyes to it, with a ping'
+      }
+      onClick={() => useGm.getState().setAlerting(!alerting)}
+    >
+      <Icon name="alert" /> Alert
+    </button>
   )
 }

@@ -22,6 +22,8 @@ interface Snapshot {
   levelImages: Record<string, Blob | null>
   levelId: string
   tableLevelId: string
+  /** The acting combatant's movement this turn: undoing a move takes it off. */
+  turnMove: State['turnMove']
 }
 
 type State = ReturnType<typeof useGm.getState>
@@ -32,6 +34,7 @@ const snapshot = (s: State): Snapshot => ({
   levelImages: s.levelImages,
   levelId: s.levelId,
   tableLevelId: s.tableLevelId,
+  turnMove: s.turnMove,
 })
 const edited = (s: State, prev: State) =>
   s.scene !== prev.scene ||

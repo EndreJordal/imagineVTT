@@ -172,6 +172,9 @@ export function startGmSync(): () => void {
     if (s.soundClips !== prev.soundClips || s.masterVolume !== prev.masterVolume || s.audioOutput !== prev.audioOutput) {
       void save('sound', { clips: s.soundClips, master: s.masterVolume, output: s.audioOutput })
     }
+    if (s.lastAlert && s.lastAlert !== prev.lastAlert) channel.post({ type: 'alert', at: s.lastAlert.at })
+    if (s.measureDraft !== prev.measureDraft) channel.post({ type: 'measure', draft: s.measureDraft })
+    if (s.measure !== prev.measure) void save('measure', s.measure)
     if (s.objectImages !== prev.objectImages) {
       channel.post({ type: 'assets', images: s.objectImages })
       void save('objectImages', s.objectImages)

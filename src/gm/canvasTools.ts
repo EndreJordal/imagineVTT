@@ -69,6 +69,24 @@ export function createTool(tool: Tool): CanvasTool | null {
       return lightTool(tool.light)
     case 'hide':
       return tool.mode === 'fill' ? fillTool() : brushTool(tool.mode === 'erase')
+    case 'measure':
+      return measureTool()
+  }
+}
+
+/** Measuring: press, drag and let go (the store snaps, keeps or drops it). Alt: no snapping. */
+function measureTool(): CanvasTool {
+  return {
+    down(c, p, e) {
+      c.handlers.onMeasureStart(p, e.altKey)
+      c.capture(e)
+    },
+    move(c, p, e, pressed) {
+      if (pressed) c.handlers.onMeasureMove(p, e.altKey)
+    },
+    up: (c) => c.handlers.onMeasureEnd(),
+    cursor: () => 'crosshair',
+    draw() {},
   }
 }
 

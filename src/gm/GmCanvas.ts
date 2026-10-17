@@ -1,6 +1,6 @@
-import { Container, Graphics, Sprite, Texture } from 'pixi.js'
+import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import { PixiHost } from '../render/PixiHost'
-import { loadCanvasIcons } from './canvasIcons'
+import { iconCursor, loadCanvasIcons } from './canvasIcons'
 import { SceneLayer } from '../render/SceneLayer'
 import {
   mapScaleForCorner,
@@ -26,6 +26,7 @@ import { createTool, wallPointAt, type CanvasTool, type ToolCanvas } from './can
 import { SLACK_PX } from './canvasStyle'
 import { SELECT } from './tools'
 import { NOTHING_SELECTED } from './slices/shared'
+import { hitsMeasure } from '../shared/measure'
 import { CURSORS, type Drag, type GmUi, type Handlers, type Target } from './canvasTypes'
 import { MapHandle } from './canvasMap'
 import { LightTokens } from './canvasLights'
@@ -82,6 +83,18 @@ export class GmCanvas extends PixiHost {
   private selectionBox = new Graphics()
   /** Where a dragged character token will go. */
   private characterGhost = new Graphics()
+  /** How far the acting combatant's token has moved this turn, under the token (GM-only). */
+  private turnLabel = new Text({
+    text: '',
+    anchor: { x: 0.5, y: 0 },
+    style: { fill: 0xffe2a0, fontFamily: 'system-ui, sans-serif', fontSize: 15, fontWeight: 'bold', stroke: { color: 0x000000, width: 4 } },
+  })
+  /** How many squares the dragged token moves (diagonals count 1, like straight moves). */
+  private ghostLabel = new Text({
+    text: '',
+    anchor: 0.5,
+    style: { fill: 0xffffff, fontFamily: 'system-ui, sans-serif', fontSize: 22, fontWeight: 'bold', stroke: { color: 0x000000, width: 5 } },
+  })
   private ui: GmUi = {
     tableScreen: { width: 1920, height: 1080 },
     tableConnected: false,
@@ -96,6 +109,10 @@ export class GmCanvas extends PixiHost {
     curtainDown: false,
     handout: null,
     ghostLightIds: [],
+    turnMove: null,
+    alerting: false,
+    lastAlert: null,
+    measureDraft: null,
   }
   /** Selections as sets, for looking up (kept while the store's arrays are the same). */
   private selectedLightIds = new Set<string>()
@@ -164,6 +181,8 @@ export class GmCanvas extends PixiHost {
       this.lights.aim,
       this.selectionBox,
       this.characterGhost,
+      this.turnLabel,
+      this.ghostLabel,
       this.toolLayer,
     )
     this.app.stage.addChild(this.camera)
@@ -191,6 +210,11 @@ export class GmCanvas extends PixiHost {
     if (ui.selectedObjectIds !== was.selectedObjectIds) this.selectedObjectIds = new Set(ui.selectedObjectIds)
     this.ghostLightIds = new Set(ui.ghostLightIds)
     this.setOnion(ui.onion)
+    if (ui.lastAlert && ui.lastAlert !== was.lastAlert && state.scene) {
+      this.sceneLayer.alert(ui.lastAlert.at, state.scene.grid.size)
+    }
+    if (ui.alerting !== was.alerting && this.ready) this.app.canvas.style.cursor = this.cursorFor(null)
+    this.sceneLayer.measures.setDraft(ui.measureDraft)
     if (ui.tool !== was.tool) {
       this.active = createTool(ui.tool)
       this.toolPressed = false
@@ -343,6 +367,7 @@ export class GmCanvas extends PixiHost {
     if (!this.ready || !this.state) return
     this.requestRender()
     this.sceneLayer.update(this.state.scene, this.ui.peeking ? 'players' : 'gm')
+    this.sceneLayer.setTurnStart(this.turnStart())
     if (!this.fitted) {
       this.fitted = true
       if (this.pendingCamera) this.applyCamera(this.pendingCamera)
@@ -361,6 +386,7 @@ export class GmCanvas extends PixiHost {
     this.requestRender()
     this.drawKinds()
     this.sceneLayer.characters.select(this.ui.selectedCharacterIds, this.px)
+    this.drawTurnLabel()
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -443,12 +469,16 @@ export class GmCanvas extends PixiHost {
     this.active?.draw(this.toolView, g)
   }
 
-  /** Faint tokens where the dragged ones will go (moved by dx, dy), and the way there. */
-  private drawCharacterGhosts(ids: string[], dx: number, dy: number) {
+  /**
+   * Faint tokens where the dragged ones will go (moved by dx, dy), and the way there; the
+   * `leader` (the token dragged, else the first) shows how many squares it moves.
+   */
+  private drawCharacterGhosts(ids: string[], dx: number, dy: number, leader = ids[0]) {
     if (!this.state) return
     const scene = this.state.scene
     const px = this.px
     const g = this.characterGhost.clear()
+    this.ghostLabel.visible = false
     for (const id of ids) {
       const t = scene.characters?.find((x) => x.id === id)
       if (!t) continue
@@ -460,8 +490,44 @@ export class GmCanvas extends PixiHost {
         .circle(to.x, to.y, r)
         .fill({ color: 0xffffff, alpha: 0.15 })
         .stroke({ width: 2 * px, color: 0xffffff, alpha: 0.9 })
+      if (id === leader) {
+        const squares = Math.round(Math.max(Math.abs(to.x - t.x), Math.abs(to.y - t.y)) / scene.grid.size)
+        // The acting combatant: what the turn comes to with this move.
+        const turn = this.ui.turnMove
+        const total = turn && t.ref === turn.ref ? Math.round(turn.squares + squares) : null
+        this.ghostLabel.text = total !== null ? `${squares} → ${total}` : String(squares)
+        this.ghostLabel.position.set(to.x, to.y)
+        this.ghostLabel.scale.set(px)
+        this.ghostLabel.visible = squares > 0
+      }
     }
     this.requestRender()
+  }
+
+  /** Where the acting combatant's token started its turn, if it has moved and is on this floor. */
+  private turnStart() {
+    const turn = this.ui.turnMove
+    const scene = this.state?.scene
+    const token = turn && scene?.characters?.find((t) => t.ref === turn.ref)
+    return token && scene ? { ...turn.start, r: tokenDiameter(token, scene) / 2 } : null
+  }
+
+  /** "7 yd" under the acting combatant's token, once it has moved this turn. */
+  private drawTurnLabel() {
+    const turn = this.ui.turnMove
+    const scene = this.state?.scene
+    const token = turn && scene?.characters?.find((t) => t.ref === turn.ref)
+    this.turnLabel.visible = !!token
+    if (!token || !scene) return
+    const px = this.px
+    this.turnLabel.text = `${Math.round(turn.squares)} yd`
+    this.turnLabel.scale.set(px)
+    this.turnLabel.position.set(token.x, token.y + (token.size * scene.grid.size) / 2 + 2 * px)
+  }
+
+  private clearGhosts() {
+    this.characterGhost.clear()
+    this.ghostLabel.visible = false
   }
 
   private drawSelectionBox() {
@@ -516,6 +582,7 @@ export class GmCanvas extends PixiHost {
   }
 
   private cursorFor(target: Target) {
+    if (this.ui.alerting) return iconCursor('alert')
     if (this.active) return this.active.cursor(this.toolView, this.pointer)
     if (target?.kind === 'objectResize') return target.cursor
     return CURSORS[target?.kind ?? 'pan']
@@ -551,6 +618,18 @@ export class GmCanvas extends PixiHost {
   private onPointerDown = (e: PointerEvent) => {
     if (e.button > 2) return
     const p = this.toScene(e)
+    // Alert mode: a click in the table view makes an alert; right-click leaves the mode.
+    if (this.ui.alerting && e.button !== 1) {
+      if (e.button === 2) this.handlers.onAlertOff()
+      else if (this.viewCorners && pointInPolygon(p, this.viewCorners)) this.handlers.onAlert(p)
+      return
+    }
+    // Right-click on a measurement removes it.
+    if (e.button === 2) {
+      const slack = (SLACK_PX + 4) * this.px
+      const hit = this.state?.scene.measures?.findLast((m) => hitsMeasure(m, p, slack))
+      if (hit) return this.handlers.onMeasureRemove(hit.id)
+    }
     // With a tool, right-click confirms like Enter; middle still pans.
     if (this.ui.tool.kind !== 'select' && e.button === 2) {
       this.handlers.onToolConfirm()
@@ -760,7 +839,7 @@ export class GmCanvas extends PixiHost {
       const t = this.state?.scene.characters?.find((x) => x.id === drag.id)
       if (!t || !this.state) return
       drag.to = t.snap ? snapToken(to, t.size, this.state.scene.grid) : to
-      this.drawCharacterGhosts(drag.ids, drag.to.x - t.x, drag.to.y - t.y)
+      this.drawCharacterGhosts(drag.ids, drag.to.x - t.x, drag.to.y - t.y, drag.id)
     } else if (drag.mode === 'sound') {
       this.handlers.onSoundMove(drag.id, to)
     } else if (drag.mode === 'light') {
@@ -824,7 +903,7 @@ export class GmCanvas extends PixiHost {
     // A mixed selection moves together: tokens slide in when the drag ends, objects and
     // lights moved with the drag (or, dragged by a token, by its move).
     if (drag?.mode === 'character') {
-      this.characterGhost.clear()
+      this.clearGhosts()
       const leader = this.state?.scene.characters?.find((t) => t.id === drag.id)
       if (drag.to && leader && !clicked) {
         const dx = drag.to.x - leader.x
@@ -835,7 +914,7 @@ export class GmCanvas extends PixiHost {
         }
       }
     } else if ((drag?.mode === 'object' || drag?.mode === 'light') && this.ui.selectedCharacterIds.length) {
-      this.characterGhost.clear()
+      this.clearGhosts()
       const up = this.toScene(e)
       if (!clicked) this.handlers.onCharactersMove(this.ui.selectedCharacterIds, up.x - this.dragFrom.x, up.y - this.dragFrom.y)
     }

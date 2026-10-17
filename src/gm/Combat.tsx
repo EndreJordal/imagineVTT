@@ -39,6 +39,7 @@ export function CombatSection({ canvas }: { canvas: RefObject<GmCanvas | null> }
   const combat = useGm((s) => s.combat)
   const tracker = useGm((s) => s.tracker)
   const tokens = useGm((s) => s.scene.characters)
+  const turnMove = useGm((s) => s.turnMove)
   // The tracker counts as gone when it stops beating: look again now and then.
   const [, tick] = useState(0)
   useEffect(() => {
@@ -111,6 +112,7 @@ export function CombatSection({ canvas }: { canvas: RefObject<GmCanvas | null> }
           <span className="hint">
             {c.type}
             {c.state !== 'active' && ` · ${c.state}`}
+            {turnMove?.ref === c.id && ` · moved ${Math.round(turnMove.squares)} yd`}
           </span>
         </button>
         <span className="combatant-init" title="Initiative">
@@ -228,6 +230,14 @@ export function CombatSection({ canvas }: { canvas: RefObject<GmCanvas | null> }
           <label className="check" title="A second row along the opposite edge, facing its own side the same way">
             <input type="checkbox" checked={placement.both} onChange={(e) => setCombatOrder({ both: e.target.checked })} />
             Also along the opposite edge
+          </label>
+          <label className="check" title="A faint ring on the table where the acting combatant's token started its turn">
+            <input
+              type="checkbox"
+              checked={combat.showStart !== false}
+              onChange={(e) => setCombatOrder({ showStart: e.target.checked })}
+            />
+            Show where the turn started
           </label>
         </>
       )}

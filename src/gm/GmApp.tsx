@@ -29,6 +29,7 @@ import { takeLink } from './linkStore'
 import { startAutosave } from './sceneFiles'
 import { restoreScenesFolder } from './scenesFolder'
 import { readCombatLink } from '../shared/combat'
+import { player } from './audio'
 import { gmDarkness, hydrate, levelImage, useGm, type GmStore } from './store'
 import { SELECT } from './tools'
 import { Floors } from './Floors'
@@ -189,6 +190,15 @@ export function GmApp() {
       onSoundSelect: (id) => useGm.getState().selectSound(id),
       onSoundMove: (id, p) => useGm.getState().updateSound(id, { x: p.x, y: p.y }),
       onSoundPlay: (id) => playMapSound(id),
+      onAlert: (p) => {
+        useGm.getState().sendAlert(p)
+        player.ping()
+      },
+      onAlertOff: () => useGm.getState().setAlerting(false),
+      onMeasureStart: (p, free) => useGm.getState().measureStart(p, free),
+      onMeasureMove: (p, free) => useGm.getState().measureMove(p, free),
+      onMeasureEnd: () => useGm.getState().measureEnd(),
+      onMeasureRemove: (id) => useGm.getState().removeMeasure(id),
       onMapLockToggle: () => {
         const map = useGm.getState().scene.map
         if (map) useGm.getState().setMapLocked(!map.locked)
@@ -304,6 +314,10 @@ export function GmApp() {
         return
       }
       const gm = useGm.getState()
+      if (e.key === 'Escape' && !typing && gm.alerting) {
+        gm.setAlerting(false)
+        return
+      }
       if (e.key === 'Enter' && !typing && gm.tool.kind !== 'select') {
         confirmTool()
         return
@@ -325,7 +339,7 @@ export function GmApp() {
         else gm.setTool(SELECT)
         return
       }
-      if (e.key === 'Escape' && !typing && (gm.tool.kind === 'hide' || gm.tool.kind === 'light')) {
+      if (e.key === 'Escape' && !typing && (gm.tool.kind === 'hide' || gm.tool.kind === 'light' || gm.tool.kind === 'measure')) {
         gm.setTool(SELECT)
         return
       }

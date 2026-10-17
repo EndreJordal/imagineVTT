@@ -25,6 +25,7 @@ import { type ObjectsSlice, objectsSlice } from './slices/objects'
 import { type SessionSlice, sessionSlice } from './slices/session'
 import { DEFAULT_GM_VISION, defaultDisplay, defaultScene, defaultTableScreen, firstLevel } from './slices/shared'
 import { toolsSlice, type ToolsSlice } from './slices/tools'
+import { DEFAULT_MEASURE, measureSlice, type MeasureSettings, type MeasureSlice } from './slices/measure'
 import { type ViewSlice, viewSlice } from './slices/view'
 import { wallsSlice, type WallsSlice } from './slices/walls'
 
@@ -51,11 +52,13 @@ export interface GmStore
     GroupsSlice,
     AudioSlice,
     CharactersSlice,
-    CombatSlice {}
+    CombatSlice,
+    MeasureSlice {}
 
 export const useGm = create<GmStore>()((...a) => ({
   ...floorsSlice(...a),
   ...toolsSlice(...a),
+  ...measureSlice(...a),
   ...hiddenSlice(...a),
   ...wallsSlice(...a),
   ...lightsSlice(...a),
@@ -87,7 +90,7 @@ export interface SavedFloors {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound, combat] =
+  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound, combat, measure] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
@@ -101,6 +104,7 @@ export async function hydrate() {
       load<SavedFloors>('floors'),
       load<{ clips: SoundClips; master: number; output: string }>('sound'),
       load<CombatSave | null>('combat'),
+      load<MeasureSettings>('measure'),
     ])
   const restored = scene ? migrateScene(scene) : defaultScene
   // Sessions from before floors: the scene is the one floor.
@@ -130,5 +134,6 @@ export async function hydrate() {
     sceneFile: sceneName?.file ?? null,
     unsaved: sceneName?.unsaved ?? false,
     combat: combat ?? null,
+    measure: { ...DEFAULT_MEASURE, ...measure },
   }))
 }
