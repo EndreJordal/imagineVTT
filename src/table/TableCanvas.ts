@@ -37,7 +37,8 @@ export class TableCanvas extends PixiHost {
   private fogMemory: FogMemory | null = null
 
   constructor(host: HTMLElement) {
-    super(host, '#000000')
+    // No antialiasing: at 4K it's the costliest part of a frame, and the map doesn't need it.
+    super(host, '#000000', false)
   }
 
   protected setup() {

@@ -23,12 +23,18 @@ export abstract class PixiHost {
   private frame = 0
   private lastFrame = -Infinity
 
-  constructor(host: HTMLElement, background: string) {
+  /**
+   * `antialias`: smooth drawn edges. Costly at 4K on built-in graphics, and the table's map
+   * doesn't need it (only lines and rings soften a little without it).
+   */
+  constructor(host: HTMLElement, background: string, antialias = true) {
     this.init = this.app
       .init({
         resizeTo: host,
         background,
-        antialias: true,
+        antialias,
+        // On laptops with two graphics chips, ask for the fast one.
+        powerPreference: 'high-performance',
         resolution: window.devicePixelRatio,
         autoDensity: true,
         autoStart: false, // drawn by our own loop below
