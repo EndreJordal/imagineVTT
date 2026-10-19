@@ -124,6 +124,12 @@ describe('the fight linked to the scene', () => {
     dead.combatants[0] = { ...dead.combatants[0], name: 'Hollis the Ductus', state: 'dead' }
     receiveTrackerState('mine', dead, null)
     expect(token()).toMatchObject({ name: 'Hollis the Ductus', down: true })
+    // Conditions from the tracker: the token follows them, and drops them when they end.
+    const prone = [{ id: 'prone', label: 'Prone' }]
+    receiveTrackerState('mine', { ...dead, combatants: [{ ...dead.combatants[0], conditions: prone }] }, null)
+    expect(token().conditions).toEqual(prone)
+    receiveTrackerState('mine', dead, null)
+    expect(token().conditions).toBeUndefined()
     useGm.getState().clearCombatTokens()
     expect(useGm.getState().scene.characters).toEqual([])
   })

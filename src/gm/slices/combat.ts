@@ -26,7 +26,7 @@ export interface CombatSlice {
   clearCombatTokens(): void
 }
 
-/** Tokens following their combatants: name, and whether they're out of the fight. */
+/** Tokens following their combatants: name, whether they're out of the fight, and conditions. */
 function follow(tokens: CharacterToken[] | undefined, byId: Map<string, Combatant>): CharacterToken[] | undefined {
   if (!tokens?.some((t) => t.ref && byId.has(t.ref))) return tokens
   let changed = false
@@ -34,9 +34,11 @@ function follow(tokens: CharacterToken[] | undefined, byId: Map<string, Combatan
     const c = t.ref ? byId.get(t.ref) : undefined
     if (!c) return t
     const down = isDown(c)
-    if (t.name === c.name && !!t.down === down) return t
+    const conditions = c.conditions?.length ? c.conditions : undefined
+    const same = JSON.stringify(t.conditions ?? null) === JSON.stringify(conditions ?? null)
+    if (t.name === c.name && !!t.down === down && same) return t
     changed = true
-    return { ...t, name: c.name, down }
+    return { ...t, name: c.name, down, conditions }
   })
   return changed ? out : tokens
 }

@@ -1,3 +1,4 @@
+import type { Condition } from './combat'
 import { sceneBounds, snapToGrid } from './geometry'
 import { activeAreas, inArea } from './hidden'
 import { emitsLight, LIGHT_PRESETS } from './lights'
@@ -43,6 +44,8 @@ export interface CharacterToken {
   ref?: string
   /** Out of the fight (dead, in torpor…), as the tracker says: drawn greyed. */
   down?: boolean
+  /** Its combatant's conditions, as the tracker says: word tags on its top edge (prone: on its side). */
+  conditions?: Condition[]
 }
 
 /**

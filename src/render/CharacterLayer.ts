@@ -1,3 +1,5 @@
+import { isProne, shownConditions } from '../shared/combat'
+import { conditionTags } from './conditionTags'
 import { ColorMatrixFilter, Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import {
   BORDERS,
@@ -30,6 +32,8 @@ interface Shown {
   highlight: Graphics
   /** The glow round whoever is acting in the linked fight. */
   glow: Graphics
+  /** Its conditions as word tags, stacked up from the token's top edge. */
+  tags: Container
   /** Where it's drawn, and the slide it's on (start set on the next frame). */
   at: Point
   slide: { from: Point; to: Point; start: number | null; duration: number } | null
@@ -49,6 +53,7 @@ interface Drawn {
   px: number
   active: boolean
   version: number
+  players: boolean
 }
 
 const sameDrawn = (a: Drawn | null, b: Drawn) =>
@@ -232,6 +237,7 @@ export class CharacterLayer extends Container {
         px: selected ? this.px : 0,
         active: !!t.ref && t.ref === this.activeRef,
         version: this.version,
+        players,
       }
       if (sameDrawn(s.drawn, drawn)) continue
       s.drawn = drawn
@@ -290,12 +296,13 @@ export class CharacterLayer extends Container {
     const glow = new Graphics()
     glow.visible = false
     const labels = { name: labelText(NAME_COLOR), type: labelText(TYPE_COLOR) }
+    const tags = new Container()
     portrait.mask = mask
     // All the outlines, then all the lettering.
     root.addChild(glow, fill, initial, portrait, mask, plain, ring, highlight)
-    root.addChild(labels.name.back, labels.type.back, labels.name.front, labels.type.front)
+    root.addChild(labels.name.back, labels.type.back, labels.name.front, labels.type.front, tags)
     this.addChild(root)
-    const s: Shown = { root, portrait, mask, fill, initial, labels, ring, plain, highlight, glow, at: { x: t.x, y: t.y }, slide: null, drawn: null, greyed: false }
+    const s: Shown = { root, portrait, mask, fill, initial, labels, ring, plain, highlight, glow, tags, at: { x: t.x, y: t.y }, slide: null, drawn: null, greyed: false }
     this.shown.set(t.id, s)
     return s
   }
@@ -334,13 +341,29 @@ export class CharacterLayer extends Container {
       s.portrait.visible = true
       const scale = ((2 * inner) / Math.min(tex.width, tex.height)) * Math.max(0.1, t.zoom)
       s.portrait.scale.set(scale)
-      s.portrait.position.set(t.offsetX * 2 * inner, t.offsetY * 2 * inner)
+      // Prone: the portrait lies on its side (turned a quarter, its offset with it).
+      const ox = t.offsetX * 2 * inner
+      const oy = t.offsetY * 2 * inner
+      const prone = isProne(t.conditions)
+      s.portrait.rotation = prone ? Math.PI / 2 : 0
+      if (prone) s.portrait.position.set(-oy, ox)
+      else s.portrait.position.set(ox, oy)
       s.initial.visible = false
     } else {
       s.portrait.visible = false
       s.initial.visible = true
       s.initial.text = t.name.trim().charAt(0).toUpperCase()
       s.initial.style.fontSize = Math.max(4, inner)
+      s.initial.rotation = isProne(t.conditions) ? Math.PI / 2 : 0
+    }
+
+    // Conditions: word tags stacked up from the token's top edge (the players don't see secret ones).
+    for (const c of s.tags.removeChildren()) c.destroy({ children: true })
+    const shown = shownConditions(t.conditions, this.last?.players ?? false)
+    if (shown.length) {
+      const stack = conditionTags(shown, r * 0.34, -1)
+      stack.position.set(0, -r + r * 0.17)
+      s.tags.addChild(stack)
     }
 
     this.drawLabels(s, t, scene)

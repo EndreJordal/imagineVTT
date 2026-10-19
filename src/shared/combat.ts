@@ -28,6 +28,8 @@ export interface Combatant {
   state: string
   /** Waiting in the tracker's Inactive section (reinforcements): not in the fight yet. */
   inactive: boolean
+  /** Conditions it's under (prone, dazed, held…), as the tracker names them. */
+  conditions?: Condition[]
   /** Has acted this turn. */
   acted: boolean
   init: number | null
@@ -35,6 +37,34 @@ export interface Combatant {
   portrait: string
   vtt: CombatantLook | null
 }
+
+/**
+ * A condition a combatant is under, as the tracker names it: shown as a word tag on its token
+ * and under its name in the players' order. `secret`: the GM's eyes only.
+ */
+export interface Condition {
+  id: string
+  label: string
+  /** '#rrggbb'; otherwise one picked from the id (the same condition, the same colour). */
+  color?: string
+  secret?: boolean
+}
+
+const CONDITION_COLORS = [0x8f1d1d, 0x7a4a0e, 0x1f5f8b, 0x5b2c83, 0x1e6b4a, 0x8a2d6b, 0x4b5320, 0x23395b]
+
+/** A condition's tag colour. */
+export function conditionColor(c: Pick<Condition, 'id' | 'color'>): number {
+  if (c.color && /^#[0-9a-f]{6}$/i.test(c.color)) return parseInt(c.color.slice(1), 16)
+  let h = 0
+  for (const ch of c.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return CONDITION_COLORS[h % CONDITION_COLORS.length]
+}
+
+export const isProne = (conditions: Pick<Condition, 'id'>[] | undefined) => !!conditions?.some((c) => c.id === 'prone')
+
+/** The conditions to show: for the players, not the secret ones. */
+export const shownConditions = (conditions: Condition[] | undefined, players: boolean) =>
+  (conditions ?? []).filter((c) => !players || !c.secret).map(({ id, label, color }) => ({ id, label, ...(color && { color }) }))
 
 /** The fight as the tracker reports it. */
 export interface CombatSummary {
@@ -173,6 +203,8 @@ export interface OrderEntry {
   active: boolean
   acted: boolean
   down: boolean
+  /** Its conditions the players may see. */
+  conditions?: Pick<Condition, 'id' | 'label' | 'color'>[]
   /** Initiative this turn (null: not rolled yet). */
   init: number | null
   /** Squares its token has moved this turn (the acting combatant's, once it has moved). */
@@ -261,6 +293,7 @@ export function orderFor(
       active: c.id === summary.activeId,
       acted: c.acted,
       down: isDown(c),
+      ...(shownConditions(c.conditions, true).length && { conditions: shownConditions(c.conditions, true) }),
       init: c.init,
     })
   }

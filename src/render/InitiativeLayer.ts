@@ -1,6 +1,7 @@
 import { ColorMatrixFilter, Container, Graphics, Sprite, Text } from 'pixi.js'
-import { oppositeEdge, type OrderEdge, type OrderEntry, type OrderFacing, type OrderStrip } from '../shared/combat'
+import { isProne, oppositeEdge, type OrderEdge, type OrderEntry, type OrderFacing, type OrderStrip } from '../shared/combat'
 import type { AssetImages } from '../shared/mapObjects'
+import { conditionTags } from './conditionTags'
 import { PictureTextures } from './pictureTextures'
 
 /**
@@ -178,6 +179,10 @@ export class InitiativeLayer extends Container {
       pic.scale.set((2 * inner) / Math.min(texture.width, texture.height))
       // Portraits are mostly heads at the top: show the upper part.
       pic.position.set(0, ((pic.height - 2 * inner) / 2) * 0.6)
+      if (isProne(e.conditions)) {
+        pic.rotation = Math.PI / 2
+        pic.position.set(-pic.position.y, 0)
+      }
       const mask = new Graphics().circle(0, 0, inner).fill(0xffffff)
       pic.mask = mask
       coin.addChild(pic, mask)
@@ -251,6 +256,13 @@ export class InitiativeLayer extends Container {
     if (name.width > nameWidth) name.scale.set(nameWidth / name.width)
     name.position.set(0, r + r * 0.12)
     coin.addChild(name)
+
+    // Conditions, as word tags under the name.
+    if (e.conditions?.length) {
+      const stack = conditionTags(e.conditions, Math.max(12, d * 0.17), 1)
+      stack.position.set(0, name.y + name.height + d * 0.04)
+      coin.addChild(stack)
+    }
 
     if (e.down) {
       coin.filters = [this.grey]
