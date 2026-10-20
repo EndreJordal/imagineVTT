@@ -74,7 +74,12 @@ export function curtainImageMap(images: CurtainPicture[]): Record<string, Blob> 
 export async function hydrateCurtain(): Promise<() => void> {
   const state = await load<CurtainState>('curtain')
   useCurtain.setState({
-    state: { ...DEFAULT_CURTAIN, ...state, slideshow: { ...DEFAULT_CURTAIN.slideshow, ...state?.slideshow } },
+    state: {
+      ...DEFAULT_CURTAIN,
+      ...state,
+      slideshow: { ...DEFAULT_CURTAIN.slideshow, ...state?.slideshow },
+      effects: { ...DEFAULT_CURTAIN.effects, ...state?.effects },
+    },
   })
   await folder.restore()
   return useCurtain.subscribe((s, prev) => {

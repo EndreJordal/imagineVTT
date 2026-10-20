@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { CURTAIN_TRANSITIONS, type CurtainTransition } from '../shared/curtain'
+import { CURTAIN_EFFECTS, CURTAIN_TRANSITIONS, type CurtainTransition } from '../shared/curtain'
 import {
   chooseCurtainFolder,
   reconnectCurtainFolder,
@@ -145,6 +145,43 @@ export function CurtainSection() {
           Whole picture
         </button>
       </div>
+
+      <span className="slider-label">Effects</span>
+      {CURTAIN_EFFECTS.map((fx) => {
+        const e = state.effects[fx.value]
+        const set = (patch: Partial<typeof e>) => setCurtain({ effects: { ...state.effects, [fx.value]: { ...e, ...patch } } })
+        return (
+          <div key={fx.value} className="curtain-effect">
+            <label className="check" title={fx.title}>
+              <input type="checkbox" checked={e.on} onChange={(ev) => set({ on: ev.target.checked })} />
+              {fx.label}
+            </label>
+            {e.on && (
+              <Slider
+                label="Strength"
+                unit="%"
+                scale={100}
+                value={e.amount}
+                fallback={0.5}
+                min={0.05}
+                max={1}
+                step={0.05}
+                onChange={(amount) => set({ amount })}
+              />
+            )}
+            {fx.value === 'ink' && e.on && (
+              <label className="check" title="Deep red drops instead of black ink">
+                <input
+                  type="checkbox"
+                  checked={state.effects.blood}
+                  onChange={(ev) => setCurtain({ effects: { ...state.effects, blood: ev.target.checked } })}
+                />
+                Blood
+              </label>
+            )}
+          </div>
+        )
+      })}
 
       <label
         className={`check${canSlide ? '' : ' disabled'}`}

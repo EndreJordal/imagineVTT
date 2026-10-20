@@ -1,5 +1,5 @@
 import { Container, ImageSource, Mesh, MeshGeometry, Shader, Texture, UniformGroup, type TextureSource } from 'pixi.js'
-import { slideshowIds, type CurtainState, type CurtainTransition } from '../shared/curtain'
+import { CURTAIN_EFFECTS, slideshowIds, type CurtainState, type CurtainTransition } from '../shared/curtain'
 
 /**
  * The curtain on the table: a picture over the whole screen instead of the map, with
@@ -34,6 +34,10 @@ uniform float uToOn;
 uniform float uProgress;    // 0..1 from "from" to "to"
 uniform float uMode;        // 0 cut, 1 fade, 2 dissolve, 3 wipe, 4 iris
 uniform float uAspect;      // screen width / height
+uniform float uTime;        // seconds
+uniform vec4 uEffects;      // strengths 0..1: smoke, shimmer, ink, breathing edges
+uniform vec4 uEffects2;     // ...film grain, dust, embers, rain on glass
+uniform float uBlood;       // 1: ink is blood
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -50,9 +54,9 @@ float fbm(vec2 p) {
 }
 
 /** A picture layer: black outside the picture (bars), nothing at all for the map. */
-vec4 layer(sampler2D tex, vec4 rect, float on) {
+vec4 layer(sampler2D tex, vec4 rect, float on, vec2 at) {
   if (on < 0.5) return vec4(0.0);
-  vec2 uv = (vUV - rect.xy) / rect.zw;
+  vec2 uv = (at - rect.xy) / rect.zw;
   if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return vec4(0.0, 0.0, 0.0, 1.0);
   vec4 c = texture(tex, uv);
   return vec4(c.rgb, 1.0); // premultiplied: transparent parts of a picture show as black
@@ -75,10 +79,127 @@ float reach(float t) {
   return smoothstep(r - e, r + e, s);
 }
 
+// Ink: in a grid of cells, now and then a dot appears, bleeds outward with a ragged edge and
+// fades; each cell on its own slow cycle. Returns how much ink covers this spot.
+float ink(vec2 p) {
+  vec2 cell = floor(p);
+  float cover = 0.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 c = cell + vec2(x, y);
+      float pick = hash(c + 3.7);
+      if (pick < 0.55) continue;                       // most cells stay clean
+      float period = 9.0 + 8.0 * hash(c + 1.3);
+      float life = fract(uTime / period + hash(c + 9.1));
+      vec2 centre = c + 0.2 + 0.6 * vec2(hash(c + 5.2), hash(c + 7.9));
+      float grow = 1.0 - pow(1.0 - min(life * 1.6, 1.0), 3.0);
+      float r = (0.12 + 0.28 * hash(c + 2.4)) * grow;
+      float d = length(p - centre) + (fbm((p + c) * 3.0) - 0.5) * 0.35 * r;
+      float fade = 1.0 - smoothstep(0.55, 1.0, life);
+      cover = max(cover, (1.0 - smoothstep(r * 0.75, r, d)) * fade);
+    }
+  }
+  return cover;
+}
+
+// Motes (dust, embers): at most one per cell, drifting up and swaying, twinkling.
+float motes(vec2 p, float rise, float size, float seed, float density) {
+  p.y += uTime * rise;
+  vec2 cell = floor(p);
+  float glow = 0.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 c = cell + vec2(x, y);
+      if (hash(c + seed) > density) continue;
+      vec2 sway = vec2(sin(uTime * 0.4 + hash(c + seed * 2.0) * 6.28), cos(uTime * 0.3 + hash(c + seed * 3.0) * 6.28));
+      float d = length(p - (c + 0.5 + 0.35 * sway));
+      float twinkle = 0.5 + 0.5 * sin(uTime * (1.0 + 2.0 * hash(c + seed * 4.0)) + hash(c) * 6.28);
+      glow += (1.0 - smoothstep(0.0, size, d)) * twinkle;
+    }
+  }
+  return glow;
+}
+
+// Rain on glass: in some columns a drop runs down with a thin trail. Returns its cover.
+float rain(vec2 p) {
+  float col = floor(p.x);
+  float h = hash(vec2(col, 3.1));
+  if (h < 0.45) return 0.0;
+  float fx = abs(fract(p.x) - 0.5);
+  float head = fract(uTime * (0.08 + 0.12 * h) + hash(vec2(col, 8.3))) * 1.3 - 0.15;
+  float dy = vUV.y - head;
+  float drop = (1.0 - smoothstep(0.1, 0.2, fx)) * (1.0 - smoothstep(0.0, 0.012, abs(dy)));
+  float trail = (1.0 - smoothstep(0.02, 0.06, fx)) * step(dy, 0.0) * (1.0 - smoothstep(0.0, 0.18, -dy));
+  return max(drop, trail * 0.5);
+}
+
 void main() {
-  vec4 a = layer(uFrom, uFromRect, uFromOn);
-  vec4 b = layer(uTo, uToRect, uToOn);
-  finalColor = mix(a, b, reach(clamp(uProgress, 0.0, 1.0)));
+  vec2 aspect = vec2(uAspect, 1.0);
+  // Shimmer: the picture ripples as through warm air, rising slowly.
+  vec2 at = vUV;
+  float haze = 0.0;
+  if (uEffects.y > 0.0) {
+    vec2 q = vUV * aspect * vec2(3.0, 4.5) + vec2(0.0, uTime * 0.5);
+    vec2 wave = vec2(fbm(q), fbm(q + 17.0)) - 0.5;
+    at += wave * 0.022 * uEffects.y;
+    haze = wave.x;
+  }
+  // Rain: the drops bend the picture behind them a little.
+  float wet = 0.0;
+  if (uEffects2.w > 0.0) {
+    wet = rain(vUV * aspect * vec2(28.0, 1.0)) * uEffects2.w;
+    at += vec2(0.0, wet * 0.006);
+  }
+  vec4 a = layer(uFrom, uFromRect, uFromOn, at);
+  vec4 b = layer(uTo, uToRect, uToOn, at);
+  vec4 c = mix(a, b, reach(clamp(uProgress, 0.0, 1.0)));
+  if (uEffects.y > 0.0) {
+    // ...with faint bands of light moving through it, and now and then a glint.
+    c.rgb *= 1.0 + haze * 0.35 * uEffects.y;
+    float glint = pow(noise(vUV * aspect * 40.0 + vec2(uTime * 0.7, -uTime * 0.4)), 28.0);
+    c.rgb += glint * 0.6 * uEffects.y * c.a;
+  }
+
+  // Smoke: two layers of slow mist, drifting different ways.
+  if (uEffects.x > 0.0) {
+    vec2 p = vUV * aspect * 2.2;
+    float n = fbm(p + vec2(uTime * 0.025, uTime * 0.012) + fbm(p * 0.7 - uTime * 0.01));
+    float mist = smoothstep(0.42, 0.85, n) * 0.38 * uEffects.x;
+    c.rgb = mix(c.rgb, vec3(0.62, 0.62, 0.66), mist * c.a);
+  }
+  // Ink (or blood): dots bleeding into the picture.
+  if (uEffects.z > 0.0) {
+    float k = ink(vUV * aspect * 5.0) * 0.75 * uEffects.z;
+    vec3 col = uBlood > 0.5 ? vec3(0.32, 0.0, 0.02) : vec3(0.04, 0.04, 0.06);
+    c.rgb = mix(c.rgb, col, k * c.a);
+  }
+  // Breathing edges: a vignette darkening and lifting slowly, with a little flicker.
+  if (uEffects.w > 0.0) {
+    float r = length((vUV - 0.5) * aspect) / length(aspect * 0.5);
+    float breath = 0.75 + 0.2 * sin(uTime * 0.6) + 0.05 * sin(uTime * 2.3);
+    c.rgb *= 1.0 - smoothstep(0.35, 1.05, r) * 0.6 * breath * uEffects.w;
+  }
+  // Film grain and a faint projector flicker.
+  if (uEffects2.x > 0.0) {
+    float grain = hash(floor(vUV * vec2(1920.0, 1080.0)) + floor(uTime * 24.0) * 7.13) - 0.5;
+    float flicker = (noise(vec2(uTime * 9.0, 0.0)) - 0.5) * 0.12;
+    c.rgb = c.rgb * (1.0 + flicker * uEffects2.x) + grain * 0.14 * uEffects2.x * c.a;
+  }
+  // Dust: pale specks catching the light.
+  if (uEffects2.y > 0.0) {
+    float d = motes(vUV * aspect * 9.0, 0.03, 0.07, 1.0, 0.35);
+    c.rgb += vec3(0.95, 0.9, 0.8) * d * 0.45 * uEffects2.y * c.a;
+  }
+  // Embers: orange sparks rising faster, with a soft glow round each.
+  if (uEffects2.z > 0.0) {
+    vec2 p = vUV * aspect * 7.0;
+    float spark = motes(p, 0.12, 0.05, 7.0, 0.22);
+    float halo = motes(p, 0.12, 0.25, 7.0, 0.22);
+    c.rgb += (vec3(1.0, 0.55, 0.15) * spark * 0.9 + vec3(1.0, 0.35, 0.05) * halo * 0.15) * uEffects2.z * c.a;
+  }
+  // Rain: a wet sheen along the drops.
+  if (wet > 0.0) c.rgb += wet * 0.12 * c.a;
+  finalColor = c;
 }
 `
 
@@ -119,6 +240,10 @@ export class CurtainLayer extends Container {
     uProgress: { value: 1, type: 'f32' },
     uMode: { value: 1, type: 'f32' },
     uAspect: { value: 16 / 9, type: 'f32' },
+    uTime: { value: 0, type: 'f32' },
+    uEffects: { value: new Float32Array([0, 0, 0, 0]), type: 'vec4<f32>' },
+    uEffects2: { value: new Float32Array([0, 0, 0, 0]), type: 'vec4<f32>' },
+    uBlood: { value: 0, type: 'f32' },
   })
   private shader = Shader.from({
     gl: { vertex, fragment, name: 'imaginevtt-curtain' },
@@ -168,6 +293,22 @@ export class CurtainLayer extends Container {
     const first = !this.state
     this.state = state
     this.images = images
+    const fx = state.effects
+    const strength = (e: { on: boolean; amount: number } | undefined) => (e?.on ? e.amount : 0)
+    this.uniforms.uniforms.uEffects = new Float32Array([
+      strength(fx?.smoke),
+      strength(fx?.shimmer),
+      strength(fx?.ink),
+      strength(fx?.vignette),
+    ])
+    this.uniforms.uniforms.uEffects2 = new Float32Array([
+      strength(fx?.grain),
+      strength(fx?.dust),
+      strength(fx?.embers),
+      strength(fx?.rain),
+    ])
+    this.uniforms.uniforms.uBlood = fx?.blood ? 1 : 0
+    this.uniforms.update()
     for (const [id, p] of this.pictures) {
       if (!images[id]) {
         // Unbound first: Pixi warns about (and may draw) a destroyed texture still in use.
@@ -188,9 +329,14 @@ export class CurtainLayer extends Container {
     this.scheduleSlide()
   }
 
-  /** Whether frames are needed: a transition under way. */
+  /** Whether frames are needed: a transition under way, or effects moving over a picture. */
   get animated() {
-    return this.now - this.started < this.duration
+    return this.now - this.started < this.duration || (this.mesh.visible && this.hasEffects)
+  }
+
+  private get hasEffects() {
+    const fx = this.state?.effects
+    return !!fx && CURTAIN_EFFECTS.some((e) => fx[e.value]?.on)
   }
 
   /** The next slide, `interval` seconds from now (a timer: no frames drawn while waiting). */
@@ -214,6 +360,7 @@ export class CurtainLayer extends Container {
     this.now = seconds
     const progress = this.duration > 0 ? (seconds - this.started) / this.duration : 1
     this.uniforms.uniforms.uProgress = Math.min(1, Math.max(0, progress))
+    this.uniforms.uniforms.uTime = seconds
     this.uniforms.update()
     // Nothing to draw once the map is back.
     this.mesh.visible = !(this.to === null && progress >= 1)

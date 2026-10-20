@@ -1655,3 +1655,10 @@ button.primary {
   border-color: #fff;
   box-shadow: 0 0 0 2px #000;
 }
+
+/* Curtain effects: each one's switch, then its strength (and ink's blood) when on. */
+.curtain-effect {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

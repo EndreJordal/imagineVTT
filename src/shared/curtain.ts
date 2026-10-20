@@ -29,7 +29,25 @@ export interface CurtainState {
   fit: 'cover' | 'contain'
   /** Cycle through `ids` every `interval` seconds while the curtain is down. */
   slideshow: { on: boolean; interval: number; ids: string[] }
+  /** Subtle moving effects over the pictures (every picture alike). */
+  effects: CurtainEffects
 }
+
+export type CurtainEffect = 'smoke' | 'shimmer' | 'ink' | 'vignette' | 'grain' | 'dust' | 'embers' | 'rain'
+
+/** Each effect on or off, with its strength (0..1); ink can be blood instead. */
+export type CurtainEffects = Record<CurtainEffect, { on: boolean; amount: number }> & { blood: boolean }
+
+export const CURTAIN_EFFECTS: { value: CurtainEffect; label: string; title: string }[] = [
+  { value: 'smoke', label: 'Smoke', title: 'Slow wisps of mist drifting across the picture' },
+  { value: 'shimmer', label: 'Shimmer', title: 'A faint heat-haze ripple, as through warm air or old glass' },
+  { value: 'ink', label: 'Ink', title: 'Dots of ink that slowly appear, bleed outward and fade' },
+  { value: 'vignette', label: 'Breathing edges', title: 'The edges darken and lighten slowly, like candlelight' },
+  { value: 'grain', label: 'Film grain', title: 'Fine grain and a faint flicker, like an old projector' },
+  { value: 'dust', label: 'Dust', title: 'Tiny specks floating slowly upward, catching the light' },
+  { value: 'embers', label: 'Embers', title: 'Glowing sparks rising and flickering out' },
+  { value: 'rain', label: 'Rain on glass', title: 'Drops running down, as if seen through a window' },
+]
 
 export const DEFAULT_CURTAIN: CurtainState = {
   down: false,
@@ -38,6 +56,17 @@ export const DEFAULT_CURTAIN: CurtainState = {
   duration: 1.5,
   fit: 'cover',
   slideshow: { on: false, interval: 10, ids: [] },
+  effects: {
+    smoke: { on: false, amount: 0.5 },
+    shimmer: { on: false, amount: 0.5 },
+    ink: { on: false, amount: 0.5 },
+    vignette: { on: false, amount: 0.5 },
+    grain: { on: false, amount: 0.5 },
+    dust: { on: false, amount: 0.5 },
+    embers: { on: false, amount: 0.5 },
+    rain: { on: false, amount: 0.5 },
+    blood: false,
+  },
 }
 
 /** The pictures the slideshow cycles through: the chosen ones that still exist, in order. */
