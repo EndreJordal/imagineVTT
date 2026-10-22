@@ -4,6 +4,8 @@ import { extractLevel } from '../shared/levels'
 import { allLevels, levelImage } from './store'
 import { tableState, useGm } from './store'
 import { SELECT } from './tools'
+import { sceneBounds } from '../shared/geometry'
+import { waterDistance, waterHearing } from '../shared/water'
 
 
 describe('objects', () => {
@@ -369,5 +371,59 @@ describe('measuring in the store', () => {
     expect(gm().scene.measures).toHaveLength(1)
     gm().clearMeasures()
     expect(gm().scene.measures).toHaveLength(0)
+  })
+})
+
+describe('water in the store', () => {
+  it('paints one area per stroke, adds strokes that start on it, erases, and hears it from its edge', () => {
+    const gm = () => useGm.getState()
+    gm().setWaterBrush(1)
+    gm().waterPaint({ x: 200, y: 200 }, { x: 600, y: 200 }, false, 'a')
+    expect(gm().scene.waterAreas).toHaveLength(1)
+    const id = gm().scene.waterAreas![0].id
+    // A stroke starting on the water adds to it: one area, one token.
+    gm().waterPaint({ x: 600, y: 200 }, { x: 600, y: 600 }, false, 'b')
+    expect(gm().scene.waterAreas).toHaveLength(1)
+    expect(gm().scene.waterAreas![0].id).toBe(id)
+    // Elsewhere: new water.
+    gm().waterPaint({ x: 1500, y: 1500 }, { x: 1600, y: 1500 }, false, 'c')
+    expect(gm().scene.waterAreas).toHaveLength(2)
+    gm().waterPaint({ x: 1400, y: 1500 }, { x: 1700, y: 1500 }, true, 'd')
+    expect(gm().scene.waterAreas).toHaveLength(1)
+
+    const bounds = sceneBounds(gm().scene)
+    const area = { ...gm().scene.waterAreas![0], sound: { clip: 'x', volume: 1, range: 4 } }
+    expect(waterDistance(area, bounds, { x: 400, y: 200 }, 1000)).toBe(0)
+    expect(waterHearing(area, bounds, [{ x: 400, y: 200 }], 100)).toBe(1)
+    // Two squares beyond the far end's edge: heard, less loud; far away: silent.
+    const near = waterHearing(area, bounds, [{ x: 400, y: 600 + 100 + 200 }], 100)
+    expect(near).toBeGreaterThan(0)
+    expect(near).toBeLessThan(1)
+    expect(waterHearing(area, bounds, [{ x: 3000, y: 3000 }], 100)).toBe(0)
+    gm().removeWater(area.id)
+    expect(gm().scene.waterAreas).toEqual([])
+  })
+})
+
+describe('water selected together', () => {
+  it('box-selects, toggles, groups and changes several water areas at once', () => {
+    const gm = () => useGm.getState()
+    gm().waterPaint({ x: 200, y: 200 }, { x: 300, y: 200 }, false, 'w1')
+    gm().waterPaint({ x: 1200, y: 1200 }, { x: 1300, y: 1200 }, false, 'w2')
+    const [a, b] = gm().scene.waterAreas!.map((w) => w.id)
+    gm().selectMany([], [], [], false, [], [a])
+    gm().toggleWaterSelected(b)
+    expect(gm().selectedWaterIds).toEqual([a, b])
+    gm().updateWaters([a, b], { ripple: 0.9 })
+    expect(gm().scene.waterAreas!.every((w) => w.ripple === 0.9)).toBe(true)
+    gm().groupSelection()
+    const group = gm().scene.waterAreas![0].group
+    expect(group).toBeTruthy()
+    expect(gm().scene.waterAreas![1].group).toBe(group)
+    gm().selectWater(null)
+    gm().selectGroup(group!)
+    expect(gm().selectedWaterIds.sort()).toEqual([a, b].sort())
+    gm().ungroup(group!)
+    expect(gm().scene.waterAreas!.some((w) => w.group)).toBe(false)
   })
 })

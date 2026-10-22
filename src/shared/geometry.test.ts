@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  fitSquares,
+  viewAlignedToGrid,
   snapToGrid,
   alignMapToGrid,
   carryPoint,
@@ -231,5 +233,34 @@ describe('table zoom', () => {
     expect(clampViewZoom(0.5)).toBe(0.5)
     expect(clampViewZoom(0)).toBeGreaterThan(0)
     expect(clampViewZoom(100)).toBeLessThan(100)
+  })
+})
+
+describe('fitSquares', () => {
+  it('fits a whole number of squares across or down the screen', () => {
+    // A 1000 x 600 mm screen at 4 px/mm, 25.4 mm squares: 39.4 across (39), 23.6 down (24).
+    const screen = { width: 4000, height: 2400 }
+    const x = fitSquares('x', screen, { pxPerMm: 4 }, 25.4)!
+    expect(x.count).toBe(39)
+    expect(x.squareMm * 39).toBeCloseTo(1000)
+    const y = fitSquares('y', screen, { pxPerMm: 4 }, 25.4)!
+    expect(y.count).toBe(24)
+    expect(y.squareMm * 24).toBeCloseTo(600)
+  })
+})
+
+describe('viewAlignedToGrid', () => {
+  it("puts the table's top-left corner on a grid corner, whichever way the table is turned", () => {
+    const grid = { size: 100, offsetX: 0, offsetY: 0, visible: true, color: '#000000', opacity: 1 }
+    const screen = { width: 1000, height: 600 }
+    for (const orientation of [0, 90, 180, 270] as const) {
+      const scene = { grid, squareMm: 25.4, viewZoom: 1, view: { x: 537, y: 281 } } as unknown as Scene
+      const display = { pxPerMm: 1000 / 25.4 / 10, orientation } as Display // 10 squares across
+      const view = viewAlignedToGrid(scene, display, screen)
+      const corner = tableViewCorners({ ...scene, view }, display, screen)[0]
+      expect(Math.abs(corner.x / 100 - Math.round(corner.x / 100))).toBeLessThan(1e-9)
+      expect(Math.abs(corner.y / 100 - Math.round(corner.y / 100))).toBeLessThan(1e-9)
+      expect(Math.hypot(view.x - 537, view.y - 281)).toBeLessThanOrEqual(Math.SQRT1_2 * 100)
+    }
   })
 })

@@ -23,8 +23,6 @@ export const stamped = {
   reveals: 0,
 }
 
-/** By default the GM sees half the darkness the players do. */
-export const DEFAULT_GM_VISION = 0.5
 
 export const defaultScene: Scene = {
   map: null,
@@ -56,6 +54,7 @@ export type Selection = Pick<
   | 'selectedHiddenId'
   | 'selectedDoorId'
   | 'selectedSoundId'
+  | 'selectedWaterIds'
 >
 
 export const NOTHING_SELECTED: Selection = {
@@ -66,13 +65,18 @@ export const NOTHING_SELECTED: Selection = {
   selectedHiddenId: null,
   selectedDoorId: null,
   selectedSoundId: null,
+  selectedWaterIds: [],
 }
 
 /** Select just these: everything else is unselected. */
 export const selectOnly = (patch: Partial<Selection>): Selection => ({ ...NOTHING_SELECTED, ...patch })
 
 /** Adding to a multiple selection puts away what's only ever selected alone. */
-export const SINGLES_OFF = { selectedHiddenId: null, selectedDoorId: null, selectedSoundId: null } satisfies Partial<Selection>
+export const SINGLES_OFF = {
+  selectedHiddenId: null,
+  selectedDoorId: null,
+  selectedSoundId: null,
+} satisfies Partial<Selection>
 
 /** The selection without what's no longer in the scene (after undo, say). Wall points are renumbered: dropped. */
 export function selectionIn(s: Selection, scene: Scene): Selection {
@@ -86,6 +90,7 @@ export function selectionIn(s: Selection, scene: Scene): Selection {
   const hidden = has(scene.hiddenAreas)
   const door = has(scene.walls)
   const sound = has(scene.sounds)
+  const water = has(scene.waterAreas)
   return {
     selectedLightIds: s.selectedLightIds.filter(light),
     selectedObjectIds: s.selectedObjectIds.filter(object),
@@ -94,6 +99,7 @@ export function selectionIn(s: Selection, scene: Scene): Selection {
     selectedHiddenId: hidden(s.selectedHiddenId) ? s.selectedHiddenId : null,
     selectedDoorId: door(s.selectedDoorId) ? s.selectedDoorId : null,
     selectedSoundId: sound(s.selectedSoundId) ? s.selectedSoundId : null,
+    selectedWaterIds: s.selectedWaterIds.filter(water),
   }
 }
 

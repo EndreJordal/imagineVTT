@@ -118,7 +118,8 @@ export async function writeSceneFile(s: SceneFile): Promise<Blob> {
     assets[key] = { ...rest, file, type: image.type }
   }
   // Only the sounds the scene uses.
-  const usedSounds = usedClips(s.scene, s.levels.map((l) => l.sounds ?? []), s.soundClips)
+  const waterClips = s.levels.flatMap((l) => l.waterAreas ?? []).flatMap((w) => (w.sound ? [w.sound.clip] : []))
+  const usedSounds = usedClips(s.scene, s.levels.map((l) => l.sounds ?? []), s.soundClips, waterClips)
   const sounds: NonNullable<SceneJson['sounds']> = {}
   let k = 0
   for (const [key, clip] of Object.entries(s.soundClips)) {

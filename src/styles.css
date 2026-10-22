@@ -1662,3 +1662,319 @@ button.primary {
   flex-direction: column;
   gap: 2px;
 }
+
+/* Top bar: a thin rule between its groups, and a narrower time-of-day slider. */
+.toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 4px;
+  background: #3a3a44;
+}
+
+.toolbar-item.time-of-day input[type='range'] {
+  width: 120px;
+}
+
+/* Time of day: one track, two knobs. The players' (top, pointing down) and the GM's
+   (bottom, pointing up) make a diamond when they meet. */
+.dual-track {
+  position: relative;
+  width: 130px;
+  height: 26px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.dual-track * {
+  pointer-events: none;
+}
+
+.dual-labels {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.dual-labels span:first-child {
+  color: #f0d9a0;
+}
+
+.dual-labels span:last-child {
+  color: #8fb4ff;
+}
+
+.dual-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: #4a4a55;
+}
+
+.dual-fill {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #e8c56a, #4a5aa8);
+}
+
+.dual-knob {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin-left: -8px;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  outline: none;
+}
+
+/* Top: pointing down, its tip on the line. */
+.dual-knob.players {
+  top: 3px;
+  border-top: 10px solid #f0d9a0;
+}
+
+/* Bottom: pointing up, its tip on the line. */
+.dual-knob.gm {
+  top: 13px;
+  border-bottom: 10px solid #8fb4ff;
+}
+
+.dual-knob:focus-visible.players {
+  border-top-color: #fff;
+}
+
+.dual-knob:focus-visible.gm {
+  border-bottom-color: #fff;
+}
+
+.preview-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The sidebar's top: Prep / Play, and folding every section. */
+.sidebar-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2c2c34;
+}
+
+.sidebar-fold {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+/* Keyboard shortcuts: the ? overlay, and the list (also in Settings). */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.shortcuts-card {
+  width: min(760px, calc(100% - 32px));
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: #1d1d22;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+.shortcuts-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.shortcut-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 4px 20px;
+}
+
+.shortcut-list h3 {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shortcut-list dl {
+  margin: 0;
+}
+
+.shortcut {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.shortcut dt {
+  flex: 0 0 auto;
+  min-width: 110px;
+}
+
+.shortcut dd {
+  margin: 0;
+}
+
+.shortcut kbd {
+  padding: 1px 5px;
+  border: 1px solid #4a4a55;
+  border-radius: 4px;
+  background: #2a2a31;
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Settings: which sidebar sections Prep and Play show. */
+.sidebar-modes {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.sidebar-modes th,
+.sidebar-modes td {
+  padding: 2px 4px;
+  text-align: center;
+}
+
+.sidebar-modes td:first-child {
+  text-align: left;
+}
+
+/* Top bar: chips for what's on (alert mode, a tool, the curtain, a picture shown). */
+.mode-chips {
+  display: flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid #4a4a55;
+  background: #26262d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mode-chip .icon-button {
+  padding: 2px;
+}
+
+.mode-chip.mode-alert {
+  border-color: #ff5a36;
+}
+
+.mode-chip.mode-curtain {
+  border-color: #d94dff;
+}
+
+/* Folder browsing: where you are, list or thumbnails, and subfolders as tiles. */
+.browser-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.browser-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.browser-crumbs button {
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.browser-crumbs .crumb {
+  border: none;
+  background: none;
+  color: var(--accent);
+}
+
+.browser-crumbs .crumb:disabled {
+  color: inherit;
+  opacity: 1;
+}
+
+.browser-view button {
+  padding: 1px 6px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.folder-tile .folder-icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 4px;
+  background: #26262d;
+  color: #e8c56a;
+}
+
+/* As a list: one column, a small picture beside each name. */
+.curtain-pictures.as-list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.curtain-pictures.as-list .curtain-thumb {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.curtain-pictures.as-list .curtain-thumb img,
+.curtain-pictures.as-list .curtain-thumb-empty,
+.curtain-pictures.as-list .folder-icon {
+  width: 44px;
+  flex: 0 0 44px;
+}
+
+.curtain-pictures.as-list .folder-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.curtain-pictures.as-list .curtain-name {
+  text-align: left;
+}
+
+.curtain-pictures.as-list .curtain-tick {
+  top: 50%;
+  left: auto;
+  right: 6px;
+  transform: translateY(-50%);
+}

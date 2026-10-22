@@ -8,6 +8,7 @@ import {
   DOOR_COLOR,
   DOOR_REACH_PX,
   HIDDEN_COLOR,
+  WATER_COLOR,
   SLACK_PX,
   SNAP_MARKER_PX,
   TOKEN_PX,
@@ -36,6 +37,8 @@ export interface ToolCanvas {
   doorDraft(): Point | null
   /** Hide brush radius, in squares. */
   hideBrush(): number
+  /** Water brush radius, in squares. */
+  waterBrush(): number
   readonly handlers: Handlers
   /** The door whose open/close button is at p, if any. */
   doorButtonAt(p: Point): string | null
@@ -71,6 +74,10 @@ export function createTool(tool: Tool): CanvasTool | null {
       return tool.mode === 'fill' ? fillTool() : brushTool(tool.mode === 'erase')
     case 'measure':
       return measureTool()
+    case 'water':
+      return tool.mode === 'fill'
+        ? { ...fillTool(), down: (c, p) => c.handlers.onWaterFill(p) }
+        : brushTool(tool.mode === 'erase', 'water')
   }
 }
 
@@ -160,7 +167,10 @@ function fillTool(): CanvasTool {
 }
 
 /** Hiding areas, brush (or eraser): strokes paint, Alt doing the opposite. */
-function brushTool(eraser: boolean): CanvasTool {
+/** A brush: hiding areas (and erasing them), or painting water. */
+function brushTool(eraser: boolean, paints: 'hide' | 'water' = 'hide'): CanvasTool {
+  const paint = (c: ToolCanvas, from: Point, to: Point, erase: boolean, id: string) =>
+    paints === 'water' ? c.handlers.onWaterPaint(from, to, erase, id) : c.handlers.onHidePaint(from, to, erase, id)
   let at: Point | null = null
   let erase = eraser
   let stroke: { id: string; last: Point } | null = null
@@ -168,7 +178,7 @@ function brushTool(eraser: boolean): CanvasTool {
     down(c, p, e) {
       erase = eraser !== e.altKey
       stroke = { id: crypto.randomUUID(), last: p }
-      c.handlers.onHidePaint(p, p, erase, stroke.id)
+      paint(c, p, p, erase, stroke.id)
       c.capture(e)
     },
     move(c, p, e, pressed) {
@@ -177,7 +187,7 @@ function brushTool(eraser: boolean): CanvasTool {
         erase = eraser !== e.altKey
         return
       }
-      c.handlers.onHidePaint(stroke.last, p, erase, stroke.id)
+      paint(c, stroke.last, p, erase, stroke.id)
       stroke.last = p
     },
     up: () => (stroke = null),
@@ -185,9 +195,9 @@ function brushTool(eraser: boolean): CanvasTool {
     draw(c, g) {
       const scene = c.scene()
       if (!at || !scene) return
-      const r = c.hideBrush() * scene.grid.size
+      const r = (paints === 'water' ? c.waterBrush() : c.hideBrush()) * scene.grid.size
       g.circle(at.x, at.y, r).stroke({ width: 3 * c.px(), color: 0x000000, alpha: 0.6 })
-      g.circle(at.x, at.y, r).stroke({ width: 1.5 * c.px(), color: erase ? 0xffffff : HIDDEN_COLOR })
+      g.circle(at.x, at.y, r).stroke({ width: 1.5 * c.px(), color: erase ? 0xffffff : paints === 'water' ? WATER_COLOR : HIDDEN_COLOR })
     },
   }
 }
@@ -202,25 +212,53 @@ function snapMarker(g: Graphics, at: Point, color: number, px: number) {
  * `moving` points are skipped, so a dragged point doesn't snap onto itself.
  */
 export function wallPointAt(c: ToolCanvas, p: Point, moving: WallPointRef[] = []): Point {
+  const px = c.px()
+  // Corners first: the nearest within reach.
+  const near = (WALL_DOT_PX + SLACK_PX) * px
   let best: Point | undefined
-  let bestDist = (WALL_DOT_PX + SLACK_PX) * c.px()
-  const consider = (q: Point) => {
+  let bestDist = Infinity
+  const consider = (q: Point, reach = near) => {
     const d = Math.hypot(p.x - q.x, p.y - q.y)
-    if (d <= bestDist) {
+    if (d <= reach && d < bestDist) {
       best = q
       bestDist = d
     }
   }
-  for (const w of c.scene()?.walls ?? []) {
+  const walls = c.scene()?.walls ?? []
+  const isMoving = (wallId: string, index: number) => moving.some((r) => r.wallId === wallId && r.index === index)
+  for (const w of walls) {
     w.points.forEach((q, index) => {
-      if (!moving.some((r) => r.wallId === w.id && r.index === index)) consider(q)
+      if (!isMoving(w.id, index)) consider(q)
     })
   }
-  for (const q of c.wallDraft()) consider(q)
+  const draft = c.wallDraft()
+  // The first point of the wall being drawn reaches a little further, to close a room.
+  draft.forEach((q, i) => consider(q, i === 0 && draft.length > 2 ? near + CLOSE_PX * px : near))
   if (best) return { x: best.x, y: best.y }
+  // Then onto a wall line, only very close (doors aren't wall lines to join).
+  let line: Point | undefined
+  let lineDist = LINE_SNAP_PX * px
+  const onto = (a: Point, b: Point) => {
+    const hit = nearestOnSegment(p, a, b)
+    if (hit.distance <= lineDist) {
+      line = hit.point
+      lineDist = hit.distance
+    }
+  }
+  for (const w of walls) {
+    if (w.door) continue
+    for (let i = 1; i < w.points.length; i++) if (!isMoving(w.id, i - 1) && !isMoving(w.id, i)) onto(w.points[i - 1], w.points[i])
+  }
+  for (let i = 1; i < draft.length; i++) onto(draft[i - 1], draft[i])
+  if (line) return line
   const grid = c.scene()?.grid
   return grid ? snapToGrid(p, grid, c.snap()) : p
 }
+
+/** How close (GM screen px) a new wall point must be to a wall line to land on it. */
+const LINE_SNAP_PX = 6
+/** How much further the first point of the wall being drawn reaches, to close a room. */
+const CLOSE_PX = 6
 
 /**
  * The door point the door tool would use for pointer position p, or null: an existing wall

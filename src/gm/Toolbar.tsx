@@ -1,6 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type { FogMode } from '../shared/types'
 import { CurtainButton } from './Curtain'
+import { toggleCurtain, useCurtain } from './curtainStore'
+import { hideHandout, useHandouts } from './handoutStore'
+import { SELECT } from './tools'
 import { redo, undo } from './history'
 import { newScene, openScene, saveScene } from './sceneFiles'
 import { SettingsMenu } from './Settings'
@@ -11,36 +14,25 @@ import { useDropdown } from './useDropdown'
 import { Icon } from './icons'
 
 export function Toolbar() {
-  const darkness = useGm((s) => s.scene.darkness)
-  const setDarkness = useGm((s) => s.setDarkness)
-
   return (
     <header className="toolbar">
       <span className="toolbar-title">imagineVTT</span>
+      {/* The scene */}
       <SceneFile />
       <UndoRedo />
+      <span className="toolbar-divider" />
+      {/* The table, live: what the players see right now */}
       <TableStatus />
-      <label className="toolbar-item" title="Time of day: dims and desaturates the map, on the table too">
-        <Icon name="day" />
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={darkness}
-          aria-label="Time of day"
-          aria-valuetext={darkness === 0 ? 'Day' : darkness === 1 ? 'Night' : `${Math.round(darkness * 100)}% dark`}
-          onChange={(e) => setDarkness(e.target.valueAsNumber)}
-          onDoubleClick={() => setDarkness(0)}
-        />
-        <Icon name="night" />
-      </label>
-      <GmVision />
-      <ObscuringMenu />
-      <SoundMixer />
+      <PreviewButton />
       <CurtainButton />
       <AlertButton />
+      <span className="toolbar-divider" />
+      {/* Atmosphere */}
+      <TimeOfDay />
+      <ObscuringMenu />
+      <ModeChips />
       <span className="toolbar-spacer" />
+      <SoundMixer />
       <SettingsMenu />
     </header>
   )
@@ -206,38 +198,156 @@ function UndoRedo() {
  * How dark the GM's own view is, relative to the table: from exactly what the players see
  * to full day. Holding the eye button (or V) shows exactly what the players see.
  */
-function GmVision() {
-  const vision = useGm((s) => s.gmVision)
-  const peeking = useGm((s) => s.peeking)
-  const { setGmVision, setPeeking } = useGm.getState()
-  const label = vision === 0 ? "players' view" : vision === 1 ? 'day' : `${Math.round(vision * 100)}% lighter`
+const TOOL_NAMES: Record<string, string> = {
+  walls: 'Building walls',
+  doors: 'Building doors',
+  light: 'Placing lights',
+  hide: 'Hiding areas',
+  water: 'Painting water',
+  measure: 'Measuring',
+}
+
+/**
+ * What's on that changes how clicks work, or what the table shows, as chips: each one's ✕
+ * turns it off. Easy to forget otherwise.
+ */
+function ModeChips() {
+  const tool = useGm((s) => s.tool.kind)
+  const alerting = useGm((s) => s.alerting)
+  const curtainDown = useCurtain((s) => s.state.down)
+  const showing = useHandouts((s) => !!s.shown)
+  const chips: { key: string; label: string; title: string; off(): void }[] = []
+  if (alerting) chips.push({ key: 'alert', label: 'Alert mode', title: 'Stop alerting', off: () => useGm.getState().setAlerting(false) })
+  if (tool !== 'select' && TOOL_NAMES[tool])
+    chips.push({ key: 'tool', label: TOOL_NAMES[tool], title: 'Put the tool down (Esc)', off: () => useGm.getState().setTool(SELECT) })
+  if (curtainDown) chips.push({ key: 'curtain', label: 'Curtain down', title: 'Raise the curtain (C)', off: () => void toggleCurtain() })
+  if (showing) chips.push({ key: 'handout', label: 'Showing a picture', title: 'Stop showing it', off: hideHandout })
+  if (!chips.length) return null
   return (
-    <div className="toolbar-item" title="Your view only: how much of the night you see. The table is not affected.">
-      <button
-        className={`icon-button peek${peeking ? ' active' : ''}`}
-        title="Hold (or hold V) to see exactly what the players see"
-        aria-pressed={peeking}
+    <div className="mode-chips">
+      {chips.map((c) => (
+        <span key={c.key} className={`mode-chip mode-${c.key}`}>
+          {c.label}
+          <button className="icon-button" title={c.title} aria-label={c.title} onClick={c.off}>
+            <Icon name="close" size={12} />
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Hold to see the table exactly as the players do (or hold V): no GM-only marks. */
+function PreviewButton() {
+  const peeking = useGm((s) => s.peeking)
+  const { setPeeking } = useGm.getState()
+  return (
+    <button
+      className={`preview-button${peeking ? ' active' : ''}`}
+      title="Hold to see exactly what the players see, without your marks (or hold V)"
+      aria-pressed={peeking}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setPeeking(true)
+      }}
+      onPointerUp={() => setPeeking(false)}
+      onPointerCancel={() => setPeeking(false)}
+    >
+      <Icon name="peek" /> Preview
+    </button>
+  )
+}
+
+/**
+ * Time of day as one track with two knobs: the top one (pointing down) is the players'
+ * darkness, the bottom one (pointing up) yours. Until you move yours it follows theirs (a
+ * diamond: you see what they see); moved, it stays where you put it; double-clicked, it
+ * follows theirs again.
+ */
+function TimeOfDay() {
+  const darkness = useGm((s) => s.scene.darkness)
+  const gmView = useGm((s) => s.gmView)
+  const { setDarkness, setGmView } = useGm.getState()
+  const gm = gmView ?? darkness
+  const track = useRef<HTMLDivElement>(null)
+  const dragging = useRef<'players' | 'gm' | null>(null)
+  const at = (e: { clientX: number }) => {
+    const r = track.current!.getBoundingClientRect()
+    return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+  }
+  const setGm = (v: number) => setGmView(Math.min(1, Math.max(0, v)))
+  const move = (which: 'players' | 'gm', v: number) => (which === 'players' ? setDarkness(v) : setGm(v))
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+  const word = (v: number) => (v === 0 ? 'day' : v === 1 ? 'night' : `${pct(v)} dark`)
+  const key = (which: 'players' | 'gm') => (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 0.1 : 0.02
+    const now = which === 'players' ? darkness : gm
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') move(which, now - step)
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') move(which, now + step)
+    else return
+    e.preventDefault()
+  }
+  return (
+    <div
+      className="toolbar-item time-of-day"
+      title={`Time of day. Player View (top knob): ${word(darkness)}, on the table too. GM View (bottom knob): ${word(gm)}, your screen only. ${gmView === null ? ' (following the players)' : ''} Double-click: top to day, bottom to follow the players again.`}
+    >
+      <span className="dual-labels" aria-hidden>
+        <span>Player View</span>
+        <span>GM View</span>
+      </span>
+      <Icon name="day" />
+      <div
+        ref={track}
+        onDragStart={(e) => e.preventDefault()}
+        className="dual-track"
         onPointerDown={(e) => {
+          // No text selection or native drag (the browser's "not allowed" cursor).
+          e.preventDefault()
+          // The upper half moves the players' knob, the lower half yours.
+          const r = e.currentTarget.getBoundingClientRect()
+          const which = e.clientY < r.top + r.height / 2 ? 'players' : 'gm'
+          dragging.current = which
           e.currentTarget.setPointerCapture(e.pointerId)
-          setPeeking(true)
+          move(which, at(e))
         }}
-        onPointerUp={() => setPeeking(false)}
-        onPointerCancel={() => setPeeking(false)}
+        onPointerMove={(e) => dragging.current && move(dragging.current, at(e))}
+        onPointerUp={() => (dragging.current = null)}
+        onPointerCancel={() => (dragging.current = null)}
+        onDoubleClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect()
+          if (e.clientY < r.top + r.height / 2) setDarkness(0)
+          else setGmView(null)
+        }}
       >
-        <Icon name="peek" size={18} />
-      </button>
-      <span className="toolbar-label">GM vision</span>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.05}
-        value={vision}
-        aria-label="GM vision"
-        aria-valuetext={label}
-        onChange={(e) => setGmVision(e.target.valueAsNumber)}
-      />
-      <span className="toolbar-value">{label}</span>
+        <div className="dual-line" />
+        <div className="dual-fill" style={{ width: pct(darkness) }} />
+        <div
+          className="dual-knob players"
+          style={{ left: pct(darkness) }}
+          role="slider"
+          tabIndex={0}
+          aria-label="Darkness for the players"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(darkness * 100)}
+          aria-valuetext={word(darkness)}
+          onKeyDown={key('players')}
+        />
+        <div
+          className="dual-knob gm"
+          style={{ left: pct(gm) }}
+          role="slider"
+          tabIndex={0}
+          aria-label="Darkness you see"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(gm * 100)}
+          aria-valuetext={word(gm)}
+          onKeyDown={key('gm')}
+        />
+      </div>
+      <Icon name="night" />
     </div>
   )
 }

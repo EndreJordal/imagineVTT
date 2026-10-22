@@ -12,7 +12,7 @@ export function HandoutsSection() {
   const showing = shown && images.find((i) => i.id === shown.id)
 
   return (
-    <Section title={showing ? 'Show to players • showing' : 'Show to players'}>
+    <Section id="handouts" title={showing ? 'Show to players • showing' : 'Show to players'}>
       <p className="hint">Show the players a picture (a map, a letter, a portrait), framed over the map on the table.</p>
       <FolderPictures
         state={state}

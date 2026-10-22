@@ -49,7 +49,7 @@ export function CombatSection({ canvas }: { canvas: RefObject<GmCanvas | null> }
 
   if (!combat) {
     return (
-      <Section title="Combat">
+      <Section id="combat" title="Combat">
         <p className="hint">
           No fight is linked to this scene. Start one from an encounter in the campaign bible (“Start in imagineVTT”).
         </p>
@@ -134,7 +134,7 @@ export function CombatSection({ canvas }: { canvas: RefObject<GmCanvas | null> }
   }
 
   return (
-    <Section title={`Combat${active ? ` • ${active.name}` : ''}`}>
+    <Section id="combat" title={`Combat${active ? ` • ${active.name}` : ''}`}>
       <p className="combat-name">{combat.encounter}</p>
       <div className="row combat-tracker">
         <span className={`hint${linked ? ' ok' : ''}`}>

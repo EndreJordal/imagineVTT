@@ -91,15 +91,14 @@ describe('lights in the store', () => {
 describe('gmDarkness', () => {
   const scene = (darkness: number) => ({ ...useGm.getState().scene, darkness })
 
-  it('spares the GM a fraction of the night, following the table', () => {
-    expect(gmDarkness({ scene: scene(1), gmVision: 0.5, peeking: false })).toBe(0.5)
-    expect(gmDarkness({ scene: scene(0.4), gmVision: 0.5, peeking: false })).toBeCloseTo(0.2)
-    expect(gmDarkness({ scene: scene(1), gmVision: 1, peeking: false })).toBe(0)
-    expect(gmDarkness({ scene: scene(1), gmVision: 0, peeking: false })).toBe(1)
+  it("follows the players' darkness until set apart, then keeps its own", () => {
+    expect(gmDarkness({ scene: scene(0.7), gmView: null, peeking: false })).toBe(0.7)
+    expect(gmDarkness({ scene: scene(0.2), gmView: 0.9, peeking: false })).toBe(0.9)
+    expect(gmDarkness({ scene: scene(1), gmView: 0, peeking: false })).toBe(0)
   })
 
   it("shows exactly the players' darkness while peeking", () => {
-    expect(gmDarkness({ scene: scene(0.9), gmVision: 1, peeking: true })).toBe(0.9)
+    expect(gmDarkness({ scene: scene(0.9), gmView: 0, peeking: true })).toBe(0.9)
   })
 })
 

@@ -13,7 +13,7 @@ export interface ToolsSlice {
    */
   setTool(tool: Tool): void
   /** Pick up a tool, or put it down if it's in hand (W, D, H); hiding in its last mode. */
-  toggleTool(kind: 'walls' | 'doors' | 'hide' | 'measure'): void
+  toggleTool(kind: 'walls' | 'doors' | 'hide' | 'measure' | 'water'): void
   /** Snapping for walls, doors and placing lights: every 1, 1/2 or 1/4 square; 0 = none. */
   snap: number
   setSnap(fraction: number): void
@@ -26,12 +26,19 @@ export const toolsSlice: StateCreator<GmStore, [], [], ToolsSlice> = (set, get) 
     set(
       tool.kind === 'select'
         ? { tool, wallDraft: [], doorDraft: null }
-        : { ...TOOLS_OFF, tool, ...(tool.kind === 'hide' && { hideMode: tool.mode }) },
+        : {
+            ...TOOLS_OFF,
+            tool,
+            ...(tool.kind === 'hide' && { hideMode: tool.mode }),
+            ...(tool.kind === 'water' && { waterMode: tool.mode }),
+          },
     ),
   toggleTool: (kind) => {
-    const { tool, hideMode, setTool } = get()
+    const { tool, hideMode, waterMode, setTool } = get()
     if (tool.kind === kind) setTool(SELECT)
-    else setTool(kind === 'hide' ? { kind, mode: hideMode } : { kind })
+    else if (kind === 'hide') setTool({ kind, mode: hideMode })
+    else if (kind === 'water') setTool({ kind, mode: waterMode })
+    else setTool({ kind })
   },
   snap: 1,
   setSnap: (snap) => set({ snap }),

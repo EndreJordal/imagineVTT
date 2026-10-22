@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { moveCrossesWall, wallSegments } from './visibility'
 import {
+  joinOnto,
   deleteWallPoints,
   makeDoor,
   moveWallPoints,
@@ -183,5 +184,18 @@ describe('doors', () => {
     // The closed loop's start and end are one point: index 0 and 4 with index 3 neighbour.
     expect(selectedSegment([room], [{ wallId: 'r', index: 4 }, { wallId: 'r', index: 3 }])).not.toBeNull()
     expect(selectedSegment([room], [{ wallId: 'r', index: 0 }, { wallId: 'r', index: 2 }])).toBeNull()
+  })
+})
+
+describe('joinOnto', () => {
+  it('adds a point lying on a wall line as that wall’s corner, not at its ends or on doors', () => {
+    const walls = [
+      { id: 'w', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] },
+      { id: 'd', points: [{ x: 0, y: 50 }, { x: 100, y: 50 }], door: { open: false } },
+    ]
+    const out = joinOnto(walls, [{ x: 40, y: 0 }, { x: 100, y: 0 }, { x: 40, y: 50 }])
+    expect(out[0].points).toEqual([{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 100, y: 0 }])
+    expect(out[1]).toBe(walls[1])
+    expect(joinOnto(walls, [{ x: 40, y: 20 }])).toBe(walls)
   })
 })

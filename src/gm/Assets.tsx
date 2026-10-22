@@ -81,7 +81,7 @@ export function AssetsSection() {
   }, [inKind, category, query])
 
   return (
-    <Section title="Assets">
+    <Section id="assets" title="Assets">
       {status.kind === 'unsupported' && (
         <p className="hint">The asset library needs Chrome or Edge, which can open a folder on this computer.</p>
       )}

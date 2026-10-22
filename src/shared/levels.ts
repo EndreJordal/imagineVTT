@@ -1,3 +1,4 @@
+import type { WaterArea } from './water'
 import type { Measure } from './measure'
 import type { CharacterToken } from './characters'
 import type { HiddenArea } from './hidden'
@@ -33,6 +34,7 @@ export interface Level {
   sounds?: MapSound[]
   characters?: CharacterToken[]
   measures?: Measure[]
+  waterAreas?: WaterArea[]
 }
 
 /** A floor's part of a scene (the scene shows one floor; see applyLevel). */
@@ -53,6 +55,7 @@ export function extractLevel(scene: Scene, base: Pick<Level, 'id' | 'name'>): Le
     sounds: scene.sounds ?? [],
     characters: scene.characters ?? [],
     measures: scene.measures ?? [],
+    waterAreas: scene.waterAreas ?? [],
   }
 }
 
@@ -73,6 +76,7 @@ export function applyLevel(scene: Scene, level: Level): Scene {
     sounds: level.sounds ?? [],
     characters: level.characters ?? [],
     measures: level.measures ?? [],
+    waterAreas: level.waterAreas ?? [],
   }
 }
 
@@ -94,6 +98,7 @@ export function emptyLevel(id: string, name: string, like: Scene): Level {
     sounds: [],
     characters: [],
     measures: [],
+    waterAreas: [],
   }
 }
 

@@ -36,7 +36,14 @@ export interface SessionSlice {
   notice: { text: string; id: number } | null
   notify(text: string): void
   /** Box selection: these lights and wall points (added to the selection if `add`). */
-  selectMany(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean, characterIds?: string[]): void
+  selectMany(
+    lightIds: string[],
+    wallPoints: WallPointRef[],
+    objectIds: string[],
+    add: boolean,
+    characterIds?: string[],
+    waterIds?: string[],
+  ): void
   /** Delete everything selected: lights, wall points and objects. */
   deleteSelection(): void
 }
@@ -109,10 +116,11 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
   sendAlert: (at) => set((s) => ({ lastAlert: { at, id: (s.lastAlert?.id ?? 0) + 1 } })),
   notice: null,
   notify: (text) => set((s) => ({ notice: { text, id: (s.notice?.id ?? 0) + 1 } })),
-  selectMany: (lightIds, wallPoints, objectIds, add, characterIds = []) =>
+  selectMany: (lightIds, wallPoints, objectIds, add, characterIds = [], waterIds = []) =>
     set((s) =>
       add
         ? {
+            selectedWaterIds: [...new Set([...s.selectedWaterIds, ...waterIds])],
             selectedCharacterIds: [...new Set([...s.selectedCharacterIds, ...characterIds])],
             selectedObjectIds: [...new Set([...s.selectedObjectIds, ...objectIds])],
             selectedLightIds: [...new Set([...s.selectedLightIds, ...lightIds])],
@@ -123,6 +131,7 @@ export const sessionSlice: StateCreator<GmStore, [], [], SessionSlice & Pick<Tab
             ...SINGLES_OFF,
           }
         : selectOnly({
+            selectedWaterIds: waterIds,
             selectedCharacterIds: characterIds,
             selectedObjectIds: objectIds,
             selectedLightIds: lightIds,

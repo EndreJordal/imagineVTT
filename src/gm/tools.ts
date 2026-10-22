@@ -1,3 +1,4 @@
+import type { WaterTool } from './slices/water'
 import type { LightKind } from '../shared/lights'
 
 /** The hide tool's modes: fill an enclosed space, or paint and erase with a brush. */
@@ -14,6 +15,7 @@ export type Tool =
   | { kind: 'light'; light: LightKind }
   | { kind: 'hide'; mode: HideTool }
   | { kind: 'measure' }
+  | { kind: 'water'; mode: WaterTool }
 
 
 export const SELECT: Tool = { kind: 'select' }

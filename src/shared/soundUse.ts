@@ -6,9 +6,11 @@ export function usedClips(
   scene: Pick<Scene, 'globalSounds' | 'doorSounds' | 'walls'>,
   levelSounds: MapSound[][],
   clips: SoundClips,
+  waterClips: string[] = [],
 ): Set<string> {
   const keys = [
     ...levelSounds.flat().map((x) => x.clip),
+    ...waterClips,
     ...(scene.globalSounds ?? []).map((x) => x.clip),
     scene.doorSounds?.open,
     scene.doorSounds?.close,

@@ -17,7 +17,7 @@ export function MeasuringSection() {
   const kept = useGm((s) => s.scene.measures?.length ?? 0)
   const { setMeasure, clearMeasures } = useGm.getState()
   return (
-    <Section title="Measuring">
+    <Section id="measuring" title="Measuring">
       <label className="check" title="Measurements stay on the map after you let go (else only while the button is held)">
         <input type="checkbox" checked={measure.persist} onChange={(e) => setMeasure({ persist: e.target.checked })} />
         Persist measuring

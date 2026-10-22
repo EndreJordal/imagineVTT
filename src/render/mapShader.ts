@@ -45,6 +45,7 @@ uniform float uMapTurns;       // quarter turns clockwise the map image is shown
 uniform vec3 uBackground;      // shown where there is no map image
 uniform vec4 uGrid;            // size, offset x, offset y, visible
 uniform vec4 uGridColor;       // rgb, opacity
+uniform float uGridWidth;      // line width, in screen pixels
 uniform float uSaturation;     // night: colour kept (1 = day)
 uniform float uBrightness;     // night: light kept (1 = day)
 uniform float uLightsOn;
@@ -127,7 +128,21 @@ in vec2 vScene;
 out vec4 finalColor;
 
 uniform sampler2D uMap;
+uniform sampler2D uWater;      // water areas, soft-edged: how much water (r)
+uniform sampler2D uWaterId;    // ...and which area (r * 255 - 1), unfiltered
+uniform float uWaterMode;      // 0 none, 1 players, 2 GM (tinted blue to show where)
+uniform float uTime;           // seconds, for the water's movement
+uniform vec4 uWaterA[8];       // per area: ripple, waves, flow speed, flow direction (radians)
+uniform vec4 uWaterB[8];       // per area: tint colour, tint amount
 ${shading}
+
+float waterHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(waterHash(i), waterHash(i + vec2(1, 0)), u.x), mix(waterHash(i + vec2(0, 1)), waterHash(i + vec2(1, 1)), u.x), u.y);
+}
 
 /** Where in the image a point of the (turned) map is. */
 vec2 imageUv(vec2 uv) {
@@ -139,18 +154,49 @@ vec2 imageUv(vec2 uv) {
 
 void main() {
   vec2 scene = uBounds.xy + vUV * uBounds.zw;
-  vec3 day = uHasMap > 0.5 ? texture(uMap, imageUv(vUV)).rgb : uBackground;
+
+  // Water: the picture under it ripples, swells and drifts with the flow; worked out only
+  // where there's water (most of the map pays one texture read).
+  vec2 uv = vUV;
+  float wet = 0.0;
+  vec4 wb = vec4(0.0);
+  float sparkle = 0.0;
+  if (uWaterMode > 0.5) {
+    wet = texture(uWater, vUV).r;
+    if (wet > 0.004) {
+      int id = clamp(int(texture(uWaterId, vUV).r * 255.0 + 0.5) - 1, 0, 7);
+      vec4 wa = uWaterA[id];
+      wb = uWaterB[id];
+      vec2 sq = scene / uGrid.x;                              // in squares
+      vec2 dir = vec2(cos(wa.w), sin(wa.w));
+      vec2 drift = dir * wa.z * uTime * 0.8;                  // the flow, squares per second
+      vec2 q = sq * 1.6 - drift;
+      vec2 ripple = vec2(noise(q + uTime * 0.35), noise(q * 1.3 + 7.1 - uTime * 0.3)) - 0.5;
+      float swell = sin(dot(sq, dir) * 1.2 - uTime * (0.9 + wa.z * 2.0) + noise(sq * 0.35 - drift * 0.2) * 4.0);
+      vec2 bend = ripple * 0.22 * wa.x + dir * swell * 0.12 * wa.y;   // squares
+      uv += bend * uGrid.x / uBounds.zw * wet;
+      float caustic = pow(noise(q * 2.5 + uTime * 0.2), 6.0) * wa.x;
+      float crest = smoothstep(0.8, 1.0, swell) * wa.y;
+      sparkle = (caustic * 0.35 + crest * 0.18) * wet;
+    }
+  }
+  vec3 day = uHasMap > 0.5 ? texture(uMap, imageUv(uv)).rgb : uBackground;
+  if (wet > 0.004) day = mix(day, wb.rgb, wb.a * wet) + sparkle;
 
   // Grid lines, about one screen pixel wide at any zoom.
   if (uGrid.w > 0.5) {
     vec2 cell = (scene - uGrid.yz) / uGrid.x;
     vec2 dist = abs(fract(cell + 0.5) - 0.5) * uGrid.x;   // scene units to the nearest line
     vec2 pixel = fwidth(scene);                            // scene units per screen pixel
-    vec2 on = 1.0 - smoothstep(pixel * 0.5, pixel, dist);
+    float lineHalf = uGridWidth * 0.5;
+    vec2 on = 1.0 - smoothstep(pixel * lineHalf, pixel * (lineHalf + 0.5), dist);
     day = mix(day, uGridColor.rgb, max(on.x, on.y) * uGridColor.a);
   }
 
-  finalColor = vec4(shade(day, vUV), 1.0);
+  vec3 color = shade(day, vUV);
+  // The GM sees where water is.
+  if (uWaterMode > 1.5) color = mix(color, vec3(0.25, 0.6, 1.0), 0.3 * wet);
+  finalColor = vec4(color, 1.0);
 }
 `
 
@@ -183,6 +229,7 @@ export interface MapUniforms {
   uBackground: Float32Array
   uGrid: Float32Array
   uGridColor: Float32Array
+  uGridWidth: number
   uSaturation: number
   uBrightness: number
   uLightsOn: number
@@ -192,11 +239,15 @@ export interface MapUniforms {
   uMemoryBrightness: number
   uGmShade: number
   uHiddenMode: number
+  uWaterMode: number
+  uTime: number
+  uWaterA: Float32Array
+  uWaterB: Float32Array
 }
 
 /** The light, sight and memory maps the shading reads (shared by the map and objects). */
 export type SharedTextureSlot = 'uLightMask' | 'uGlow' | 'uVision' | 'uMemory' | 'uHidden'
-export type MapTextureSlot = 'uMap' | SharedTextureSlot
+export type MapTextureSlot = 'uMap' | 'uWater' | 'uWaterId' | SharedTextureSlot
 export const SHARED_SLOTS: SharedTextureSlot[] = ['uLightMask', 'uGlow', 'uVision', 'uMemory', 'uHidden']
 
 /** A unit quad (0..1) carrying the map shader; position and scale it to the map's bounds. */
@@ -208,6 +259,7 @@ export function createMapMesh() {
     uBackground: { value: new Float32Array([0x2a / 255, 0x2a / 255, 0x30 / 255]), type: 'vec3<f32>' },
     uGrid: { value: new Float32Array(4), type: 'vec4<f32>' },
     uGridColor: { value: new Float32Array(4), type: 'vec4<f32>' },
+    uGridWidth: { value: 1, type: 'f32' },
     uSaturation: { value: 1, type: 'f32' },
     uBrightness: { value: 1, type: 'f32' },
     uLightsOn: { value: 0, type: 'f32' },
@@ -217,6 +269,10 @@ export function createMapMesh() {
     uMemoryBrightness: { value: 0.4, type: 'f32' },
     uGmShade: { value: 0.55, type: 'f32' },
     uHiddenMode: { value: 0, type: 'f32' },
+    uWaterMode: { value: 0, type: 'f32' },
+    uTime: { value: 0, type: 'f32' },
+    uWaterA: { value: new Float32Array(32), type: 'vec4<f32>', size: 8 },
+    uWaterB: { value: new Float32Array(32), type: 'vec4<f32>', size: 8 },
   })
   const empty = Texture.EMPTY.source
   const shader = Shader.from({
@@ -230,6 +286,8 @@ export function createMapMesh() {
       uVision: empty,
       uMemory: empty,
       uHidden: empty,
+      uWater: empty,
+      uWaterId: empty,
     },
   })
   const geometry = new MeshGeometry({

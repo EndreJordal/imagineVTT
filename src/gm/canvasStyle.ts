@@ -17,3 +17,6 @@ export const DOOR_REACH_PX = 22
 
 /** Hidden areas' tokens and the hide brush. */
 export const HIDDEN_COLOR = 0xb070ff
+
+/** Water areas (GM-only tint, token ring, brush). */
+export const WATER_COLOR = 0x3fa9f5

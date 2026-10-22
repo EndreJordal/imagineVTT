@@ -23,17 +23,18 @@ import { type LightsSlice, lightsSlice } from './slices/lights'
 import { mapSlice, type MapSlice } from './slices/map'
 import { type ObjectsSlice, objectsSlice } from './slices/objects'
 import { type SessionSlice, sessionSlice } from './slices/session'
-import { DEFAULT_GM_VISION, defaultDisplay, defaultScene, defaultTableScreen, firstLevel } from './slices/shared'
+import { defaultDisplay, defaultScene, defaultTableScreen, firstLevel } from './slices/shared'
 import { toolsSlice, type ToolsSlice } from './slices/tools'
 import { DEFAULT_MEASURE, measureSlice, type MeasureSettings, type MeasureSlice } from './slices/measure'
+import { waterSlice, type WaterSlice } from './slices/water'
 import { type ViewSlice, viewSlice } from './slices/view'
 import { wallsSlice, type WallsSlice } from './slices/walls'
 
 export { allLevels, levelFogMemory, levelImage, MM_PER_INCH } from './slices/shared'
 
 /** How dark the GM's own view is, given the table's darkness and the GM's vision. */
-export function gmDarkness(s: Pick<GmStore, 'scene' | 'gmVision' | 'peeking'>): number {
-  return s.peeking ? s.scene.darkness : s.scene.darkness * (1 - s.gmVision)
+export function gmDarkness(s: Pick<GmStore, 'scene' | 'gmView' | 'peeking'>): number {
+  return s.peeking || s.gmView === null ? s.scene.darkness : s.gmView
 }
 
 /** The GM window's state: the scene, and everything about how the GM works on it. */
@@ -53,12 +54,14 @@ export interface GmStore
     AudioSlice,
     CharactersSlice,
     CombatSlice,
-    MeasureSlice {}
+    MeasureSlice,
+    WaterSlice {}
 
 export const useGm = create<GmStore>()((...a) => ({
   ...floorsSlice(...a),
   ...toolsSlice(...a),
   ...measureSlice(...a),
+  ...waterSlice(...a),
   ...hiddenSlice(...a),
   ...wallsSlice(...a),
   ...lightsSlice(...a),
@@ -90,13 +93,13 @@ export interface SavedFloors {
 
 /** Restore the last session from IndexedDB. */
 export async function hydrate() {
-  const [scene, display, mapImage, tableScreen, gmVision, fogMemory, gmCamera, sceneName, objectImages, floors, sound, combat, measure] =
+  const [scene, display, mapImage, tableScreen, gmView, fogMemory, gmCamera, sceneName, objectImages, floors, sound, combat, measure] =
     await Promise.all([
       load<Scene>('scene'),
       load<Display>('display'),
       load<Blob | null>('mapImage'),
       load<Size>('tableScreen'),
-      load<number>('gmVision'),
+      load<number | null>('gmView'),
       load<FogMemory>('fogMemory'),
       load<GmCamera>('gmCamera'),
       load<{ name: string | null; unsaved: boolean; file?: string | null }>('sceneName'),
@@ -122,7 +125,7 @@ export async function hydrate() {
     display: display ?? defaultDisplay,
     mapImage: mapImage ?? null,
     tableScreen: tableScreen ?? defaultTableScreen,
-    gmVision: gmVision ?? DEFAULT_GM_VISION,
+    gmView: gmView ?? null,
     fogMemory: fogMemory ?? null,
     gmCamera: gmCamera ?? null,
     objectImages: objectImages ?? {},

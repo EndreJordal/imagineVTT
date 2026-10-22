@@ -1,11 +1,12 @@
 import type { RefObject } from 'react'
-import { mapNatural, tableScale } from '../shared/geometry'
+import { fitSquares, mapNatural, tableScale, viewAlignedToGrid } from '../shared/geometry'
 import { AssetsSection } from './Assets'
 import { CurtainSection } from './Curtain'
 import { HandoutsSection } from './Handouts'
 import { CharactersSection } from './Characters'
 import { CombatSection } from './Combat'
 import { FolderPictures } from './FolderPictures'
+import { useSidebar } from './sidebarStore'
 import { MeasuringSection } from './Measuring'
 import { isMapInUse, mapFolder, chooseMap, useMapFolder } from './mapFolder'
 import { DetectGrid } from './DetectGrid'
@@ -14,7 +15,6 @@ import { PvbOrientation } from './PvbOrientation'
 import { finite, positive, round } from './numbers'
 import { useShallow } from 'zustand/react/shallow'
 import { MM_PER_INCH, useGm } from './store'
-import { openTableWindow } from './tableWindow'
 import { Field, Section, Slider } from './ui'
 import { Icon } from './icons'
 import { DEFAULT_DOOR_REVEAL } from '../shared/doors'
@@ -71,6 +71,44 @@ function MapPicker() {
   )
 }
 
+/** The sidebar's top: Prep or Play (the sections each shows are set in Settings), fold all or open all. */
+function SidebarBar() {
+  const mode = useSidebar((s) => s.mode)
+  const allFolded = useSidebar((s) => s.shown[s.mode].every((id) => s.collapsed.includes(id)))
+  const { setMode, collapseAll } = useSidebar.getState()
+  return (
+    <div className="sidebar-bar">
+      <div className="segmented" role="radiogroup" aria-label="Sidebar">
+        {(['prep', 'play'] as const).map((m) => (
+          <button
+            key={m}
+            role="radio"
+            aria-checked={mode === m}
+            className={mode === m ? 'active' : ''}
+            title={m === 'prep' ? 'Setting up: every section you chose for Prep (Settings)' : 'Playing: only the sections you chose for Play (Settings)'}
+            onClick={() => setMode(m)}
+          >
+            {m === 'prep' ? 'Prep' : 'Play'}
+          </button>
+        ))}
+      </div>
+      <button className="sidebar-fold" title={allFolded ? 'Open every section' : 'Fold every section'} onClick={() => collapseAll(!allFolded)}>
+        <Icon name={allFolded ? 'chevron-down' : 'right'} size={14} /> {allFolded ? 'Expand all' : 'Collapse all'}
+      </button>
+    </div>
+  )
+}
+
+const GRID_PRESETS = [
+  { name: 'Black', color: '#000000' },
+  { name: 'White', color: '#ffffff' },
+]
+const GRID_WIDTHS = [
+  { value: 1, label: 'Thin' },
+  { value: 2, label: 'Medium' },
+  { value: 3, label: 'Thick' },
+]
+
 export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   // Only what the sidebar shows: the store changes on every drag, the sidebar rarely.
   const { grid, map, squareMm, viewZoom, tableScreen, tableConnected, display } = useGm(
@@ -89,13 +127,8 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
 
   return (
     <aside className="sidebar">
-      <Section title="Player View Box (PVB)">
-        <button onClick={openTableWindow}>Open table window</button>
-        <p className="hint">
-          {tableConnected
-            ? `Connected · ${tableScreen.width}×${tableScreen.height}`
-            : 'Not connected. Open it, drag it to the TV, click it and press F11 for fullscreen.'}
-        </p>
+      <SidebarBar />
+      <Section id="pvb" title="Player View Box (PVB)">
         <p className="hint">
           Shows {(tableScreen.width / scale / grid.size).toFixed(1)} ×{' '}
           {(tableScreen.height / scale / grid.size).toFixed(1)} squares
@@ -109,6 +142,15 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           }}
         >
           Move PVB here
+        </button>
+        <button
+          title="Nudge the table view so the TV's top-left corner sits on a grid corner: whole squares along the top and left, any cut ones at the right and bottom"
+          onClick={() => {
+            const g = useGm.getState()
+            g.setView(viewAlignedToGrid(g.scene, g.display, g.tableScreen))
+          }}
+        >
+          Align PVB to grid
         </button>
         <p className="hint">Drag the yellow triangle to move the PVB.</p>
         {map && (
@@ -177,7 +219,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       <CharactersSection />
       <MeasuringSection />
 
-      <Section title="Map">
+      <Section id="map" title="Map">
         <MapPicker />
         {map && (
           <>
@@ -225,7 +267,7 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
         <button onClick={() => canvas.current?.fit()}>Zoom to map</button>
       </Section>
 
-      <Section title="Grid">
+      <Section id="grid" title="Grid">
         <label className="check">
           <input
             type="checkbox"
@@ -235,13 +277,40 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           Show grid
         </label>
         <Field label="Colour">
-          <input
-            type="color"
-            className="swatch"
-            value={grid.color}
-            onChange={(e) => s.setGrid({ color: e.target.value })}
-          />
+          <div className="row">
+            {GRID_PRESETS.map((c) => (
+              <button
+                key={c.color}
+                className={`measure-color${grid.color.toLowerCase() === c.color ? ' active' : ''}`}
+                style={{ background: c.color }}
+                title={c.name}
+                aria-label={c.name}
+                onClick={() => s.setGrid({ color: c.color })}
+              />
+            ))}
+            <input
+              type="color"
+              className="swatch"
+              value={grid.color}
+              onChange={(e) => s.setGrid({ color: e.target.value })}
+            />
+          </div>
         </Field>
+        <span className="slider-label">Line thickness</span>
+        <div className="segmented" role="radiogroup" aria-label="Grid line thickness">
+          {GRID_WIDTHS.map((w) => (
+            <button
+              key={w.value}
+              role="radio"
+              aria-checked={(grid.width ?? 1) === w.value}
+              className={(grid.width ?? 1) === w.value ? 'active' : ''}
+              title={`${w.value} screen pixel${w.value > 1 ? 's' : ''} wide, on the table and here`}
+              onClick={() => s.setGrid({ width: w.value })}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
         <Slider
           label="Opacity"
           value={grid.opacity}
@@ -282,6 +351,29 @@ export function Sidebar({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
             25 mm
           </button>
         </div>
+        {(() => {
+          // Whole squares across (X) or down (Y) the table screen, from its size and calibration.
+          const fit = (axis: 'x' | 'y') => fitSquares(axis, tableScreen, display, squareMm, viewZoom)
+          const x = fit('x')
+          const y = fit('y')
+          const where = tableConnected ? 'the table screen' : 'the table screen (as last seen: the table window is closed)'
+          const button = (axis: 'X' | 'Y', f: typeof x) =>
+            f && (
+              <button
+                className={Math.abs(f.squareMm - squareMm) < 0.005 ? 'active' : ''}
+                title={`Make exactly ${f.count} squares fit ${axis === 'X' ? 'across' : 'down'} ${where}: ${round(f.squareMm, 2)} mm each`}
+                onClick={() => s.setSquareMm(round(f.squareMm, 3))}
+              >
+                Fit {axis} ({f.count})
+              </button>
+            )
+          return (
+            <div className="row" title="To the nearest whole number of squares on that axis">
+              {button('X', x)}
+              {button('Y', y)}
+            </div>
+          )
+        })()}
         <Field label="Square (mm)">
           <input
             type="number"
@@ -333,7 +425,7 @@ function DoorsSection() {
   const reveal = useGm((g) => g.scene.doorReveal ?? DEFAULT_DOOR_REVEAL)
   const sounds = useGm((g) => g.scene.doorSounds ?? DEFAULT_DOOR_SOUNDS)
   return (
-    <Section title="Doors">
+    <Section id="doors" title="Doors">
       <p className="hint">
         When a door opens while something is obscured, what it hid comes into view on the table like this.
         Right-click a door’s button to override it for that door.

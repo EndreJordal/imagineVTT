@@ -27,10 +27,11 @@ import { SLACK_PX } from './canvasStyle'
 import { SELECT } from './tools'
 import { NOTHING_SELECTED } from './slices/shared'
 import { hitsMeasure } from '../shared/measure'
+import { waterCentre } from '../shared/water'
 import { CURSORS, type Drag, type GmUi, type Handlers, type Target } from './canvasTypes'
 import { MapHandle } from './canvasMap'
 import { LightTokens } from './canvasLights'
-import { HiddenTokens, SoundTokens } from './canvasTokens'
+import { HiddenTokens, SoundTokens, WaterTokens } from './canvasTokens'
 import { WallsLayer } from './canvasWalls'
 import { ObjectHandles } from './canvasObjects'
 
@@ -67,6 +68,7 @@ export class GmCanvas extends PixiHost {
   private viewMarker = new Graphics()
   private lights = new LightTokens()
   private hidden = new HiddenTokens()
+  private water = new WaterTokens()
   private sounds = new SoundTokens()
   private walls = new WallsLayer()
   /** Onion skin: another floor's map, faint, to line this one up with it. */
@@ -105,6 +107,8 @@ export class GmCanvas extends PixiHost {
     wallDraft: [],
     doorDraft: null,
     hideBrush: 1,
+    waterBrush: 1,
+    selectedWaterIds: [],
     onion: null,
     curtainDown: false,
     handout: null,
@@ -152,6 +156,7 @@ export class GmCanvas extends PixiHost {
       wallDraft: () => this.ui.wallDraft,
       doorDraft: () => this.ui.doorDraft,
       hideBrush: () => this.ui.hideBrush,
+      waterBrush: () => this.ui.waterBrush,
       handlers,
       doorButtonAt: (p) => {
         const target = this.targetAt(p)
@@ -175,6 +180,7 @@ export class GmCanvas extends PixiHost {
       this.walls.g,
       this.lights.rings,
       this.hidden.layer,
+      this.water.layer,
       this.sounds.range,
       this.sounds.layer,
       this.lights.layer,
@@ -385,8 +391,29 @@ export class GmCanvas extends PixiHost {
   private drawOverlay() {
     this.requestRender()
     this.drawKinds()
-    this.sceneLayer.characters.select(this.ui.selectedCharacterIds, this.px)
+    // Previewing (Preview, or V held): exactly what the players see, so none of the GM's marks.
+    const marks = !this.ui.peeking
+    for (const o of [
+      this.lights.layer,
+      this.lights.rings,
+      this.lights.aim,
+      this.hidden.layer,
+      this.water.layer,
+      this.sounds.layer,
+      this.sounds.range,
+      this.walls.g,
+      this.objectHandles.g,
+      this.mapHandle.g,
+      this.selectionBox,
+      this.characterGhost,
+      this.ghostLabel,
+      this.toolLayer,
+    ]) {
+      o.visible = marks
+    }
+    this.sceneLayer.characters.select(marks ? this.ui.selectedCharacterIds : [], this.px)
     this.drawTurnLabel()
+    if (!marks) this.turnLabel.visible = false
     const g = this.viewOverlay.clear()
     this.viewMarker.clear()
     this.marker = null
@@ -452,6 +479,7 @@ export class GmCanvas extends PixiHost {
     this.mapHandle.draw(scene.map, px)
     this.lights.draw(scene, this.selectedLightIds, this.ghostLightIds, px)
     this.hidden.draw({ scene, ui: this.ui, px })
+    this.water.draw({ scene, ui: this.ui, px })
     this.sounds.draw({ scene, ui: this.ui, px })
     this.walls.draw(scene.walls, px, this.ui.selectedWallPoints)
     this.drawTool()
@@ -556,6 +584,7 @@ export class GmCanvas extends PixiHost {
       characterAt(p, scene) ??
       this.sounds.hit(p, scene.sounds ?? [], px) ??
       this.hidden.hit(p, scene, px) ??
+      this.water.hit(p, scene, px) ??
       this.walls.pointAt(p, scene.walls, px) ??
       this.objectHandles.hit(p, this.selectedObjects(), px)
     if (hit) return hit
@@ -724,6 +753,13 @@ export class GmCanvas extends PixiHost {
       this.handlers.onHiddenSelect(target.id)
       this.pressedAt = null
       return
+    } else if (target?.kind === 'water') {
+      // Grouped water selects its group (Alt: just it).
+      const w = scene?.waterAreas?.find((x) => x.id === target.id)
+      if (w?.group && !e.altKey) this.handlers.onGroupSelect(w.group)
+      else this.handlers.onWaterSelect(target.id)
+      this.pressedAt = null
+      return
     } else if (target?.kind === 'light') {
       const light = scene?.lights.find((l) => l.id === target.id)
       if (!light) return
@@ -876,6 +912,7 @@ export class GmCanvas extends PixiHost {
       if (on?.kind === 'object') this.handlers.onObjectToggle(on.id)
       else if (on?.kind === 'light') this.handlers.onLightToggle(on.id)
       else if (on?.kind === 'character') this.handlers.onCharacterToggle(on.id)
+      else if (on?.kind === 'water') this.handlers.onWaterToggle(on.id)
       else {
         const r = rectBetween(drag.start, drag.end)
         const scene = this.state?.scene
@@ -883,7 +920,9 @@ export class GmCanvas extends PixiHost {
         const points = wallPointsIn(scene?.walls ?? [], r)
         const objects = (scene?.objects ?? []).filter((o) => inRect(o, r)).map((o) => o.id)
         const characters = (scene?.characters ?? []).filter((t) => inRect(t, r)).map((t) => t.id)
-        this.handlers.onBoxSelect(lights, points, objects, e.ctrlKey || e.metaKey, characters)
+        const bounds = scene && sceneBounds(scene)
+        const water = bounds ? (scene.waterAreas ?? []).filter((w) => inRect(waterCentre(w, bounds), r)).map((w) => w.id) : []
+        this.handlers.onBoxSelect(lights, points, objects, e.ctrlKey || e.metaKey, characters, water)
       }
       this.drag = null
       this.drawSelectionBox()

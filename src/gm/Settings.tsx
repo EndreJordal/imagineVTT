@@ -7,6 +7,42 @@ import { useGm } from './store'
 import { useDropdown } from './useDropdown'
 import { chooseScenesFolder, reconnectScenesFolder, useScenesFolder } from './scenesFolder'
 import { Icon } from './icons'
+import { ShortcutList } from './Shortcuts'
+import { SIDEBAR_SECTIONS, useSidebar } from './sidebarStore'
+
+/** Which sidebar sections Prep and Play each show. */
+function SidebarModes() {
+  const shown = useSidebar((s) => s.shown)
+  const { setShown } = useSidebar.getState()
+  return (
+    <table className="sidebar-modes">
+      <thead>
+        <tr>
+          <th />
+          <th>Prep</th>
+          <th>Play</th>
+        </tr>
+      </thead>
+      <tbody>
+        {SIDEBAR_SECTIONS.map((sec) => (
+          <tr key={sec.id}>
+            <td>{sec.label}</td>
+            {(['prep', 'play'] as const).map((m) => (
+              <td key={m}>
+                <input
+                  type="checkbox"
+                  aria-label={`${sec.label} in ${m}`}
+                  checked={shown[m].includes(sec.id)}
+                  onChange={(e) => setShown(m, sec.id, e.target.checked)}
+                />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
 
 /** Toolbar settings button: settings that rarely change (calibration, for now). */
 export function SettingsMenu() {
@@ -27,6 +63,13 @@ export function SettingsMenu() {
       </button>
       {open && (
         <div className="menu-list menu-right settings-panel" role="dialog" aria-label="Settings">
+          <h2>Sidebar: Prep and Play</h2>
+          <SidebarModes />
+          <h2>Keyboard shortcuts</h2>
+          <details className="manual-adjust">
+            <summary>Show all (or press ? anywhere)</summary>
+            <ShortcutList />
+          </details>
           <h2>Scenes folder</h2>
           <ScenesFolderSetting />
           <h2>Sound output</h2>

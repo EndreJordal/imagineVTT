@@ -1,7 +1,8 @@
 import { BufferImageSource, Container, Graphics, ImageSource, Texture, type Renderer } from 'pixi.js'
 import type { FogMemory } from '../shared/fog'
 import { mapNatural, sceneBounds } from '../shared/geometry'
-import { activeAreas, areaMask, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
+import { activeAreas, areaMask, decodeHidden, hiddenGrid, softenHidden, type HiddenArea, type SoftRegion } from '../shared/hidden'
+import { activeWater, type WaterArea } from '../shared/water'
 import { MEMORY_BRIGHTNESS, NIGHT_DESATURATION, NIGHT_DIMMING } from '../shared/night'
 import type { AssetImages } from '../shared/mapObjects'
 import type { Point, Scene } from '../shared/types'
@@ -99,9 +100,11 @@ export class SceneLayer extends Container {
     this.characters.onChange = fn
   }
 
-  /** Whether frames are needed with nothing changed (flickering lights, animated objects). */
+  /** Whether frames are needed with nothing changed (flickering lights, animated objects, water). */
   isAnimating() {
-    return this.lighting.animated || this.objects.animated || this.characters.animated || this.alerts.animated
+    return (
+      this.lighting.animated || this.objects.animated || this.characters.animated || this.alerts.animated || this.waterOn
+    )
   }
 
   /** The images of the assets objects show (from the GM; kept with the scene). */
@@ -112,6 +115,10 @@ export class SceneLayer extends Container {
 
   /** Call before each frame: animates light flicker, redraws sight when vision tokens move. */
   animate(renderer: Renderer, seconds: number) {
+    if (this.waterOn) {
+      this.map.uniforms.uTime = seconds
+      this.map.uniformsChanged()
+    }
     this.lighting.animate(renderer, seconds)
     if (this.fogMode !== 'off') this.fog.render(renderer)
     // The light and sight maps may have been created or resized: point the shader at them.
@@ -188,6 +195,83 @@ export class SceneLayer extends Container {
     this.bitmap = null
   }
 
+  /**
+   * Water areas, soft-edged: how much water (linear) and which area (unfiltered), rebuilt
+   * only when the areas change. Their settings are uniforms, set on every update (cheap).
+   */
+  private waterTextures: { amount: Texture; id: Texture } | null = null
+  private waterDrawn: { areas: WaterArea[]; cellsPerSquare: number } | null = null
+  private waterSoftened = new WeakMap<WaterArea['cells'], { softness: number; cellsPerSquare: number; region: SoftRegion | null }>()
+  /** Active water on this floor, seen by the players (the table, or the GM peeking): the map animates. */
+  private waterOn = false
+
+  private syncWater(scene: Scene): boolean {
+    const areas = activeWater(scene.waterAreas)
+    const u = this.map.uniforms
+    areas.forEach((a, i) => {
+      const rad = (a.direction * Math.PI) / 180
+      u.uWaterA.set([a.ripple, a.waves, a.flow, rad], i * 4)
+      const rgb = parseInt(a.color.slice(1), 16) || 0
+      u.uWaterB.set([((rgb >> 16) & 255) / 255, ((rgb >> 8) & 255) / 255, (rgb & 255) / 255, a.tint], i * 4)
+    })
+    const bounds = sceneBounds(scene)
+    const { cols, rows } = hiddenGrid(bounds)
+    const cellsPerSquare = (cols / bounds.width) * scene.grid.size
+    // Only the masks (shape and softness) need the textures rebuilt.
+    const shapes = (list: WaterArea[]) => list.map((a) => `${a.id}:${a.softness}`).join()
+    const d = this.waterDrawn
+    const same =
+      d &&
+      d.cellsPerSquare === cellsPerSquare &&
+      d.areas.length === areas.length &&
+      d.areas.every((a, i) => a.cells === areas[i].cells) &&
+      shapes(d.areas) === shapes(areas)
+    if (same) return !!this.waterTextures
+    this.waterDrawn = { areas, cellsPerSquare }
+    const amount = new Uint8Array(cols * rows)
+    const ids = new Uint8Array(cols * rows)
+    let any = false
+    areas.forEach((area, index) => {
+      if (area.cells.cols !== cols || area.cells.rows !== rows) return
+      let soft = this.waterSoftened.get(area.cells)
+      if (!soft || soft.softness !== area.softness || soft.cellsPerSquare !== cellsPerSquare) {
+        const mask = decodeHidden(area.cells)
+        soft = { softness: area.softness, cellsPerSquare, region: softenHidden(mask, cols, rows, area.softness * cellsPerSquare) }
+        this.waterSoftened.set(area.cells, soft)
+      }
+      const r = soft.region
+      if (!r) return
+      any = true
+      for (let j = 0; j < r.height; j++) {
+        const row = (r.y + j) * cols + r.x
+        for (let i = 0; i < r.width; i++) {
+          const v = r.pixels[j * r.width + i]
+          if (v > amount[row + i]) {
+            amount[row + i] = v
+            ids[row + i] = index + 1
+          }
+        }
+      }
+    })
+    this.releaseWater()
+    if (!any) return false
+    const make = (pixels: Uint8Array, scaleMode: 'linear' | 'nearest') =>
+      new Texture({ source: new BufferImageSource({ resource: pixels, width: cols, height: rows, format: 'r8unorm', scaleMode }) })
+    this.waterTextures = { amount: make(amount, 'linear'), id: make(ids, 'nearest') }
+    this.map.setTexture('uWater', this.waterTextures.amount.source)
+    this.map.setTexture('uWaterId', this.waterTextures.id.source)
+    return true
+  }
+
+  private releaseWater() {
+    if (!this.waterTextures) return
+    this.map.setTexture('uWater', null)
+    this.map.setTexture('uWaterId', null)
+    this.waterTextures.amount.destroy(true)
+    this.waterTextures.id.destroy(true)
+    this.waterTextures = null
+  }
+
   /** Hidden areas, soft-edged, as drawn: rebuilt when they (or their softness) change. */
   private hiddenTexture: Texture | null = null
   private hiddenDrawn: { areas: HiddenArea[] | undefined; cellsPerSquare: number } | null = null
@@ -256,6 +340,7 @@ export class SceneLayer extends Container {
 
   override destroy(options?: Parameters<Container['destroy']>[0]) {
     this.releaseHidden()
+    this.releaseWater()
     this.imageToken++ // drop any decode still in flight
     this.releaseMap(this.mapTexture)
     this.mapTexture = null
@@ -304,6 +389,7 @@ export class SceneLayer extends Container {
     u.uGrid.set([size, offsetX, offsetY, visible && size >= 2 ? 1 : 0])
     const rgb = parseInt(color.slice(1), 16)
     u.uGridColor.set([((rgb >> 16) & 255) / 255, ((rgb >> 8) & 255) / 255, (rgb & 255) / 255, opacity])
+    u.uGridWidth = scene.grid.width ?? 1
     const d = Math.min(1, Math.max(0, scene.darkness))
     u.uSaturation = 1 - NIGHT_DESATURATION * d
     u.uBrightness = 1 - NIGHT_DIMMING * d
@@ -313,6 +399,10 @@ export class SceneLayer extends Container {
     u.uGmShade = GM_UNEXPLORED_SHADE
     // Hidden areas apply with or without fog of war: black for the players, shaded for the GM.
     u.uHiddenMode = this.syncHidden(scene) ? (viewer === 'gm' ? 2 : 1) : 0
+    const water = this.syncWater(scene)
+    u.uWaterMode = water ? (viewer === 'gm' ? 2 : 1) : 0
+    // The GM sees where water is (tinted), still: only the players' view moves, halving the cost.
+    this.waterOn = water && viewer === 'players'
     this.map.uniformsChanged()
   }
 }

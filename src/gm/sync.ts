@@ -166,7 +166,7 @@ export function startGmSync(): () => void {
       }, SAVE_DELAY_MS)
     }
     if (s.tableScreen !== prev.tableScreen) void save('tableScreen', s.tableScreen)
-    if (s.gmVision !== prev.gmVision) void save('gmVision', s.gmVision)
+    if (s.gmView !== prev.gmView) void save('gmView', s.gmView)
     if (tableImage(s) !== tableImage(prev)) channel.post({ type: 'map', image: tableImage(s) })
     if (s.mapImage !== prev.mapImage) void save('mapImage', s.mapImage)
     if (s.soundClips !== prev.soundClips || s.masterVolume !== prev.masterVolume || s.audioOutput !== prev.audioOutput) {

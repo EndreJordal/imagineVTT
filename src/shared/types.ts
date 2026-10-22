@@ -1,3 +1,4 @@
+import type { WaterArea } from './water'
 import type { Measure } from './measure'
 import type { CharacterToken } from './characters'
 import type { Turn } from './handout'
@@ -33,6 +34,8 @@ export interface GridSettings {
   color: string
   /** Line opacity, 0..1. */
   opacity: number
+  /** Line width in screen pixels (1 thin, 2 medium, 3 thick); absent: thin. */
+  width?: number
 }
 
 /** The map image as placed in the scene: its top-left corner and displayed size. */
@@ -106,6 +109,8 @@ export interface Scene {
   characters?: CharacterToken[]
   /** Measurements and drawings kept on this floor. */
   measures?: Measure[]
+  /** Water brought to life on this floor (ripples, waves, flow, sound). */
+  waterAreas?: WaterArea[]
   /** How long character tokens take to slide to where they're moved (s; all floors). */
   characterSlide?: number
   /** Quarter turns clockwise every character token (border, portrait and text) is turned by (all floors). */

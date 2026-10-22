@@ -11,6 +11,8 @@ import { openDroppedScene, openScene, saveScene } from './sceneFiles'
 import { GmNotice } from './GmNotice'
 import { DoorPanel, DoorToolbox, WallPointsPanel, WallToolbox } from './Walls'
 import { HiddenAreaPanel, HideToolbox } from './Hide'
+import { WaterPanel, WaterToolbox } from './Water'
+import { ShortcutsOverlay } from './Shortcuts'
 import { GroupBar, ScenePanel } from './ScenePanel'
 import { SoundPanel } from './Sound'
 import { CharacterPanel, CharactersPanel } from './Characters'
@@ -177,8 +179,8 @@ export function GmApp() {
         if (selectedObjectIds.length === 1) copyObject(selectedObjectIds[0], p)
       },
       onObjectChange: (id, patch) => useGm.getState().updateObject(id, patch),
-      onBoxSelect: (lightIds, points, objectIds, add, characterIds) =>
-        useGm.getState().selectMany(lightIds, points, objectIds, add, characterIds),
+      onBoxSelect: (lightIds, points, objectIds, add, characterIds, waterIds) =>
+        useGm.getState().selectMany(lightIds, points, objectIds, add, characterIds, waterIds),
       onObjectToggle: (id) => useGm.getState().toggleObjectSelected(id),
       onObjectsMove: (ids, dx, dy) => {
         // Lights selected with them (a group) come along.
@@ -199,6 +201,15 @@ export function GmApp() {
       onMeasureMove: (p, free) => useGm.getState().measureMove(p, free),
       onMeasureEnd: () => useGm.getState().measureEnd(),
       onMeasureRemove: (id) => useGm.getState().removeMeasure(id),
+      onWaterPaint: (from, to, erase, stroke) => useGm.getState().waterPaint(from, to, erase, stroke),
+      onWaterFill: (p) => {
+        const gm = useGm.getState()
+        const result = gm.waterFill(p)
+        if (result === 'open') gm.notify("That space isn't closed in by walls and doors: close the gap, or paint it with the brush.")
+        else if (result === 'on-wall') gm.notify('Click inside the space, not on its wall.')
+      },
+      onWaterSelect: (id) => useGm.getState().selectWater(id),
+      onWaterToggle: (id) => useGm.getState().toggleWaterSelected(id),
       onMapLockToggle: () => {
         const map = useGm.getState().scene.map
         if (map) useGm.getState().setMapLocked(!map.locked)
@@ -236,7 +247,7 @@ export function GmApp() {
       const inputs = [
         handouts.shown, handout?.turn, handouts.fill,
         s.scene, s.levels, s.levelId, s.tableLevelId, s.levelImages, s.onionSkin, s.display, s.calibrating,
-        s.gmVision, s.fogMemory, s.fogVersion, s.mapImage, curtainDown, ...UI_KEYS.map((k) => s[k]),
+        s.gmView, s.fogMemory, s.fogVersion, s.mapImage, curtainDown, ...UI_KEYS.map((k) => s[k]),
       ]
       if (shownInputs && inputs.every((v, i) => v === shownInputs![i])) return
       shownInputs = inputs
@@ -339,7 +350,11 @@ export function GmApp() {
         else gm.setTool(SELECT)
         return
       }
-      if (e.key === 'Escape' && !typing && (gm.tool.kind === 'hide' || gm.tool.kind === 'light' || gm.tool.kind === 'measure')) {
+      if (
+        e.key === 'Escape' &&
+        !typing &&
+        (gm.tool.kind === 'hide' || gm.tool.kind === 'light' || gm.tool.kind === 'measure' || gm.tool.kind === 'water')
+      ) {
         gm.setTool(SELECT)
         return
       }
@@ -435,11 +450,13 @@ export function GmApp() {
             <WallToolbox />
             <DoorToolbox />
             <HideToolbox />
+            <WaterToolbox />
             <WallPointsPanel />
             <LightPanel />
             <ObjectPanel />
             <ObjectsPanel />
             <HiddenAreaPanel />
+            <WaterPanel />
             <DoorPanel />
             <SoundPanel />
             <CharacterPanel />
@@ -448,6 +465,7 @@ export function GmApp() {
             <AssetPreview />
           </div>
           <PlacementHint />
+          <ShortcutsOverlay />
           <GmNotice />
           <CombatBanner />
         </div>

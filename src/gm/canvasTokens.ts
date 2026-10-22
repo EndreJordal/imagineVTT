@@ -5,7 +5,8 @@ import { activeAreas, areaCentre } from '../shared/hidden'
 import type { MapSound } from '../shared/sound'
 import type { Point, Scene } from '../shared/types'
 import { iconTexture, type CanvasIcon } from './canvasIcons'
-import { HIDDEN_COLOR, TOKEN_PX } from './canvasStyle'
+import { HIDDEN_COLOR, TOKEN_PX, WATER_COLOR } from './canvasStyle'
+import { waterCentre } from '../shared/water'
 import type { Target, Token, View } from './canvasTypes'
 
 /** Size of a token's icon, in GM screen px. */
@@ -87,6 +88,29 @@ export class HiddenTokens {
     const bounds = sceneBounds(scene)
     const area = (scene.hiddenAreas ?? []).findLast((a) => onToken(p, areaCentre(a, bounds), px))
     return area ? { kind: 'hidden', id: area.id } : null
+  }
+}
+
+/** Water areas' tokens: a drop at each area's middle (switched off: faint). */
+export class WaterTokens {
+  private pool = new TokenPool(iconToken)
+  readonly layer = this.pool.layer
+
+  draw({ scene, ui, px }: View) {
+    const areas = scene.waterAreas ?? []
+    this.pool.keep(areas.map((a) => a.id))
+    const bounds = sceneBounds(scene)
+    for (const area of areas) {
+      const t = this.pool.get(area.id)
+      drawToken(t, waterCentre(area, bounds), px, 'water', WATER_COLOR, ui.selectedWaterIds.includes(area.id))
+      t.root.alpha = area.active === false ? 0.4 : 1
+    }
+  }
+
+  hit(p: Point, scene: Scene, px: number): Target {
+    const bounds = sceneBounds(scene)
+    const area = (scene.waterAreas ?? []).findLast((a) => onToken(p, waterCentre(a, bounds), px))
+    return area ? { kind: 'water', id: area.id } : null
   }
 }
 

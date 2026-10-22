@@ -4,6 +4,8 @@ import { Icon } from './icons'
 import type { FolderFields, PictureFolder } from './pictureFolder'
 import { useThumbnail } from './thumbnails'
 import { useRowsBox } from './useRowsBox'
+import { usePictureBrowser } from './pictureBrowser'
+import { BrowserBar, FolderTile } from './BrowserBar'
 
 /**
  * A picture folder's controls (choose, reconnect, rescan, change) and its pictures as
@@ -34,8 +36,10 @@ export function FolderPictures(props: {
     return () => window.removeEventListener('focus', rescan)
   }, [folder, props.state.status])
 
-  const rows = props.rows
-  const list = useRowsBox(rows, images.length)
+  const browser = usePictureBrowser(images, props.ns)
+  // As a list, twice the rows show (they're half as tall as thumbnails).
+  const rows = props.rows && (browser.view === 'list' ? props.rows * 2 : props.rows)
+  const list = useRowsBox(rows, browser.folders.length + browser.here.length + browser.view.length)
 
   return (
     <>
@@ -70,9 +74,13 @@ export function FolderPictures(props: {
           No {what} in “{folderName}” yet: put JPG, PNG or WebP files in it.
         </p>
       )}
+      {images.length > 0 && <BrowserBar browser={browser} root={folderName ?? what} />}
       {images.length > 0 && (
-        <div className={`curtain-pictures${rows ? ' scrolls' : ''}`} ref={list}>
-          {images.map((image) => (
+        <div className={`curtain-pictures${rows ? ' scrolls' : ''}${browser.view === 'list' ? ' as-list' : ''}`} ref={list}>
+          {browser.folders.map((f) => (
+            <FolderTile key={f.path} folder={f} onOpen={browser.open} />
+          ))}
+          {browser.here.map((image) => (
             <Thumb
               key={image.id}
               image={image}

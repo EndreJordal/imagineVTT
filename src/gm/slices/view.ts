@@ -5,7 +5,7 @@ import type { GmCamera } from '../../shared/sceneFile'
 import type { Display, Point, Size, TableState } from '../../shared/types'
 import { moveCrossesWall, wallSegments } from '../../shared/visibility'
 import type { GmStore } from '../store'
-import { DEFAULT_GM_VISION, defaultDisplay, defaultTableScreen } from './shared'
+import { defaultDisplay, defaultTableScreen } from './shared'
 
 export interface ViewSlice {
   /** Size of the table window; the last known size while none is connected. */
@@ -25,11 +25,11 @@ export interface ViewSlice {
   setViewZoom(zoom: number): void
   setCalibrating(on: boolean): void
   /**
-   * How much of the night the GM is spared, 0 (sees what the players see) to 1 (full day).
-   * A GM preference: it never affects the table.
+   * How dark the GM's own view is (0 day .. 1 night), set apart from the players' darkness;
+   * null: the same as theirs. A GM preference: it never affects the table.
    */
-  gmVision: number
-  setGmVision(vision: number): void
+  gmView: number | null
+  setGmView(darkness: number | null): void
   /** Temporarily show the GM exactly what the players see (while a peek key/button is held). */
   peeking: boolean
   setPeeking(peeking: boolean): void
@@ -110,8 +110,8 @@ export const viewSlice: StateCreator<GmStore, [], [], ViewSlice & Pick<TableStat
       return (s.scene.viewZoom ?? 1) === viewZoom ? s : { scene: { ...s.scene, viewZoom } }
     }),
   setCalibrating: (calibrating) => set({ calibrating }),
-  gmVision: DEFAULT_GM_VISION,
-  setGmVision: (gmVision) => set({ gmVision }),
+  gmView: null,
+  setGmView: (gmView) => set({ gmView }),
   peeking: false,
   setPeeking: (peeking) => set({ peeking }),
   setDarkness: (darkness) => set((s) => ({ scene: { ...s.scene, darkness } })),

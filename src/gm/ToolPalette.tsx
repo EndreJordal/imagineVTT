@@ -20,7 +20,7 @@ function selectTool() {
 
 /**
  * Tools on a strip at the map's left edge: select, build walls, build doors, place a light,
- * hide areas, measure. Keys: Esc select, W walls, D doors, L lights, H hide, M measure.
+ * hide areas, paint water, measure. Keys: Esc select, W walls, D doors, L lights, H hide, K water, M measure.
  */
 export function ToolPalette() {
   const kind = useGm((s) => s.tool.kind)
@@ -39,6 +39,7 @@ export function ToolPalette() {
       else if (key === 'l') setOpen((open) => !open)
       else if (key === 'h') gm.toggleTool('hide')
       else if (key === 'm') gm.toggleTool('measure')
+      else if (key === 'k') gm.toggleTool('water')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -73,6 +74,13 @@ export function ToolPalette() {
         keyName="H"
         active={kind === 'hide'}
         onClick={() => useGm.getState().toggleTool('hide')}
+      />
+      <ToolButton
+        icon={<Icon name="water" size={20} />}
+        label="Paint water"
+        keyName="K"
+        active={kind === 'water'}
+        onClick={() => useGm.getState().toggleTool('water')}
       />
       <MeasureMenu />
       <div className="menu" ref={lightsRoot}>

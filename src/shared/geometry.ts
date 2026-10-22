@@ -215,3 +215,32 @@ export function pointInPolygon(p: Point, poly: Point[]): boolean {
   }
   return inside
 }
+
+/**
+ * The square size (mm) that fits a whole number of squares across the table screen's width
+ * (`x`) or height, the nearest number to how many fit now, and that number.
+ */
+export function fitSquares(
+  axis: 'x' | 'y',
+  screen: Size,
+  display: Pick<Display, 'pxPerMm'>,
+  squareMm: number,
+  viewZoom = 1,
+): { count: number; squareMm: number } | null {
+  const px = axis === 'x' ? screen.width : screen.height
+  const mm = px / display.pxPerMm
+  if (!(mm > 0) || !(squareMm > 0) || !(viewZoom > 0)) return null
+  const count = Math.max(1, Math.round(mm / (squareMm * viewZoom)))
+  return { count, squareMm: mm / (count * viewZoom) }
+}
+
+/**
+ * The table view's centre moved (by at most half a square each way) so the table's top-left
+ * corner, as the TV shows it, sits on a grid corner: whole squares from the top and left
+ * edges, any cut ones at the right and bottom.
+ */
+export function viewAlignedToGrid(scene: Scene, display: Display, screen: Size): Point {
+  const topLeft = tableViewCorners(scene, display, screen)[0]
+  const snapped = snapToGrid(topLeft, scene.grid, 1)
+  return { x: scene.view.x + snapped.x - topLeft.x, y: scene.view.y + snapped.y - topLeft.y }
+}

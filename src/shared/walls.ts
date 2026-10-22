@@ -104,6 +104,33 @@ export function nearestOnSegment(p: Point, a: Point, b: Point): { point: Point; 
 /** How close (scene units) a point must be to a wall line to count as on it. */
 const ON_LINE = 1e-3
 
+/**
+ * Walls with these points added as corners where they lie on a wall's line (not at its own
+ * corners, not on doors), so a new wall ending on another one shares a corner with it and
+ * light can't slip through the join.
+ */
+export function joinOnto(walls: Wall[], points: Point[]): Wall[] {
+  let changed = false
+  const out = walls.map((w) => {
+    if (w.door) return w
+    let pts = w.points
+    for (const p of points) {
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1]
+        const b = pts[i]
+        const hit = nearestOnSegment(p, a, b)
+        if (hit.distance > 0.01 || hit.t <= 1e-6 || hit.t >= 1 - 1e-6) continue
+        pts = [...pts.slice(0, i), { x: p.x, y: p.y }, ...pts.slice(i)]
+        break
+      }
+    }
+    if (pts === w.points) return w
+    changed = true
+    return { ...w, points: pts }
+  })
+  return changed ? out : walls
+}
+
 /** The wall segment (non-door wall, index i: points i → i+1) that both points lie on. */
 function commonSegment(walls: Wall[], a: Point, b: Point): { wallId: string; index: number } | null {
   for (const w of walls) {

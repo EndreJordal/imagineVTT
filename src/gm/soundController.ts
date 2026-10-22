@@ -1,3 +1,5 @@
+import { sceneBounds } from '../shared/geometry'
+import { activeWater, waterHearing } from '../shared/water'
 import { openedDoors } from '../shared/doors'
 import { hearing, DEFAULT_DOOR_SOUNDS, type MapSound } from '../shared/sound'
 import type { Point, Scene } from '../shared/types'
@@ -11,10 +13,9 @@ import { tableState, useGm, type GmStore } from './store'
  * into range; doors opening and closing. Sounds are the table's: the floor it shows.
  */
 
-/** Who hears map sounds: the vision tokens, or (none) the middle of the table view. */
+/** Who hears map sounds and water: the vision tokens (none: nobody; global sounds are for that). */
 function listeners(scene: Scene): Point[] {
-  const seers = scene.lights.filter((l) => l.vision)
-  return seers.length ? seers : [scene.view]
+  return scene.lights.filter((l) => l.vision)
 }
 
 /** The doors closed between two versions of the walls. */
@@ -63,6 +64,7 @@ export function startSoundController(): () => void {
         ...(table.sounds ?? []).filter((x) => x.enabled).map((x) => x.id),
         ...(s.scene.sounds ?? []).filter((x) => x.enabled).map((x) => x.id),
         ...(s.scene.globalSounds ?? []).map((x) => x.id),
+        ...activeWater(table.waterAreas).filter((w) => w.sound).map((w) => `water:${w.id}`),
       ]),
     )
 
@@ -71,6 +73,12 @@ export function startSoundController(): () => void {
     for (const sound of table.sounds ?? []) {
       if (sound.enabled && sound.loop && s.soundClips[sound.clip]) {
         wanted.set(sound.id, { key: sound.clip, volume: sound.volume * hearing(sound, ears, grid) })
+      }
+    }
+    const bounds = sceneBounds(table)
+    for (const w of activeWater(table.waterAreas)) {
+      if (w.sound && s.soundClips[w.sound.clip]) {
+        wanted.set(`water:${w.id}`, { key: w.sound.clip, volume: w.sound.volume * waterHearing(w, bounds, ears, grid) })
       }
     }
     for (const g of s.scene.globalSounds ?? []) {

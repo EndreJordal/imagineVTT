@@ -23,7 +23,7 @@ export function CharactersSection() {
   const turn = useGm((s) => s.scene.characterTurn ?? 0)
   const { setNewCharacterLook, setCharacterSlide, addCharacter, turnCharacters } = useGm.getState()
   return (
-    <Section title="Character tokens">
+    <Section id="characters" title="Character tokens">
       <p className="hint">
         Tokens for the people the party meets. Drag them, or move the selected one with the arrow keys.
       </p>

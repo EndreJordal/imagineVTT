@@ -3,7 +3,7 @@ import type { StateCreator } from 'zustand'
 import { mapNatural } from '../../shared/geometry'
 import type { Point } from '../../shared/types'
 import type { Wall } from '../../shared/visibility'
-import { deleteWallPoints, makeDoor, moveWallPoints, sameRef, sameSpot, selectedSegment, type WallPointRef, withLinked } from '../../shared/walls'
+import { deleteWallPoints, joinOnto, makeDoor, moveWallPoints, sameRef, sameSpot, selectedSegment, type WallPointRef, withLinked } from '../../shared/walls'
 import type { DoorReveal } from '../../shared/doors'
 import type { GmStore } from '../store'
 import { selectOnly, SINGLES_OFF } from './shared'
@@ -87,7 +87,9 @@ export const wallsSlice: StateCreator<GmStore, [], [], WallsSlice> = (set) => ({
     set((s) => {
       if (s.wallDraft.length < 2) return { wallDraft: [] }
       const wall: Wall = { id: crypto.randomUUID(), points: s.wallDraft }
-      return { scene: { ...s.scene, walls: [...s.scene.walls, wall] }, wallDraft: [] }
+      // Points landed on other walls' lines become their corners too: the walls really join.
+      const walls = joinOnto(s.scene.walls, s.wallDraft)
+      return { scene: { ...s.scene, walls: [...walls, wall] }, wallDraft: [] }
     }),
   clearWalls: () => set((s) => ({ scene: { ...s.scene, walls: [] }, wallDraft: [], selectedWallPoints: [] })),
   addDetectedWalls: (detected, replace) =>

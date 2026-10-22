@@ -64,7 +64,14 @@ export interface Handlers {
   onObjectCopy(p: Point): void
   onObjectChange(id: string, patch: Partial<Pick<MapObject, 'x' | 'y' | 'width' | 'height' | 'rotation'>>): void
   /** Shift-drag box selection; `add` keeps what was already selected (Ctrl/Cmd). */
-  onBoxSelect(lightIds: string[], wallPoints: WallPointRef[], objectIds: string[], add: boolean, characterIds: string[]): void
+  onBoxSelect(
+    lightIds: string[],
+    wallPoints: WallPointRef[],
+    objectIds: string[],
+    add: boolean,
+    characterIds: string[],
+    waterIds: string[],
+  ): void
   /** Shift+click on an object or light: in or out of the selection. */
   onObjectToggle(id: string): void
   /** A sound's token clicked (null: nothing). */
@@ -80,6 +87,11 @@ export interface Handlers {
   onMeasureMove(p: Point, free: boolean): void
   onMeasureEnd(): void
   onMeasureRemove(id: string): void
+  /** Water: brush strokes and fills (see the store's waterPaint and waterFill); a water token clicked. */
+  onWaterPaint(from: Point, to: Point, erase: boolean, stroke: string): void
+  onWaterFill(p: Point): void
+  onWaterSelect(id: string | null): void
+  onWaterToggle(id: string): void
   /** Alert mode: a click in the table view made an alert there; right-click leaves the mode. */
   onAlert(p: Point): void
   onAlertOff(): void
@@ -110,6 +122,7 @@ export const UI_KEYS = [
   'selectedObjectIds',
   'doorDraft',
   'hideBrush',
+  'waterBrush',
   'selectedHiddenId',
   'selectedSoundId',
   'selectedCharacterIds',
@@ -117,6 +130,7 @@ export const UI_KEYS = [
   'alerting',
   'lastAlert',
   'measureDraft',
+  'selectedWaterIds',
 ] as const satisfies readonly (keyof GmStore)[]
 
 /** What the canvas shows besides the scene: the store's UI_KEYS, and what's worked out from it. */
@@ -167,7 +181,7 @@ export type Drag =
  */
 export type Target =
   | {
-      kind: 'door' | 'aim' | 'light' | 'hidden' | 'sound' | 'soundPlay' | 'character' | 'object' | 'objectRotate'
+      kind: 'door' | 'aim' | 'light' | 'hidden' | 'water' | 'sound' | 'soundPlay' | 'character' | 'object' | 'objectRotate'
       id: string
     }
   /** A selected object's corner handle, with the resize cursor for its direction. */
@@ -185,7 +199,8 @@ export function resizeCursor(dx: number, dy: number) {
   return 'nesw-resize'
 }
 
-export const CURSORS: Record<Drag['mode'] | 'locked' | 'door' | 'hidden' | 'soundPlay' | 'mapLock', string> = {
+export const CURSORS: Record<Drag['mode'] | 'locked' | 'door' | 'hidden' | 'water' | 'soundPlay' | 'mapLock', string> = {
+  water: 'pointer',
   mapLock: 'pointer',
   hidden: 'pointer',
   soundPlay: 'pointer',

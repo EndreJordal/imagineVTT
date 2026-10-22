@@ -13,13 +13,16 @@ export function groupMembers(scene: Scene, id: string) {
     objects: scene.objects.filter((o) => o.group === id),
     hidden: (scene.hiddenAreas ?? []).filter((a) => a.group === id),
     characters: (scene.characters ?? []).filter((t) => t.group === id),
+    water: (scene.waterAreas ?? []).filter((w) => w.group === id),
   }
 }
 
 /** The groups with anything in them (a group emptied by removals isn't shown). */
 export function liveGroups(scene: Scene) {
   const used = new Set(
-    [...scene.lights, ...scene.objects, ...(scene.hiddenAreas ?? []), ...(scene.characters ?? [])].map((x) => x.group),
+    [...scene.lights, ...scene.objects, ...(scene.hiddenAreas ?? []), ...(scene.characters ?? []), ...(scene.waterAreas ?? [])].map(
+      (x) => x.group,
+    ),
   )
   return (scene.groups ?? []).filter((g) => used.has(g.id))
 }
@@ -44,7 +47,8 @@ export const groupsSlice: StateCreator<GmStore, [], [], GroupsSlice> = (set, get
       const objects = new Set(s.selectedObjectIds)
       const hidden = s.selectedHiddenId
       const characters = new Set(s.selectedCharacterIds)
-      if (lights.size + objects.size + characters.size + (hidden ? 1 : 0) < 2) return s
+      const water = new Set(s.selectedWaterIds)
+      if (lights.size + objects.size + characters.size + water.size + (hidden ? 1 : 0) < 2) return s
       const scene = s.scene
       const groups = liveGroups(scene)
       const id = crypto.randomUUID()
@@ -57,6 +61,7 @@ export const groupsSlice: StateCreator<GmStore, [], [], GroupsSlice> = (set, get
           objects: scene.objects.map((o) => (objects.has(o.id) ? { ...o, group: id } : o)),
           hiddenAreas: (scene.hiddenAreas ?? []).map((a) => (a.id === hidden ? { ...a, group: id } : a)),
           characters: (scene.characters ?? []).map((t) => (characters.has(t.id) ? { ...t, group: id } : t)),
+          waterAreas: (scene.waterAreas ?? []).map((w) => (water.has(w.id) ? { ...w, group: id } : w)),
         },
       }
     }),
@@ -72,18 +77,20 @@ export const groupsSlice: StateCreator<GmStore, [], [], GroupsSlice> = (set, get
           objects: scene.objects.map(out),
           hiddenAreas: (scene.hiddenAreas ?? []).map(out),
           characters: scene.characters?.map(out),
+          waterAreas: scene.waterAreas?.map(out),
         },
       }
     }),
   renameGroup: (id, name) =>
     set((s) => ({ scene: { ...s.scene, groups: (s.scene.groups ?? []).map((g) => (g.id === id ? { ...g, name } : g)) } })),
   selectGroup: (id) => {
-    const { lights, objects, characters } = groupMembers(get().scene, id)
+    const { lights, objects, characters, water } = groupMembers(get().scene, id)
     set(
       selectOnly({
         selectedLightIds: lights.map((l) => l.id),
         selectedObjectIds: objects.map((o) => o.id),
         selectedCharacterIds: characters.map((t) => t.id),
+        selectedWaterIds: water.map((w) => w.id),
       }),
     )
   },

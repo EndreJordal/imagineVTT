@@ -11,6 +11,8 @@ import {
 import { Icon } from './icons'
 import { useThumbnail } from './thumbnails'
 import { useRowsBox } from './useRowsBox'
+import { usePictureBrowser } from './pictureBrowser'
+import { BrowserBar, FolderTile } from './BrowserBar'
 import { Field, Section, Slider } from './ui'
 
 /** Toolbar button: drops a picture over the table instead of the map, or raises it (C). */
@@ -34,7 +36,7 @@ export function CurtainButton() {
       }
       onClick={() => void toggleCurtain()}
     >
-      <Icon name="curtain" /> {down ? 'Curtain down' : 'Curtain'}
+      <Icon name="curtain" /> Curtain
     </button>
   )
 }
@@ -43,7 +45,8 @@ export function CurtainButton() {
 export function CurtainSection() {
   const state = useCurtain((s) => s.state)
   const images = useCurtain((s) => s.images)
-  const list = useRowsBox(3, images.length)
+  const browser = usePictureBrowser(images, 'curtain')
+  const list = useRowsBox(browser.view === 'list' ? 6 : 3, browser.folders.length + browser.here.length + browser.view.length)
   const status = useCurtain((s) => s.status)
   const folderName = useCurtain((s) => s.folderName)
   const { setCurtain, setSlideshow } = useCurtain.getState()
@@ -52,7 +55,7 @@ export function CurtainSection() {
   const canSlide = ticked >= 2
 
   return (
-    <Section title="Curtain">
+    <Section id="curtain" title="Curtain">
       <Rescan />
       <p className="hint">
         The table shows a picture instead of the map while the curtain is down (<kbd>C</kbd>, or the toolbar
@@ -87,9 +90,13 @@ export function CurtainSection() {
       {status === 'ready' && !images.length && (
         <p className="hint">No pictures in “{folderName}” yet: put JPG, PNG or WebP files in it.</p>
       )}
+      {images.length > 0 && <BrowserBar browser={browser} root={folderName ?? 'Pictures'} />}
       {images.length > 0 && (
-        <div className="curtain-pictures scrolls" ref={list}>
-          {images.map((image) => (
+        <div className={`curtain-pictures scrolls${browser.view === 'list' ? ' as-list' : ''}`} ref={list}>
+          {browser.folders.map((f) => (
+            <FolderTile key={f.path} folder={f} onOpen={browser.open} />
+          ))}
+          {browser.here.map((image) => (
             <Thumb
               key={image.id}
               image={image}

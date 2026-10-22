@@ -1,5 +1,6 @@
 import { useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { areaCentre } from '../shared/hidden'
+import { waterCentre } from '../shared/water'
 import { sceneBounds } from '../shared/geometry'
 import { isParty } from '../shared/levels'
 import { LIGHT_PRESETS, lightName, type Light } from '../shared/lights'
@@ -33,6 +34,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const selectedObjects = useGm((s) => s.selectedObjectIds)
   const selectedHidden = useGm((s) => s.selectedHiddenId)
   const selectedSound = useGm((s) => s.selectedSoundId)
+  const selectedWater = useGm((s) => s.selectedWaterIds)
   const selectedCharacters = useGm((s) => s.selectedCharacterIds)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   /** The row Shift+click selects from (the last one clicked without Shift). */
@@ -69,13 +71,15 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
   const objects = [...scene.objects].sort(byName)
   const sortedLights = [...lights].sort((a, b) => lightName(a).localeCompare(lightName(b), undefined, { numeric: true }))
   const characters = [...(scene.characters ?? [])].sort(byName)
+  const waters = [...(scene.waterAreas ?? [])].sort(byName)
 
   // What can be selected together, in the order the list shows it (for Shift+click ranges).
-  type Kind = 'object' | 'light' | 'character'
+  type Kind = 'object' | 'light' | 'character' | 'water'
   const order: { kind: Kind; id: string }[] = [
     ...objects.map((o) => ({ kind: 'object' as const, id: o.id })),
     ...[...sortedLights, ...viewers].map((l) => ({ kind: 'light' as const, id: l.id })),
     ...characters.map((t) => ({ kind: 'character' as const, id: t.id })),
+    ...waters.map((w) => ({ kind: 'water' as const, id: w.id })),
   ]
   const keyOf = (kind: Kind, id: string) => `${kind}:${id}`
   /** A click on a row: alone (`only`), or with Ctrl or Shift, added to or ranged with the selection. */
@@ -85,8 +89,10 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
       object: new Set(add ? selectedObjects : []),
       light: new Set(add ? selectedLights : []),
       character: new Set(add ? selectedCharacters : []),
+      water: new Set(add ? selectedWater : []),
     }
-    const select = () => gm.selectMany([...chosen.light], [], [...chosen.object], false, [...chosen.character])
+    const select = () =>
+      gm.selectMany([...chosen.light], [], [...chosen.object], false, [...chosen.character], [...chosen.water])
     const from = order.findIndex((x) => keyOf(x.kind, x.id) === anchor.current)
     const to = order.findIndex((x) => x.kind === kind && x.id === id)
     if (e.shiftKey && from >= 0 && to >= 0) {
@@ -141,12 +147,13 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           <List title="Groups">
             {groups.map((g) => {
               const m = groupMembers(scene, g.id)
-              const count = m.lights.length + m.objects.length + m.hidden.length + m.characters.length
+              const count = m.lights.length + m.objects.length + m.hidden.length + m.characters.length + m.water.length
               const selected =
-                (m.lights.length || m.objects.length || m.characters.length) > 0 &&
+                (m.lights.length || m.objects.length || m.characters.length || m.water.length) > 0 &&
                 m.lights.every((l) => selectedLights.includes(l.id)) &&
                 m.objects.every((o) => selectedObjects.includes(o.id)) &&
-                m.characters.every((t) => selectedCharacters.includes(t.id))
+                m.characters.every((t) => selectedCharacters.includes(t.id)) &&
+                m.water.every((w) => selectedWater.includes(w.id))
               return (
                 <li key={g.id}>
                   <Row
@@ -170,6 +177,7 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                     onGo={() => {
                       const first = m.objects[0] ?? m.lights[0] ?? m.characters[0]
                       if (first) goTo(first)
+                      else if (m.water[0]) goTo(waterCentre(m.water[0], bounds))
                     }}
                     onRename={(name) => gm.renameGroup(g.id, name)}
                     action={{ label: 'Ungroup', run: () => gm.ungroup(g.id) }}
@@ -189,6 +197,17 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
                       ))}
                       {m.lights.map(lightRow)}
                       {m.characters.map(characterRow)}
+                      {m.water.map((w) => (
+                        <Row
+                          key={w.id}
+                          icon={<Icon name="water" size={14} />}
+                          name={w.name}
+                          selected={selectedWater.includes(w.id)}
+                          onSelect={(e) => pick('water', w.id, e, () => gm.selectWater(w.id))}
+                          onGo={() => goTo(waterCentre(w, bounds))}
+                          onRename={(name) => gm.updateWater(w.id, { name })}
+                        />
+                      ))}
                       {m.hidden.map((a) => (
                         <Row
                           key={a.id}
@@ -247,6 +266,21 @@ export function ScenePanel({ canvas }: { canvas: RefObject<GmCanvas | null> }) {
           titleHint="Select all the character tokens on this floor"
         >
           {characters.map(characterRow)}
+        </List>
+        <List title="Water" empty="Paint water with the water tool (K).">
+          {waters.map((w) => (
+            <Row
+              key={w.id}
+              icon={<Icon name="water" size={14} />}
+              name={w.name}
+              selected={selectedWater.includes(w.id)}
+              dim={w.active === false}
+              note={w.group ? groupName(groups, w.group) : w.sound ? 'sound' : undefined}
+              onSelect={(e) => pick('water', w.id, e, () => gm.selectWater(w.id))}
+              onGo={() => goTo(waterCentre(w, bounds))}
+              onRename={(name) => gm.updateWater(w.id, { name })}
+            />
+          ))}
         </List>
         <List title="Sounds" empty="Drag sounds onto the map from the library (Assets, Audio).">
           {[...(scene.sounds ?? [])].sort(byName).map((x) => (
@@ -380,8 +414,10 @@ export function GroupBar() {
   const objects = useGm((s) => s.selectedObjectIds)
   const hidden = useGm((s) => s.selectedHiddenId)
   const characters = useGm((s) => s.selectedCharacterIds)
+  const water = useGm((s) => s.selectedWaterIds)
   const groupable =
     characters.length +
+    water.length +
     lights.filter((id) => {
       const l = scene.lights.find((x) => x.id === id)
       return l && !isParty(l)
@@ -392,6 +428,7 @@ export function GroupBar() {
     ...scene.lights.filter((l) => lights.includes(l.id)),
     ...scene.objects.filter((o) => objects.includes(o.id)),
     ...(scene.characters ?? []).filter((t) => characters.includes(t.id)),
+    ...(scene.waterAreas ?? []).filter((w) => water.includes(w.id)),
   ]
   const group = picked.length && picked.every((x) => x.group && x.group === picked[0].group) ? picked[0].group : null
   const groupInfo = group ? (scene.groups ?? []).find((g) => g.id === group) : null

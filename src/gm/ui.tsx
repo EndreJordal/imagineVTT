@@ -1,38 +1,19 @@
 import { useState, type ReactNode } from 'react'
+import { useSidebar, type SectionId } from './sidebarStore'
 import { Icon } from './icons'
 
-const COLLAPSED_KEY = 'imaginevtt.collapsedSections'
-
-function loadCollapsed(): string[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
-    return Array.isArray(saved) ? saved : []
-  } catch {
-    return []
-  }
-}
-
-function saveCollapsed(titles: string[]) {
-  try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify(titles))
-  } catch {
-    // Storage unavailable (private window etc.): sections just open fully next time.
-  }
-}
-
-/** A sidebar section that folds away by clicking its title; remembered per browser. */
-export function Section({ title, children }: { title: string; children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(() => loadCollapsed().includes(title))
-  const toggle = () => {
-    const next = !collapsed
-    setCollapsed(next)
-    const others = loadCollapsed().filter((t) => t !== title)
-    saveCollapsed(next ? [...others, title] : others)
-  }
+/**
+ * A sidebar section that folds away by clicking its title (remembered per browser), and
+ * shows only in the sidebar modes (Prep, Play) it's set to.
+ */
+export function Section({ id, title, children }: { id: SectionId; title: string; children: ReactNode }) {
+  const collapsed = useSidebar((s) => s.collapsed.includes(id))
+  const shown = useSidebar((s) => s.shown[s.mode].includes(id))
+  if (!shown) return null
   return (
     <section className={collapsed ? 'collapsed' : ''}>
       <h2>
-        <button className="section-toggle" aria-expanded={!collapsed} onClick={toggle}>
+        <button className="section-toggle" aria-expanded={!collapsed} onClick={() => useSidebar.getState().toggleCollapsed(id)}>
           <span className="chevron" aria-hidden>
             <Icon name="chevron-down" size={14} />
           </span>
